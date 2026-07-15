@@ -16,6 +16,12 @@ import {
 } from "../src/actions/runtime.js";
 import { createLogger } from "../src/logger.js";
 
+const noMentions = { parse: [], repliedUser: false };
+const runtimeOptions = {
+  developmentGuildId: "guild-1",
+  textCommandPrefix: "!",
+};
+
 type PingInteractionKind = "message" | "slash" | "user";
 
 const pingInteraction = (
@@ -47,7 +53,7 @@ describe("Prod action runtime", () => {
   it("registers every Discord ping surface from one action", async () => {
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),
-      "!",
+      runtimeOptions,
     );
 
     expect(runtime.actionCount).toBe(1);
@@ -87,7 +93,7 @@ describe("Prod action runtime", () => {
     async (kind) => {
       const runtime = createProdActionRuntime(
         createLogger({ level: "fatal" }),
-        "!",
+        runtimeOptions,
       );
       const interaction = pingInteraction(kind);
 
@@ -97,16 +103,19 @@ describe("Prod action runtime", () => {
         flags: MessageFlags.Ephemeral,
       });
       expect(interaction.deleteReply).toHaveBeenCalledOnce();
-      expect(interaction.followUp).toHaveBeenCalledWith({ content: "pong!" });
+      expect(interaction.followUp).toHaveBeenCalledWith({
+        content: "pong!",
+        allowedMentions: noMentions,
+      });
       expect(interaction.editReply).not.toHaveBeenCalled();
     },
   );
 
   it("uses the configured prefix and replies with pong through text", async () => {
-    const runtime = createProdActionRuntime(
-      createLogger({ level: "fatal" }),
-      ";",
-    );
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      textCommandPrefix: ";",
+    });
     const reply = vi.fn().mockResolvedValue(undefined);
     const message = {
       content: ";ping",
@@ -122,8 +131,33 @@ describe("Prod action runtime", () => {
       reply,
     } as unknown as Message;
 
-    await expect(runtime.handleMessage(message)).resolves.toBe(true);
-    expect(reply).toHaveBeenCalledWith({ content: "pong!" });
+    expect(runtime.handleMessage).toBeDefined();
+    await expect(runtime.handleMessage!(message)).resolves.toBe(true);
+    expect(reply).toHaveBeenCalledWith({
+      content: "pong!",
+      allowedMentions: noMentions,
+    });
+
+    const otherGuildReply = vi.fn().mockResolvedValue(undefined);
+    const otherGuildMessage = {
+      ...message,
+      guildId: "guild-2",
+      reply: otherGuildReply,
+    } as unknown as Message;
+    await expect(runtime.handleMessage!(otherGuildMessage)).resolves.toBe(
+      false,
+    );
+    expect(otherGuildReply).not.toHaveBeenCalled();
+  });
+
+  it("removes the text capability when the configured prefix is empty", () => {
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      textCommandPrefix: " \t ",
+    });
+
+    expect(runtime.handleMessage).toBeUndefined();
+    expect(runtime.commands).toHaveLength(3);
   });
 
   it.each([

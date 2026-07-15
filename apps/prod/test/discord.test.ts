@@ -174,4 +174,20 @@ describe("createDiscordGateway", () => {
     expect(discordMock.intents).toEqual([1, 2, 4]);
     expect(handleError).not.toHaveBeenCalled();
   });
+
+  it("does not request message intents without a text capability", async () => {
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleError: vi.fn(),
+      },
+      developmentGuildId: "234567890123456789",
+    });
+
+    await gateway.connect("development-token", new AbortController().signal);
+
+    expect(discordMock.intents).toEqual([1]);
+    expect(discordMock.messageHandler).toBeUndefined();
+  });
 });

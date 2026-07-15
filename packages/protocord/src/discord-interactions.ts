@@ -32,6 +32,11 @@ export const discordSlashCommandProviderId = "discord:slash-command";
 export const discordMessageContextProviderId = "discord:message-context";
 export const discordUserContextProviderId = "discord:user-context";
 
+const NO_MENTIONS: NonNullable<InteractionReplyOptions["allowedMentions"]> = {
+  parse: [],
+  repliedUser: false,
+};
+
 type DiscordPresentation<InteractionType, Context> = (
   outcome: DispatchOutcome,
   interaction: InteractionType,
@@ -679,7 +684,10 @@ async function presentDiscordOutcome(
   visibility: DiscordResponseVisibility,
 ): Promise<void> {
   if (outcome.status === "executed" && visibility === "public") {
-    const reply = { content: formatOutput(outcome.output) };
+    const reply = {
+      content: formatOutput(outcome.output),
+      allowedMentions: NO_MENTIONS,
+    };
     if (interaction.deferred) {
       await interaction.deleteReply();
       await interaction.followUp(reply);
@@ -693,7 +701,10 @@ async function presentDiscordOutcome(
 
   const reply = outcomeReply(outcome);
   if (interaction.deferred) {
-    await interaction.editReply({ content: reply.content });
+    await interaction.editReply({
+      content: reply.content,
+      allowedMentions: reply.allowedMentions,
+    });
   } else if (interaction.replied) {
     await interaction.followUp(reply);
   } else {
@@ -701,21 +712,28 @@ async function presentDiscordOutcome(
   }
 }
 
-function outcomeReply(
-  outcome: DispatchOutcome,
-): InteractionReplyOptions & { content: string } {
+function outcomeReply(outcome: DispatchOutcome): InteractionReplyOptions & {
+  content: string;
+  allowedMentions: NonNullable<InteractionReplyOptions["allowedMentions"]>;
+} {
   switch (outcome.status) {
     case "executed":
       return {
         content: formatOutput(outcome.output),
+        allowedMentions: NO_MENTIONS,
         flags: MessageFlags.Ephemeral,
       };
     case "unavailable":
     case "unauthorized":
-      return { content: outcome.reason, flags: MessageFlags.Ephemeral };
+      return {
+        content: outcome.reason,
+        allowedMentions: NO_MENTIONS,
+        flags: MessageFlags.Ephemeral,
+      };
     case "failed":
       return {
         content: "Something went wrong while running this action.",
+        allowedMentions: NO_MENTIONS,
         flags: MessageFlags.Ephemeral,
       };
   }

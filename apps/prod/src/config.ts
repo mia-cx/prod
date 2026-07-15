@@ -3,12 +3,18 @@ import { Schema } from "effect";
 const NonEmptyString = Schema.String.pipe(Schema.minLength(1));
 const DiscordSnowflake = Schema.String.pipe(Schema.pattern(/^\d{17,20}$/));
 const DatabaseUrl = Schema.String.pipe(
-  Schema.filter(
-    (value) => value === ":memory:" || value.startsWith("file:"),
-    { message: () => "must be :memory: or a file: URL" },
-  ),
+  Schema.filter((value) => value === ":memory:" || value.startsWith("file:"), {
+    message: () => "must be :memory: or a file: URL",
+  }),
 );
-const LogLevel = Schema.Literal("trace", "debug", "info", "warn", "error", "fatal");
+const LogLevel = Schema.Literal(
+  "trace",
+  "debug",
+  "info",
+  "warn",
+  "error",
+  "fatal",
+);
 
 export type LogLevel = typeof LogLevel.Type;
 
@@ -65,13 +71,22 @@ const decodeOptional = <A, I>(
 export const loadConfig = (environment: Environment): ProdConfig =>
   Object.freeze({
     discordToken: decodeRequired(environment, "DISCORD_TOKEN", NonEmptyString),
-    discordClientId: decodeRequired(environment, "DISCORD_CLIENT_ID", DiscordSnowflake),
+    discordClientId: decodeRequired(
+      environment,
+      "DISCORD_CLIENT_ID",
+      DiscordSnowflake,
+    ),
     discordDevGuildId: decodeRequired(
       environment,
       "DISCORD_DEV_GUILD_ID",
       DiscordSnowflake,
     ),
-    textCommandPrefix: decodeOptional(environment, "TEXT_COMMAND_PREFIX", Schema.String, "!"),
+    textCommandPrefix: decodeOptional(
+      environment,
+      "TEXT_COMMAND_PREFIX",
+      Schema.String,
+      "",
+    ),
     databaseUrl: decodeOptional(
       environment,
       "DATABASE_URL",
@@ -80,4 +95,3 @@ export const loadConfig = (environment: Environment): ProdConfig =>
     ),
     logLevel: decodeOptional(environment, "LOG_LEVEL", LogLevel, "info"),
   });
-

@@ -31,6 +31,7 @@ type TestContext = {
   invocations: ActionInvocation<string>[];
 };
 type TestCheck = { permission: string };
+const noMentions = { parse: [], repliedUser: false };
 
 function context(): TestContext {
   return { events: [], invocations: [] };
@@ -394,6 +395,7 @@ describe("built-in Discord interaction providers", () => {
     });
     expect(command.editReply).toHaveBeenCalledWith({
       content: "PRIVATE RESULT",
+      allowedMentions: noMentions,
     });
   });
 
@@ -475,7 +477,10 @@ describe("built-in Discord interaction providers", () => {
       flags: MessageFlags.Ephemeral,
     });
     expect(command.deleteReply).toHaveBeenCalledOnce();
-    expect(command.followUp).toHaveBeenCalledWith({ content: "PUBLIC RESULT" });
+    expect(command.followUp).toHaveBeenCalledWith({
+      content: "PUBLIC RESULT",
+      allowedMentions: noMentions,
+    });
     expect(command.editReply).not.toHaveBeenCalled();
   });
 
@@ -526,6 +531,7 @@ describe("built-in Discord interaction providers", () => {
       });
       expect(command.editReply).toHaveBeenCalledWith({
         content: "private state",
+        allowedMentions: noMentions,
       });
       expect(command.deleteReply).not.toHaveBeenCalled();
       expect(command.followUp).not.toHaveBeenCalled();
@@ -559,6 +565,7 @@ describe("built-in Discord interaction providers", () => {
     });
     expect(command.editReply).toHaveBeenCalledWith({
       content: "private denial",
+      allowedMentions: noMentions,
     });
     expect(command.deleteReply).not.toHaveBeenCalled();
     expect(command.followUp).not.toHaveBeenCalled();
@@ -591,6 +598,7 @@ describe("built-in Discord interaction providers", () => {
     });
     expect(command.editReply).toHaveBeenCalledWith({
       content: "Something went wrong while running this action.",
+      allowedMentions: noMentions,
     });
     expect(command.deleteReply).not.toHaveBeenCalled();
     expect(command.followUp).not.toHaveBeenCalled();

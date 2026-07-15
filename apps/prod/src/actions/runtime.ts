@@ -26,13 +26,18 @@ export type ProdActionRuntime = DiscordActionSurface &
     commands: readonly ApplicationCommandData[];
   }>;
 
+export type ProdActionRuntimeOptions = Readonly<{
+  developmentGuildId: string;
+  textCommandPrefix: string;
+}>;
+
 export const createProdActionRuntime = (
   logger: Logger,
-  textCommandPrefix: string,
+  options: ProdActionRuntimeOptions,
 ): ProdActionRuntime => {
   const context: ProdActionContext = { logger };
   const textProvider = createTextCommandProvider<ProdActionContext>({
-    prefix: textCommandPrefix,
+    prefix: options.textCommandPrefix,
     present: async (_trigger, _message, outcome, presentationContext) => {
       await presentationContext.replyToTextCommand?.(
         textCommandOutcomeContent(outcome),
@@ -46,6 +51,43 @@ export const createProdActionRuntime = (
     ],
   });
   registry.registerAction(pingAction);
+
+  const handleMessage = textProvider.prefix
+    ? async (message: Message): Promise<boolean> => {
+        if (message.guildId !== options.developmentGuildId) {
+          return false;
+        }
+        const dispatched = await dispatchTextCommand({
+          registry,
+          provider: textProvider,
+          message: {
+            content: message.content,
+            author: {
+              id: message.author.id,
+              username: message.author.username,
+              globalName: message.author.globalName,
+              bot: message.author.bot,
+            },
+            webhookId: message.webhookId,
+            channelId: message.channelId,
+            guildId: message.guildId,
+          },
+          context: {
+            logger,
+            replyToTextCommand: async (content) => {
+              await message.reply({
+                content,
+                allowedMentions: { parse: [], repliedUser: false },
+              });
+            },
+          },
+        });
+        if (dispatched.consumed) {
+          logActionDispatchResult(logger, dispatched.result);
+        }
+        return dispatched.consumed;
+      }
+    : undefined;
 
   return Object.freeze({
     actionCount: registry.actions.length,
@@ -62,34 +104,7 @@ export const createProdActionRuntime = (
       );
       logProdActionResult(logger, handled);
     },
-    handleMessage: async (message: Message) => {
-      const dispatched = await dispatchTextCommand({
-        registry,
-        provider: textProvider,
-        message: {
-          content: message.content,
-          author: {
-            id: message.author.id,
-            username: message.author.username,
-            globalName: message.author.globalName,
-            bot: message.author.bot,
-          },
-          webhookId: message.webhookId,
-          channelId: message.channelId,
-          guildId: message.guildId,
-        },
-        context: {
-          logger,
-          replyToTextCommand: async (content) => {
-            await message.reply({ content });
-          },
-        },
-      });
-      if (dispatched.consumed) {
-        logActionDispatchResult(logger, dispatched.result);
-      }
-      return dispatched.consumed;
-    },
+    ...(handleMessage ? { handleMessage } : {}),
     handleError: (error: unknown) => {
       logger.error({ err: error }, "Discord action dispatch failed");
     },

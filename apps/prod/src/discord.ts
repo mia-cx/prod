@@ -22,7 +22,7 @@ export type DiscordActionSurface = Readonly<{
     developmentGuildId: string,
   ): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
-  handleMessage(message: Message): Promise<boolean>;
+  handleMessage?(message: Message): Promise<boolean>;
   handleError(error: unknown): void;
 }>;
 
@@ -40,8 +40,9 @@ export const createDiscordGateway = (
   options: DiscordGatewayOptions = {},
 ): DiscordGateway => {
   const actions = options.actions;
+  const handleMessage = actions?.handleMessage;
   const client = new Client({
-    intents: actions
+    intents: handleMessage
       ? [
           GatewayIntentBits.Guilds,
           GatewayIntentBits.GuildMessages,
@@ -57,11 +58,13 @@ export const createDiscordGateway = (
         .handleInteraction(interaction)
         .catch((error: unknown) => actions.handleError(error));
     });
-    client.on(Events.MessageCreate, (message) => {
-      void actions
-        .handleMessage(message)
-        .catch((error: unknown) => actions.handleError(error));
-    });
+    if (handleMessage) {
+      client.on(Events.MessageCreate, (message) => {
+        void handleMessage(message).catch((error: unknown) =>
+          actions.handleError(error),
+        );
+      });
+    }
   }
 
   const close = async (): Promise<void> => {

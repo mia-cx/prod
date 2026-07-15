@@ -50,10 +50,10 @@ Implement `protocord` as the reusable canonical action lifecycle and extensible 
 - `packages/protocord` is a deep, extractable package and must not import `apps/prod`, ship concrete actions, or become a shared-utils package.
 - Built-in trigger constructors should produce opaque typed definitions registered through provider contracts; the canonical runtime must remain open to third-party providers without editing its trigger union.
 - Text commands default to `!`, disable on a trimmed empty prefix, accept prefixes of 1–8 Unicode code points, normalize command names to lowercase, preserve the untouched argument tail, ignore bot/webhook messages, and report whether a message was consumed.
-- Text commands are an opt-in Protocord provider capability. Prod enables the provider with its configured prefix only for the app-owned ping validation action; an empty configured prefix disables the surface.
+- Text commands are an opt-in Protocord provider capability. Prod defaults the prefix to empty, which omits the privileged message intents and listener; an explicit configured prefix enables the development-guild-only ping validation surface.
 - Prod composes one app-owned development validation action across `/ping`, both `Ping Prod` context menus, and the configured-prefix `ping` text command. Every surface replies with `pong!` through the canonical lifecycle.
 - Protocord refreshes an explicit global or guild command scope from the complete registered catalog; Discord's authoritative `set` operation updates changed slash/context commands and removes stale ones on every restart.
 - The real-Discord validation gate remains HITL and must not require credentials in issues, commits, fixtures, logs, or screenshots.
-- Package validation: lint, typecheck, build, dry-run pack, compiled-entrypoint smoke import, and 55 focused tests pass with 90.51% statement coverage.
+- Package validation: lint, typecheck, build, dry-run pack, compiled-entrypoint smoke import, and 55 focused tests pass with 90.54% statement coverage.
 - Repository validation: `pnpm check` completes 32/32 Turbo tasks and validates all seven reusable-package boundaries; `pnpm pack:check` completes 15/15 tasks.
-- Prod validation: 24/24 app tests pass, including all four ping surfaces, configured-prefix text dispatch, authoritative development-guild command refresh, and gateway wiring.
+- Prod validation: 26/26 app tests pass, including all four ping surfaces, configured-prefix development-guild text dispatch, disabled text capability gating, authoritative command refresh, and gateway wiring.

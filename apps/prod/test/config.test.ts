@@ -14,22 +14,22 @@ describe("loadConfig", () => {
       discordToken: "development-secret-token",
       discordClientId: "123456789012345678",
       discordDevGuildId: "234567890123456789",
-      textCommandPrefix: "!",
+      textCommandPrefix: "",
       databaseUrl: "file:./data/prod.sqlite",
       logLevel: "info",
     });
   });
 
-  it("accepts an empty prefix while validating optional values", () => {
+  it("accepts an explicit prefix while validating optional values", () => {
     expect(
       loadConfig({
         ...requiredEnvironment,
-        TEXT_COMMAND_PREFIX: "",
+        TEXT_COMMAND_PREFIX: ";",
         DATABASE_URL: ":memory:",
         LOG_LEVEL: "debug",
       }),
     ).toMatchObject({
-      textCommandPrefix: "",
+      textCommandPrefix: ";",
       databaseUrl: ":memory:",
       logLevel: "debug",
     });
@@ -47,10 +47,13 @@ describe("loadConfig", () => {
     ).toThrow(new ConfigurationError("DISCORD_CLIENT_ID is invalid"));
 
     try {
-      loadConfig({ ...requiredEnvironment, DISCORD_TOKEN: secret, LOG_LEVEL: "verbose" });
+      loadConfig({
+        ...requiredEnvironment,
+        DISCORD_TOKEN: secret,
+        LOG_LEVEL: "verbose",
+      });
     } catch (error) {
       expect(String(error)).not.toContain(secret);
     }
   });
 });
-
