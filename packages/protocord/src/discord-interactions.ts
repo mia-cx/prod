@@ -443,18 +443,8 @@ export function getDiscordCommandRegistration<Context, AuthorizationCheck>(
   return [...slashCommands, ...messageCommands, ...userCommands];
 }
 
-export type DiscordCommandRegistrationLogger = Readonly<{
-  warn(
-    message: string,
-    details: Readonly<{ error: unknown; guildId: string }>,
-  ): void;
-}>;
-
 export type DiscordCommandRegistrationTarget =
-  | Readonly<{
-      kind: "global";
-      clearGuildCommands?: boolean;
-    }>
+  | Readonly<{ kind: "global" }>
   | Readonly<{
       kind: "guild";
       guildId: string;
@@ -464,42 +454,28 @@ export async function registerDiscordCommands<Context, AuthorizationCheck>(
   client: Client<true>,
   registry: ActionRegistry<Context, AuthorizationCheck>,
   options?: Readonly<{
-    logger?: DiscordCommandRegistrationLogger;
     target?: DiscordCommandRegistrationTarget;
   }>,
 ): Promise<void> {
   const commands = getDiscordCommandRegistration(registry);
   const target = options?.target ?? { kind: "global" };
 
+  // Registration targets are exclusive. Discord displays both entries when the
+  // same command exists globally and in a guild, so clear the opposite catalog
+  // before publishing the authoritative one.
   if (target.kind === "guild") {
     const guild =
       client.guilds.cache.get(target.guildId) ??
       (await client.guilds.fetch(target.guildId));
+    await client.application.commands.set([]);
     await guild.commands.set(commands);
     return;
   }
 
-  await client.application.commands.set(commands);
-
-  if (target.clearGuildCommands === false) {
-    return;
-  }
-
   await Promise.all(
-    [...client.guilds.cache.values()].map(async (guild) => {
-      try {
-        await guild.commands.set([]);
-      } catch (error) {
-        options?.logger?.warn(
-          "Failed to clear stale guild application commands",
-          {
-            guildId: guild.id,
-            error,
-          },
-        );
-      }
-    }),
+    [...client.guilds.cache.values()].map((guild) => guild.commands.set([])),
   );
+  await client.application.commands.set(commands);
 }
 
 function createDiscordCommandProvider<Context>(

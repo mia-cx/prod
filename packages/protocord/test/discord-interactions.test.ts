@@ -417,36 +417,105 @@ describe("Discord application command registration", () => {
     ]);
   });
 
-  it("sets global commands and best-effort clears stale guild commands", async () => {
+  it("clears every guild catalog before publishing global commands", async () => {
     const globalSet = vi.fn().mockResolvedValue(undefined);
-    const cleared = vi.fn().mockResolvedValue(undefined);
-    const cleanupError = new Error("missing access");
-    const rejected = vi.fn().mockRejectedValue(cleanupError);
-    const warn = vi.fn();
+    const firstGuildSet = vi.fn().mockResolvedValue(undefined);
+    const secondGuildSet = vi.fn().mockResolvedValue(undefined);
     const client = {
       application: { commands: { set: globalSet } },
       guilds: {
         cache: new Map([
-          ["guild-1", { id: "guild-1", commands: { set: cleared } }],
-          ["guild-2", { id: "guild-2", commands: { set: rejected } }],
+          ["guild-1", { id: "guild-1", commands: { set: firstGuildSet } }],
+          ["guild-2", { id: "guild-2", commands: { set: secondGuildSet } }],
         ]),
       },
     } as unknown as Client<true>;
     const registry = registryWithCommands();
 
     await expect(
-      registerDiscordCommands(client, registry, { logger: { warn } }),
+      registerDiscordCommands(client, registry),
     ).resolves.toBeUndefined();
 
+    expect(firstGuildSet).toHaveBeenCalledWith([]);
+    expect(secondGuildSet).toHaveBeenCalledWith([]);
     expect(globalSet).toHaveBeenCalledWith(
       getDiscordCommandRegistration(registry),
     );
-    expect(cleared).toHaveBeenCalledWith([]);
-    expect(rejected).toHaveBeenCalledWith([]);
-    expect(warn).toHaveBeenCalledWith(
-      "Failed to clear stale guild application commands",
-      { guildId: "guild-2", error: cleanupError },
+    expect(firstGuildSet.mock.invocationCallOrder[0]).toBeLessThan(
+      globalSet.mock.invocationCallOrder[0]!,
     );
+    expect(secondGuildSet.mock.invocationCallOrder[0]).toBeLessThan(
+      globalSet.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not publish global commands when a stale guild catalog cannot be cleared", async () => {
+    const cleanupError = new Error("missing access");
+    const globalSet = vi.fn().mockResolvedValue(undefined);
+    const client = {
+      application: { commands: { set: globalSet } },
+      guilds: {
+        cache: new Map([
+          [
+            "guild-1",
+            {
+              id: "guild-1",
+              commands: { set: vi.fn().mockRejectedValue(cleanupError) },
+            },
+          ],
+        ]),
+      },
+    } as unknown as Client<true>;
+
+    await expect(
+      registerDiscordCommands(client, registryWithCommands()),
+    ).rejects.toBe(cleanupError);
+    expect(globalSet).not.toHaveBeenCalled();
+  });
+
+  it("clears global commands before publishing a guild catalog", async () => {
+    const globalSet = vi.fn().mockResolvedValue(undefined);
+    const guildSet = vi.fn().mockResolvedValue(undefined);
+    const guild = { id: "guild-1", commands: { set: guildSet } };
+    const client = {
+      application: { commands: { set: globalSet } },
+      guilds: { cache: new Map([["guild-1", guild]]) },
+    } as unknown as Client<true>;
+    const registry = registryWithCommands();
+
+    await registerDiscordCommands(client, registry, {
+      target: { kind: "guild", guildId: "guild-1" },
+    });
+
+    expect(globalSet).toHaveBeenCalledWith([]);
+    expect(guildSet).toHaveBeenCalledWith(
+      getDiscordCommandRegistration(registry),
+    );
+    expect(globalSet.mock.invocationCallOrder[0]).toBeLessThan(
+      guildSet.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not publish guild commands when the global catalog cannot be cleared", async () => {
+    const cleanupError = new Error("missing access");
+    const guildSet = vi.fn().mockResolvedValue(undefined);
+    const client = {
+      application: {
+        commands: { set: vi.fn().mockRejectedValue(cleanupError) },
+      },
+      guilds: {
+        cache: new Map([
+          ["guild-1", { id: "guild-1", commands: { set: guildSet } }],
+        ]),
+      },
+    } as unknown as Client<true>;
+
+    await expect(
+      registerDiscordCommands(client, registryWithCommands(), {
+        target: { kind: "guild", guildId: "guild-1" },
+      }),
+    ).rejects.toBe(cleanupError);
+    expect(guildSet).not.toHaveBeenCalled();
   });
 
   it("replaces a guild catalog on restart to update and remove commands", async () => {
@@ -457,6 +526,9 @@ describe("Discord application command registration", () => {
     const guild = { id: "guild-1", commands: { set } };
     const fetch = vi.fn(async () => guild);
     const client = {
+      application: {
+        commands: { set: vi.fn().mockResolvedValue(undefined) },
+      },
       guilds: { cache: new Map(), fetch },
     } as unknown as Client<true>;
     const target = { kind: "guild" as const, guildId: "guild-1" };

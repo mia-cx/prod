@@ -46,15 +46,18 @@ describe("Prod action runtime", () => {
       },
     ]);
 
-    const set = vi.fn().mockResolvedValue(undefined);
+    const globalSet = vi.fn().mockResolvedValue(undefined);
+    const guildSet = vi.fn().mockResolvedValue(undefined);
     const client = {
+      application: { commands: { set: globalSet } },
       guilds: {
-        cache: new Map([["guild-1", { commands: { set } }]]),
+        cache: new Map([["guild-1", { commands: { set: guildSet } }]]),
         fetch: vi.fn(),
       },
     } as unknown as Client<true>;
     await runtime.refreshCommands(client, "guild-1");
-    expect(set).toHaveBeenCalledWith(runtime.commands);
+    expect(globalSet).toHaveBeenCalledWith([]);
+    expect(guildSet).toHaveBeenCalledWith(runtime.commands);
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
