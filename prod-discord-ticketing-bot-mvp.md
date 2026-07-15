@@ -857,9 +857,10 @@ When triage completes:
 1. Store reporter and internal summaries.
 2. Apply internal labels and suggestions.
 3. Set triage to ready.
-4. Post a deterministic reporter-safe confirmation containing `reporterSummary`.
-5. Ask the reporter to correct inaccuracies.
-6. Stop responding.
+4. Post a deterministic reporter-safe issue-summary message containing `reporterSummary`.
+5. Pin the issue-summary message in the ticket thread.
+6. Ask the reporter to correct inaccuracies.
+7. Stop responding.
 
 ### Failure and race behavior
 
@@ -1328,6 +1329,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Planner applies only configured labels.
 - Suggestions contain only eligible staff.
 - Late model results are discarded.
+- Triage completion posts and pins exactly one reporter-safe issue-summary message.
 - Reporter confirmation contains no staff metadata.
 - DEBUGSHARE is collected but not parsed or fetched.
 - Model failure leaves tickets staff-usable.
@@ -1363,7 +1365,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 5. Prod explains DEBUGSHARE and asks initial questions.
 6. The reporter posts issue details and Poke's DEBUGSHARE response.
 7. Prod applies internal labels and suggests one or more eligible assignees.
-8. Prod confirms a reporter-safe summary and stops responding.
+8. Prod posts and pins a reporter-safe issue summary, then stops responding.
 9. Staff reviews the ticket through `/tickets` and `/ticket-info`.
 10. One staff member runs `/claim`; AI remains paused.
 11. An assignment manager runs `/assign` to add another staff member.
