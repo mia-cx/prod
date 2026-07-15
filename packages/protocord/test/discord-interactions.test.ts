@@ -51,7 +51,7 @@ function action(
       jsonSchema: { type: "string" },
     },
     triggers,
-    availability: (_input, testContext) => {
+    availability: (testContext) => {
       testContext.events.push("availability");
       return { available: true };
     },
@@ -97,6 +97,7 @@ function interaction(
     reply: vi.fn().mockResolvedValue(undefined),
     editReply: vi.fn().mockResolvedValue(undefined),
     followUp: vi.fn().mockResolvedValue(undefined),
+    deleteReply: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
   return result as unknown as Interaction;
@@ -225,7 +226,7 @@ describe("built-in Discord interaction providers", () => {
           parse: () => "unused",
           autocomplete: {
             availability: () => ({ available: true }),
-            authorization: () => undefined,
+            access: { kind: "public" },
             complete: autocomplete,
           },
           present,
@@ -259,7 +260,10 @@ describe("built-in Discord interaction providers", () => {
           parse: () => "unused",
           autocomplete: {
             availability: () => ({ available: true }),
-            authorization: () => ({ permission: "tickets.view" }),
+            access: {
+              kind: "authorized",
+              authorization: () => ({ permission: "tickets.view" }),
+            },
             complete,
           },
         }),
@@ -276,6 +280,58 @@ describe("built-in Discord interaction providers", () => {
     ).resolves.toBe(true);
 
     expect(respond).toHaveBeenCalledWith([]);
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("checks autocomplete readiness only after access succeeds", async () => {
+    const readiness = vi.fn(() => ({
+      available: false as const,
+      reason: "resource is paused",
+    }));
+    const complete = vi.fn(() => [{ name: "Private ticket", value: "secret" }]);
+    const registry = createActionRegistry<TestContext, TestCheck>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    registry.registerAction(
+      action([
+        slashCommand<string, TestContext, TestCheck>({
+          name: "ticket",
+          description: "Find a ticket",
+          parse: () => "unused",
+          autocomplete: {
+            availability: () => ({ available: true }),
+            access: {
+              kind: "authorized",
+              authorization: () => ({ permission: "tickets.view" }),
+            },
+            readiness,
+            complete,
+          },
+        }),
+      ]),
+    );
+    const deniedRespond = vi.fn().mockResolvedValue(undefined);
+
+    await dispatchDiscordAutocomplete(
+      registry,
+      interaction("autocomplete", "ticket", { respond: deniedRespond }),
+      context(),
+      () => ({ authorized: false, reason: "private" }),
+    );
+
+    expect(readiness).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+
+    const authorizedRespond = vi.fn().mockResolvedValue(undefined);
+    await dispatchDiscordAutocomplete(
+      registry,
+      interaction("autocomplete", "ticket", { respond: authorizedRespond }),
+      context(),
+      () => ({ authorized: true }),
+    );
+
+    expect(readiness).toHaveBeenCalledOnce();
+    expect(authorizedRespond).toHaveBeenCalledWith([]);
     expect(complete).not.toHaveBeenCalled();
   });
 
@@ -363,6 +419,181 @@ describe("built-in Discord interaction providers", () => {
     expect(command.deferReply).toHaveBeenCalledWith({
       flags: MessageFlags.Ephemeral,
     });
+  });
+
+  it("lets a custom presenter own acknowledgement when deferral is disabled", async () => {
+    const present = vi.fn();
+    const registry = createActionRegistry<TestContext>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    registry.registerAction(
+      action([
+        slashCommand({
+          name: "custom-response",
+          description: "Use a custom response",
+          acknowledgement: "none",
+          parse: () => "custom",
+          present,
+        }),
+      ]),
+    );
+    const event = interaction("slash", "custom-response");
+    const command = event as ChatInputCommandInteraction;
+    const testContext = context();
+
+    await dispatchDiscordInteraction(registry, event, testContext);
+
+    expect(command.deferReply).not.toHaveBeenCalled();
+    expect(present).toHaveBeenCalledWith(
+      { status: "executed", output: "CUSTOM" },
+      command,
+      testContext,
+    );
+    expect(command.reply).not.toHaveBeenCalled();
+  });
+
+  it("publishes only an executed result for a public trigger", async () => {
+    const registry = createActionRegistry<TestContext>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    registry.registerAction(
+      action([
+        slashCommand({
+          name: "public-result",
+          description: "Publish successful output",
+          visibility: "public",
+          parse: () => "public result",
+        }),
+      ]),
+    );
+    const event = interaction("slash", "public-result");
+    const command = event as ChatInputCommandInteraction;
+
+    await dispatchDiscordInteraction(registry, event, context());
+
+    expect(command.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(command.deleteReply).toHaveBeenCalledOnce();
+    expect(command.followUp).toHaveBeenCalledWith({ content: "PUBLIC RESULT" });
+    expect(command.editReply).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "slash",
+      slashCommand({
+        name: "protected",
+        description: "Protected slash command",
+        visibility: "public",
+        parse: () => "slash",
+      }),
+    ],
+    [
+      "message",
+      messageContextMenu({
+        name: "Protected message",
+        visibility: "public",
+        parse: () => "message",
+      }),
+    ],
+    [
+      "user",
+      userContextMenu({
+        name: "Protected user",
+        visibility: "public",
+        parse: () => "user",
+      }),
+    ],
+  ] as const)(
+    "keeps unavailable public %s commands private",
+    async (kind, trigger) => {
+      const registry = createActionRegistry<TestContext>({
+        providers: createDiscordInteractionProviders<TestContext>(),
+      });
+      registry.registerAction(
+        action([trigger], {
+          availability: () => ({ available: false, reason: "private state" }),
+        }),
+      );
+      const event = interaction(kind, trigger.name);
+      const command = event as ChatInputCommandInteraction;
+
+      await dispatchDiscordInteraction(registry, event, context());
+
+      expect(command.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
+      expect(command.editReply).toHaveBeenCalledWith({
+        content: "private state",
+      });
+      expect(command.deleteReply).not.toHaveBeenCalled();
+      expect(command.followUp).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps unauthorized public commands private", async () => {
+    const trigger = slashCommand({
+      name: "protected-public",
+      description: "Protected public command",
+      visibility: "public",
+      parse: () => "protected",
+    });
+    const registry = createActionRegistry<TestContext, TestCheck>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    registry.registerAction({
+      ...action([trigger]),
+      authorization: () => ({ permission: "protected.run" }),
+    });
+    const event = interaction("slash", trigger.name);
+    const command = event as ChatInputCommandInteraction;
+
+    await dispatchDiscordInteraction(registry, event, context(), () => ({
+      authorized: false,
+      reason: "private denial",
+    }));
+
+    expect(command.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(command.editReply).toHaveBeenCalledWith({
+      content: "private denial",
+    });
+    expect(command.deleteReply).not.toHaveBeenCalled();
+    expect(command.followUp).not.toHaveBeenCalled();
+  });
+
+  it("keeps failed public commands private", async () => {
+    const trigger = slashCommand({
+      name: "failing-public",
+      description: "Failing public command",
+      visibility: "public",
+      parse: () => "failing",
+    });
+    const registry = createActionRegistry<TestContext>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    registry.registerAction(
+      action([trigger], {
+        execute: async () => {
+          throw new Error("boom");
+        },
+      }),
+    );
+    const event = interaction("slash", trigger.name);
+    const command = event as ChatInputCommandInteraction;
+
+    await dispatchDiscordInteraction(registry, event, context());
+
+    expect(command.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(command.editReply).toHaveBeenCalledWith({
+      content: "Something went wrong while running this action.",
+    });
+    expect(command.deleteReply).not.toHaveBeenCalled();
+    expect(command.followUp).not.toHaveBeenCalled();
   });
 });
 

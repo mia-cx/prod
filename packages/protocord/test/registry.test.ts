@@ -44,7 +44,7 @@ const action = (
     jsonSchema: { type: "string" },
   },
   triggers: [trigger("fixture")],
-  availability: (_input, context) => {
+  availability: (context) => {
     context.events.push("availability");
     return { available: true };
   },
@@ -149,6 +149,52 @@ describe("action registry", () => {
       reason: "nope",
     });
     expect(context.events).not.toContain("execute");
+  });
+
+  it("checks invocation-sensitive readiness only after authorization", async () => {
+    const readiness = vi.fn(({ invocation }, context: TestContext) => {
+      context.events.push(`readiness:${invocation.input}`);
+      return { available: false as const, reason: "resource is paused" };
+    });
+    const registry = createActionRegistry<TestContext, TestCheck>({
+      providers: [provider()],
+    });
+    registry.registerAction(action({ readiness }));
+    const deniedContext: TestContext = { events: [] };
+
+    const denied = await registry.dispatch({
+      providerId: "test",
+      triggerName: "fixture",
+      event: "secret-resource",
+      context: deniedContext,
+      authorize: () => ({ authorized: false, reason: "nope" }),
+    });
+
+    expect(denied.matched && denied.outcome).toEqual({
+      status: "unauthorized",
+      reason: "nope",
+    });
+    expect(readiness).not.toHaveBeenCalled();
+
+    const authorizedContext: TestContext = { events: [] };
+    const authorized = await registry.dispatch({
+      providerId: "test",
+      triggerName: "fixture",
+      event: "secret-resource",
+      context: authorizedContext,
+      authorize: () => ({ authorized: true }),
+    });
+
+    expect(authorized.matched && authorized.outcome).toEqual({
+      status: "unavailable",
+      reason: "resource is paused",
+    });
+    expect(authorizedContext.events).toEqual([
+      "availability",
+      "authorization",
+      "readiness:secret-resource",
+      "present:unavailable",
+    ]);
   });
 
   it("rejects conflicts atomically within a provider", () => {

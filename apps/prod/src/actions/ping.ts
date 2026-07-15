@@ -24,7 +24,7 @@ export const pingAction: Action<PingInput, string, ProdActionContext> = {
     slashCommand({
       name: "ping",
       description: "Check whether Prod is responsive",
-      acknowledgement: "public",
+      visibility: "public",
       parse: () => ({}),
     }),
   ],

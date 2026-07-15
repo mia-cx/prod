@@ -1,9 +1,9 @@
 export type {
   Action,
   ActionAvailability,
-  ActionAvailabilityInput,
   ActionInput,
   ActionInvocation,
+  ActionReadinessInput,
   ActionRequester,
   AuthorizationDecision,
   Authorize,
@@ -39,8 +39,10 @@ export {
 export type {
   DiscordAcknowledgement,
   DiscordAutocomplete,
+  DiscordAutocompleteAccess,
   DiscordCommandRegistrationTarget,
   DiscordInteractionHandleResult,
+  DiscordResponseVisibility,
   MessageContextMenuTrigger,
   SlashCommandTrigger,
   UserContextMenuTrigger,

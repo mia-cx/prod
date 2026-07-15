@@ -26,7 +26,7 @@ export type ActionInvocation<Input> = Readonly<{
   requester?: ActionRequester;
 }>;
 
-export type ActionAvailabilityInput<Input> = Readonly<{
+export type ActionReadinessInput<Input> = Readonly<{
   invocation: ActionInvocation<Input>;
 }>;
 
@@ -48,14 +48,17 @@ export type Action<
   description: string;
   input: ActionInput<Input>;
   triggers: readonly TriggerDefinition<Input>[];
-  availability(
-    input: ActionAvailabilityInput<Input>,
-    context: Context,
-  ): Awaitable<ActionAvailability>;
+  /** Public, invocation-independent availability checked before authorization. */
+  availability(context: Context): Awaitable<ActionAvailability>;
   authorization(
     invocation: ActionInvocation<Input>,
     context: Context,
   ): Awaitable<AuthorizationCheck | undefined>;
+  /** Invocation-sensitive readiness checked only after authorization succeeds. */
+  readiness?(
+    input: ActionReadinessInput<Input>,
+    context: Context,
+  ): Awaitable<ActionAvailability>;
   execute(
     invocation: ActionInvocation<Input>,
     context: Context,

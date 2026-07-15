@@ -81,8 +81,8 @@ const fixtureAction = (
     jsonSchema: { type: "string" },
   },
   triggers: [futureTrigger("on-ready", "Deployments/Ready")],
-  availability: ({ invocation }, context) => {
-    context.trace.push(`availability:${invocation.source}`);
+  availability: (context) => {
+    context.trace.push("availability");
     return { available: true };
   },
   authorization: (invocation, context) => {
@@ -132,7 +132,7 @@ describe("external trigger-provider extensibility", () => {
       "provider:parse",
       "input:parse",
       "provider:invocation-details",
-      "availability:future-event-bus",
+      "availability",
       "authorization:consumer-42",
       "authorizer:deployments.read",
       "execute:ship it",
@@ -186,7 +186,7 @@ describe("external trigger-provider extensibility", () => {
       "provider:parse",
       "input:parse",
       "provider:invocation-details",
-      "availability:future-event-bus",
+      "availability",
       "authorization:consumer-42",
       "provider:present:failed",
     ]);

@@ -245,10 +245,7 @@ async function invoke<Context, AuthorizationCheck>(
       input,
       rawEvent: event,
     };
-    const availability = await entry.action.availability(
-      { invocation },
-      context,
-    );
+    const availability = await entry.action.availability(context);
     if (!availability.available) {
       return { status: "unavailable", reason: availability.reason };
     }
@@ -264,6 +261,11 @@ async function invoke<Context, AuthorizationCheck>(
       if (!decision.authorized) {
         return { status: "unauthorized", reason: decision.reason };
       }
+    }
+
+    const readiness = await entry.action.readiness?.({ invocation }, context);
+    if (readiness && !readiness.available) {
+      return { status: "unavailable", reason: readiness.reason };
     }
 
     return {

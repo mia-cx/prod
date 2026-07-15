@@ -6,6 +6,7 @@ import {
   getDiscordCommandRegistration,
   handleDiscordInteraction,
   registerDiscordCommands,
+  type DiscordInteractionHandleResult,
 } from "protocord";
 
 import type { DiscordActionSurface } from "../discord.js";
@@ -41,23 +42,36 @@ export const createProdActionRuntime = (logger: Logger): ProdActionRuntime => {
         interaction,
         context,
       );
-      if (
-        handled.handled &&
-        handled.type === "command" &&
-        handled.result.presentationError !== undefined
-      ) {
-        logger.error(
-          {
-            err: handled.result.presentationError,
-            action: handled.result.actionName,
-            trigger: handled.result.triggerName,
-          },
-          "failed to present action result",
-        );
-      }
+      logProdActionResult(logger, handled);
     },
     handleError: (error: unknown) => {
       logger.error({ err: error }, "Discord action dispatch failed");
     },
   });
+};
+
+export const logProdActionResult = (
+  logger: Logger,
+  handled: DiscordInteractionHandleResult,
+): void => {
+  if (!handled.handled || handled.type !== "command") {
+    return;
+  }
+
+  const details = {
+    action: handled.result.actionName,
+    trigger: handled.result.triggerName,
+  };
+  if (handled.result.outcome.status === "failed") {
+    logger.error(
+      { ...details, err: handled.result.outcome.error },
+      "Discord action lifecycle failed",
+    );
+  }
+  if (handled.result.presentationError !== undefined) {
+    logger.error(
+      { ...details, err: handled.result.presentationError },
+      "failed to present action result",
+    );
+  }
 };

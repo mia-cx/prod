@@ -46,7 +46,7 @@ const action = (): Action<string, string, TestContext, TestCheck> => ({
       usage: "report [summary]",
     }),
   ],
-  availability: (_input, context) => {
+  availability: (context) => {
     context.events.push("availability");
     return { available: true };
   },

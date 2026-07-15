@@ -12,7 +12,7 @@ Implement `protocord` as the reusable canonical action lifecycle and extensible 
 
 ## Acceptance criteria
 
-- [x] Consumer actions run through shared input parsing, availability, authorization, execution, and presentation stages.
+- [x] Consumer actions run through shared input parsing, public availability, authorization, protected readiness, execution, and presentation stages.
 - [x] Slash aliases, both context-menu forms, and text commands dispatch through the same registry.
 - [x] Provider-scoped conflicts fail atomically and disabled text commands register nothing.
 - [x] Consumed text commands do not continue into the ordinary message pipeline.
@@ -23,8 +23,8 @@ Implement `protocord` as the reusable canonical action lifecycle and extensible 
 ## TODOs
 
 - [x] Define the public action, invocation, lifecycle, result, trigger-definition, provider, and registry contracts without exposing Effect in the reusable API.
-- [x] Implement atomic action/provider registration, provider-scoped conflict detection, and the canonical parse → availability → authorization → execute lifecycle with fresh pre-execution checks.
-- [x] Implement slash-command, message-context, user-context, and configurable-prefix text providers, including autocomplete/registration metadata and trigger-specific presentation.
+- [x] Implement atomic action/provider registration, provider-scoped conflict detection, and the canonical parse → public availability → authorization → protected readiness → execute lifecycle with fresh pre-execution checks.
+- [x] Implement slash-command, message-context, user-context, and configurable-prefix text providers, including explicit autocomplete access, registration metadata, private acknowledgement, outcome-aware response visibility, and trigger-specific presentation.
 - [x] Compose consumer-owned fixture actions in tests and prove aliases, context menus, text parsing/consumption, disabled prefixes, bot/webhook filtering, lifecycle ordering, and failure behavior.
 - [x] Prove extensibility with a synthetic external provider and verify the compiled package contains no concrete actions or default command catalog.
 - [x] Run package and repository checks, then document the remaining real-Discord HITL gate.
@@ -54,6 +54,6 @@ Implement `protocord` as the reusable canonical action lifecycle and extensible 
 - Prod composes one app-owned development validation action, `/ping`, registers it in the configured development guild at startup, and replies publicly with `pong!` through the canonical lifecycle.
 - Protocord refreshes an explicit global or guild command scope from the complete registered catalog; Discord's authoritative `set` operation updates changed slash/context commands and removes stale ones on every restart.
 - The real-Discord validation gate remains HITL and must not require credentials in issues, commits, fixtures, logs, or screenshots.
-- Package validation: lint, typecheck, build, dry-run pack, compiled-entrypoint smoke import, and 43 focused tests pass with 89.76% statement coverage.
+- Package validation: lint, typecheck, build, dry-run pack, compiled-entrypoint smoke import, and 55 focused tests pass with 90.51% statement coverage.
 - Repository validation: `pnpm check` completes 32/32 Turbo tasks and validates all seven reusable-package boundaries; `pnpm pack:check` completes 15/15 tasks.
 - Prod validation: 16/16 app tests pass, including the exact `/ping` registration, `pong!` response, authoritative development-guild command refresh, and interaction dispatch wiring.

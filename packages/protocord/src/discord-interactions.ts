@@ -38,17 +38,28 @@ type DiscordPresentation<InteractionType, Context> = (
   context: Context,
 ) => Awaitable<void>;
 
-export type DiscordAcknowledgement = "ephemeral" | "none" | "public";
+export type DiscordAcknowledgement = "defer" | "none";
+export type DiscordResponseVisibility = "ephemeral" | "public";
+
+export type DiscordAutocompleteAccess<Context, AuthorizationCheck> =
+  | Readonly<{ kind: "public" }>
+  | Readonly<{
+      kind: "authorized";
+      authorization: (
+        interaction: AutocompleteInteraction,
+        context: Context,
+      ) => Awaitable<AuthorizationCheck>;
+    }>;
 
 export type DiscordAutocomplete<Context, AuthorizationCheck> = Readonly<{
-  availability: (
+  /** Public, invocation-independent availability checked before access. */
+  availability: (context: Context) => Awaitable<ActionAvailability>;
+  access: DiscordAutocompleteAccess<Context, AuthorizationCheck>;
+  /** Interaction-sensitive readiness checked only after access succeeds. */
+  readiness?: (
     interaction: AutocompleteInteraction,
     context: Context,
   ) => Awaitable<ActionAvailability>;
-  authorization: (
-    interaction: AutocompleteInteraction,
-    context: Context,
-  ) => Awaitable<AuthorizationCheck | undefined>;
   complete: (
     interaction: AutocompleteInteraction,
     context: Context,
@@ -79,6 +90,7 @@ export type SlashCommandTrigger<
     options: readonly ApplicationCommandOptionData[];
     registration: SlashCommandRegistration;
     acknowledgement: DiscordAcknowledgement;
+    visibility: DiscordResponseVisibility;
     parseInteraction(interaction: ChatInputCommandInteraction): Input;
     autocomplete?: DiscordAutocomplete<Context, AuthorizationCheck>;
     presentInteraction?: DiscordPresentation<
@@ -95,6 +107,7 @@ export type MessageContextMenuTrigger<
     providerId: typeof discordMessageContextProviderId;
     registration: MessageContextRegistration;
     acknowledgement: DiscordAcknowledgement;
+    visibility: DiscordResponseVisibility;
     parseInteraction(interaction: MessageContextMenuCommandInteraction): Input;
     presentInteraction?: DiscordPresentation<
       MessageContextMenuCommandInteraction,
@@ -110,6 +123,7 @@ export type UserContextMenuTrigger<
     providerId: typeof discordUserContextProviderId;
     registration: UserContextRegistration;
     acknowledgement: DiscordAcknowledgement;
+    visibility: DiscordResponseVisibility;
     parseInteraction(interaction: UserContextMenuCommandInteraction): Input;
     presentInteraction?: DiscordPresentation<
       UserContextMenuCommandInteraction,
@@ -128,6 +142,7 @@ export function slashCommand<
   options?: readonly ApplicationCommandOptionData[];
   registration?: SlashCommandRegistration;
   acknowledgement?: DiscordAcknowledgement;
+  visibility?: DiscordResponseVisibility;
   parse: (interaction: ChatInputCommandInteraction) => Input;
   autocomplete?: DiscordAutocomplete<Context, AuthorizationCheck>;
   present?: DiscordPresentation<ChatInputCommandInteraction, Context>;
@@ -139,7 +154,8 @@ export function slashCommand<
     usage: input.usage ?? `/${input.name}`,
     options: input.options ?? [],
     registration: input.registration ?? {},
-    acknowledgement: input.acknowledgement ?? "ephemeral",
+    acknowledgement: input.acknowledgement ?? "defer",
+    visibility: input.visibility ?? "ephemeral",
     parseInteraction: input.parse,
     ...(input.autocomplete ? { autocomplete: input.autocomplete } : {}),
     ...(input.present ? { presentInteraction: input.present } : {}),
@@ -152,6 +168,7 @@ export function messageContextMenu<Input, Context = unknown>(input: {
   usage?: string;
   registration?: MessageContextRegistration;
   acknowledgement?: DiscordAcknowledgement;
+  visibility?: DiscordResponseVisibility;
   parse: (interaction: MessageContextMenuCommandInteraction) => Input;
   present?: DiscordPresentation<MessageContextMenuCommandInteraction, Context>;
 }): MessageContextMenuTrigger<Input, Context> {
@@ -161,7 +178,8 @@ export function messageContextMenu<Input, Context = unknown>(input: {
     description: input.description ?? input.name,
     usage: input.usage ?? input.name,
     registration: input.registration ?? {},
-    acknowledgement: input.acknowledgement ?? "ephemeral",
+    acknowledgement: input.acknowledgement ?? "defer",
+    visibility: input.visibility ?? "ephemeral",
     parseInteraction: input.parse,
     ...(input.present ? { presentInteraction: input.present } : {}),
   };
@@ -173,6 +191,7 @@ export function userContextMenu<Input, Context = unknown>(input: {
   usage?: string;
   registration?: UserContextRegistration;
   acknowledgement?: DiscordAcknowledgement;
+  visibility?: DiscordResponseVisibility;
   parse: (interaction: UserContextMenuCommandInteraction) => Input;
   present?: DiscordPresentation<UserContextMenuCommandInteraction, Context>;
 }): UserContextMenuTrigger<Input, Context> {
@@ -182,7 +201,8 @@ export function userContextMenu<Input, Context = unknown>(input: {
     description: input.description ?? input.name,
     usage: input.usage ?? input.name,
     registration: input.registration ?? {},
-    acknowledgement: input.acknowledgement ?? "ephemeral",
+    acknowledgement: input.acknowledgement ?? "defer",
+    visibility: input.visibility ?? "ephemeral",
     parseInteraction: input.parse,
     ...(input.present ? { presentInteraction: input.present } : {}),
   };
@@ -201,11 +221,19 @@ export function createDiscordSlashCommandProvider<
     async (trigger, interaction, outcome, context) => {
       const slashTrigger = asSlashTrigger<Context>(trigger);
       const commandInteraction = interaction as ChatInputCommandInteraction;
-      await (slashTrigger.presentInteraction ?? presentDiscordOutcome)(
-        outcome,
-        commandInteraction,
-        context,
-      );
+      if (slashTrigger.presentInteraction) {
+        await slashTrigger.presentInteraction(
+          outcome,
+          commandInteraction,
+          context,
+        );
+      } else {
+        await presentDiscordOutcome(
+          outcome,
+          commandInteraction,
+          slashTrigger.visibility,
+        );
+      }
     },
   );
 }
@@ -224,11 +252,19 @@ export function createDiscordMessageContextProvider<
       const messageTrigger = asMessageTrigger<Context>(trigger);
       const commandInteraction =
         interaction as MessageContextMenuCommandInteraction;
-      await (messageTrigger.presentInteraction ?? presentDiscordOutcome)(
-        outcome,
-        commandInteraction,
-        context,
-      );
+      if (messageTrigger.presentInteraction) {
+        await messageTrigger.presentInteraction(
+          outcome,
+          commandInteraction,
+          context,
+        );
+      } else {
+        await presentDiscordOutcome(
+          outcome,
+          commandInteraction,
+          messageTrigger.visibility,
+        );
+      }
     },
   );
 }
@@ -247,11 +283,19 @@ export function createDiscordUserContextProvider<
       const userTrigger = asUserTrigger<Context>(trigger);
       const commandInteraction =
         interaction as UserContextMenuCommandInteraction;
-      await (userTrigger.presentInteraction ?? presentDiscordOutcome)(
-        outcome,
-        commandInteraction,
-        context,
-      );
+      if (userTrigger.presentInteraction) {
+        await userTrigger.presentInteraction(
+          outcome,
+          commandInteraction,
+          context,
+        );
+      } else {
+        await presentDiscordOutcome(
+          outcome,
+          commandInteraction,
+          userTrigger.visibility,
+        );
+      }
     },
   );
 }
@@ -297,9 +341,7 @@ export async function dispatchDiscordInteraction<
     !commandInteraction.deferred &&
     !commandInteraction.replied
   ) {
-    await commandInteraction.deferReply(
-      acknowledgement === "ephemeral" ? { flags: MessageFlags.Ephemeral } : {},
-    );
+    await commandInteraction.deferReply({ flags: MessageFlags.Ephemeral });
   }
 
   return registry.dispatch({
@@ -340,24 +382,30 @@ export async function dispatchDiscordAutocomplete<
     return false;
   }
 
-  const availability = await autocomplete.availability(interaction, context);
+  const availability = await autocomplete.availability(context);
   if (!availability.available) {
     await interaction.respond([]);
     return true;
   }
 
-  const check = await autocomplete.authorization(interaction, context);
-  if (check !== undefined) {
+  if (autocomplete.access.kind === "authorized") {
     if (!authorize) {
       await interaction.respond([]);
       return true;
     }
+    const check = await autocomplete.access.authorization(interaction, context);
     const invocation = autocompleteInvocation(interaction, trigger.name);
     const decision = await authorize(check, invocation, context);
     if (!decision.authorized) {
       await interaction.respond([]);
       return true;
     }
+  }
+
+  const readiness = await autocomplete.readiness?.(interaction, context);
+  if (readiness && !readiness.available) {
+    await interaction.respond([]);
+    return true;
   }
 
   await interaction.respond(await autocomplete.complete(interaction, context));
@@ -504,6 +552,13 @@ function createDiscordCommandProvider<Context>(
             acknowledgement?: unknown;
           }
         ).acknowledgement,
+      ) &&
+      isResponseVisibility(
+        (
+          trigger as TriggerDefinition<unknown> & {
+            visibility?: unknown;
+          }
+        ).visibility,
       ),
     isEvent: (event): event is unknown => isDiscordProviderEvent(id, event),
     getTriggerKey: (trigger) => trigger.name,
@@ -536,7 +591,13 @@ function getAcknowledgement(
 }
 
 function isAcknowledgement(value: unknown): value is DiscordAcknowledgement {
-  return value === "ephemeral" || value === "none" || value === "public";
+  return value === "defer" || value === "none";
+}
+
+function isResponseVisibility(
+  value: unknown,
+): value is DiscordResponseVisibility {
+  return value === "ephemeral" || value === "public";
 }
 
 function isDiscordProviderEvent(
@@ -615,7 +676,21 @@ async function presentDiscordOutcome(
     | ChatInputCommandInteraction
     | MessageContextMenuCommandInteraction
     | UserContextMenuCommandInteraction,
+  visibility: DiscordResponseVisibility,
 ): Promise<void> {
+  if (outcome.status === "executed" && visibility === "public") {
+    const reply = { content: formatOutput(outcome.output) };
+    if (interaction.deferred) {
+      await interaction.deleteReply();
+      await interaction.followUp(reply);
+    } else if (interaction.replied) {
+      await interaction.followUp(reply);
+    } else {
+      await interaction.reply(reply);
+    }
+    return;
+  }
+
   const reply = outcomeReply(outcome);
   if (interaction.deferred) {
     await interaction.editReply({ content: reply.content });
