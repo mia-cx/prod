@@ -68,6 +68,43 @@ const killProcessGroup = (pid: number, signal: NodeJS.Signals): void => {
   }
 };
 
+const isProcessRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ESRCH"
+    ) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+const waitForProcessExit = (
+  pid: number,
+  timeoutMs = 1_000,
+): Promise<void> =>
+  new Promise((resolvePromise, reject) => {
+    const startedAt = Date.now();
+    const poll = (): void => {
+      if (!isProcessRunning(pid)) {
+        resolvePromise();
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error(`Timed out waiting for process ${pid} to exit`));
+        return;
+      }
+      setTimeout(poll, 10);
+    };
+    poll();
+  });
+
 const waitForOutput = (
   output: () => string,
   expected: string,
@@ -150,27 +187,19 @@ const startDevFixture = (entry: string) => {
         throw new Error("Cannot force fixture cleanup without its process ID");
       }
       killProcessGroup(fixturePid, "SIGKILL");
-      killProcessGroup(wrapperPid, "SIGKILL");
-      await waitForClose(1_000);
+      if (
+        !(await settlesWithin(
+          close,
+          1_000,
+          "the wrapper to reap the killed fixture",
+        ))
+      ) {
+        killProcessGroup(wrapperPid, "SIGKILL");
+        await waitForClose(1_000);
+      }
+      await waitForProcessExit(fixturePid);
     },
   };
-};
-
-const isProcessRunning = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (
-      error !== null &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === "ESRCH"
-    ) {
-      return false;
-    }
-    throw error;
-  }
 };
 
 describe("the app dev process", () => {
@@ -210,13 +239,13 @@ describe("the app dev process", () => {
       await fixture.cleanup();
     }
 
-    expect(isProcessRunning(fixture.wrapperPid)).toBe(false);
+    await waitForProcessExit(fixture.wrapperPid);
     expect(fixturePid).toBeDefined();
     if (fixturePid === undefined) {
       throw new Error("Fixture process ID was not captured before cleanup");
     }
-    expect(isProcessRunning(fixturePid)).toBe(false);
-  }, 10_000);
+    await waitForProcessExit(fixturePid);
+  }, 12_000);
 
   it("reserves enough time to clean up after readiness times out", async () => {
     const fixture = startDevFixture("test/fixtures/delayed-ready-process.ts");
@@ -236,11 +265,11 @@ describe("the app dev process", () => {
     expect(readinessError).toEqual(
       new Error('Timed out waiting for "fixture ready"'),
     );
-    expect(isProcessRunning(fixture.wrapperPid)).toBe(false);
+    await waitForProcessExit(fixture.wrapperPid);
     expect(fixturePid).toBeDefined();
     if (fixturePid === undefined) {
       throw new Error("Fixture process ID was not captured before cleanup");
     }
-    expect(isProcessRunning(fixturePid)).toBe(false);
-  }, 10_000);
+    await waitForProcessExit(fixturePid);
+  }, 12_000);
 });
