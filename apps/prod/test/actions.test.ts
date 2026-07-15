@@ -149,6 +149,19 @@ describe("Prod action runtime", () => {
       allowedMentions: noMentions,
     });
 
+    for (const content of [";", ";unknown"] as const) {
+      const unmatchedReply = vi.fn().mockResolvedValue(undefined);
+      const unmatchedMessage = {
+        ...message,
+        content,
+        reply: unmatchedReply,
+      } as unknown as Message;
+      await expect(runtime.handleMessage!(unmatchedMessage)).resolves.toBe(
+        false,
+      );
+      expect(unmatchedReply).not.toHaveBeenCalled();
+    }
+
     const otherGuildReply = vi.fn().mockResolvedValue(undefined);
     const otherGuildMessage = {
       ...message,
