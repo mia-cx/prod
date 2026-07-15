@@ -1,7 +1,34 @@
-export type PermissionsPackageBoundary = Readonly<{
-  name: "@protocord/permissions";
-}>;
-
-export const permissionsBoundary: PermissionsPackageBoundary = Object.freeze({
-  name: "@protocord/permissions",
-});
+export type {
+  AuthorizationCheck,
+  AuthorizationContext,
+  AuthorizationDecision,
+  AuthorizationObject,
+  AuthorizationResourceValidator,
+  AuthorizationService,
+  AuthorizationSubject,
+  PermissionRule,
+  PermissionRuleStore,
+  PermissionVerb,
+  RuleObject,
+  RuleSubject,
+  ServiceAuthorizationSubject,
+  UserAuthorizationSubject,
+} from "./contracts.js";
+export {
+  AuthorizationDeniedError,
+  AuthorizationResourceMismatchError,
+  createAuthorizationService,
+  type CreateAuthorizationServiceOptions,
+} from "./evaluator.js";
+export {
+  authorizationContextLayers,
+  InvalidAuthorizationInputError,
+  validateAuthorizationCheck,
+  validateAuthorizationContext,
+  validateAuthorizationObject,
+  validateAuthorizationSubject,
+  validatePermissionRule,
+  validatePermissionVerb,
+  validateRuleObject,
+  validateRuleSubject,
+} from "./validation.js";
