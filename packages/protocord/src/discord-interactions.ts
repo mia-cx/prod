@@ -728,8 +728,12 @@ async function presentDiscordOutcome(
       allowedMentions: NO_MENTIONS,
     };
     if (interaction.deferred) {
-      await interaction.deleteReply();
+      // Finalize the deferred original before creating a follow-up. Discord
+      // otherwise treats the first follow-up as an edit and preserves the
+      // original response's ephemeral visibility.
+      await interaction.editReply(reply);
       await interaction.followUp(reply);
+      await interaction.deleteReply();
     } else if (interaction.replied) {
       await interaction.followUp(reply);
     } else {

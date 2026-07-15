@@ -583,12 +583,19 @@ describe("built-in Discord interaction providers", () => {
     expect(command.deferReply).toHaveBeenCalledWith({
       flags: MessageFlags.Ephemeral,
     });
-    expect(command.deleteReply).toHaveBeenCalledOnce();
-    expect(command.followUp).toHaveBeenCalledWith({
+    const reply = {
       content: "PUBLIC RESULT",
       allowedMentions: noMentions,
-    });
-    expect(command.editReply).not.toHaveBeenCalled();
+    };
+    expect(command.editReply).toHaveBeenCalledWith(reply);
+    expect(command.followUp).toHaveBeenCalledWith(reply);
+    expect(command.deleteReply).toHaveBeenCalledOnce();
+    expect(vi.mocked(command.editReply).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(command.followUp).mock.invocationCallOrder[0]!,
+    );
+    expect(vi.mocked(command.followUp).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(command.deleteReply).mock.invocationCallOrder[0]!,
+    );
   });
 
   it.each([

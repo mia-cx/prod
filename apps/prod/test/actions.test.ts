@@ -102,12 +102,23 @@ describe("Prod action runtime", () => {
       expect(interaction.deferReply).toHaveBeenCalledWith({
         flags: MessageFlags.Ephemeral,
       });
-      expect(interaction.deleteReply).toHaveBeenCalledOnce();
-      expect(interaction.followUp).toHaveBeenCalledWith({
+      const reply = {
         content: "pong!",
         allowedMentions: noMentions,
-      });
-      expect(interaction.editReply).not.toHaveBeenCalled();
+      };
+      expect(interaction.editReply).toHaveBeenCalledWith(reply);
+      expect(interaction.followUp).toHaveBeenCalledWith(reply);
+      expect(interaction.deleteReply).toHaveBeenCalledOnce();
+      expect(
+        vi.mocked(interaction.editReply).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        vi.mocked(interaction.followUp).mock.invocationCallOrder[0]!,
+      );
+      expect(
+        vi.mocked(interaction.followUp).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        vi.mocked(interaction.deleteReply).mock.invocationCallOrder[0]!,
+      );
     },
   );
 
