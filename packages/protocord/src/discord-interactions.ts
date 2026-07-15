@@ -89,7 +89,7 @@ export type SlashCommandTrigger<
   Input,
   Context = unknown,
   AuthorizationCheck = never,
-> = TriggerDefinition<Input> &
+> = TriggerDefinition<Input, Context, AuthorizationCheck> &
   Readonly<{
     providerId: typeof discordSlashCommandProviderId;
     options: readonly ApplicationCommandOptionData[];
@@ -107,7 +107,7 @@ export type SlashCommandTrigger<
 export type MessageContextMenuTrigger<
   Input,
   Context = unknown,
-> = TriggerDefinition<Input> &
+> = TriggerDefinition<Input, Context> &
   Readonly<{
     providerId: typeof discordMessageContextProviderId;
     registration: MessageContextRegistration;
@@ -123,7 +123,7 @@ export type MessageContextMenuTrigger<
 export type UserContextMenuTrigger<
   Input,
   Context = unknown,
-> = TriggerDefinition<Input> &
+> = TriggerDefinition<Input, Context> &
   Readonly<{
     providerId: typeof discordUserContextProviderId;
     registration: UserContextRegistration;
@@ -573,9 +573,12 @@ export async function registerDiscordCommands<Context, AuthorizationCheck>(
 function createDiscordCommandProvider<Context>(
   id: string,
   source: string,
-  parse: (trigger: TriggerDefinition<unknown>, interaction: unknown) => unknown,
+  parse: (
+    trigger: TriggerDefinition<unknown, Context, unknown>,
+    interaction: unknown,
+  ) => unknown,
   present: (
-    trigger: TriggerDefinition<unknown>,
+    trigger: TriggerDefinition<unknown, Context, unknown>,
     interaction: unknown,
     outcome: DispatchOutcome,
     context: Context,
@@ -583,23 +586,25 @@ function createDiscordCommandProvider<Context>(
 ): TriggerProvider<Context> {
   return {
     id,
-    isTrigger: (trigger): trigger is TriggerDefinition<unknown> =>
+    isTrigger: (
+      trigger,
+    ): trigger is TriggerDefinition<unknown, Context, unknown> =>
       trigger.providerId === id &&
       typeof (
-        trigger as TriggerDefinition<unknown> & {
+        trigger as TriggerDefinition<unknown, Context, unknown> & {
           parseInteraction?: unknown;
         }
       ).parseInteraction === "function" &&
       isAcknowledgement(
         (
-          trigger as TriggerDefinition<unknown> & {
+          trigger as TriggerDefinition<unknown, Context, unknown> & {
             acknowledgement?: unknown;
           }
         ).acknowledgement,
       ) &&
       isResponseVisibility(
         (
-          trigger as TriggerDefinition<unknown> & {
+          trigger as TriggerDefinition<unknown, Context, unknown> & {
             visibility?: unknown;
           }
         ).visibility,
@@ -624,11 +629,11 @@ function createDiscordCommandProvider<Context>(
   };
 }
 
-function getAcknowledgement(
-  trigger: TriggerDefinition<unknown>,
+function getAcknowledgement<Context, AuthorizationCheck>(
+  trigger: TriggerDefinition<unknown, Context, AuthorizationCheck>,
 ): DiscordAcknowledgement {
   return (
-    trigger as TriggerDefinition<unknown> & {
+    trigger as TriggerDefinition<unknown, Context, AuthorizationCheck> & {
       acknowledgement: DiscordAcknowledgement;
     }
   ).acknowledgement;
@@ -792,20 +797,20 @@ function formatOutput(output: unknown): string {
   }
 }
 
-function asSlashTrigger<Context, AuthorizationCheck = never>(
-  trigger: TriggerDefinition<unknown>,
+function asSlashTrigger<Context, AuthorizationCheck = unknown>(
+  trigger: TriggerDefinition<unknown, Context, AuthorizationCheck>,
 ): SlashCommandTrigger<unknown, Context, AuthorizationCheck> {
   return trigger as SlashCommandTrigger<unknown, Context, AuthorizationCheck>;
 }
 
-function asMessageTrigger<Context>(
-  trigger: TriggerDefinition<unknown>,
+function asMessageTrigger<Context, AuthorizationCheck = unknown>(
+  trigger: TriggerDefinition<unknown, Context, AuthorizationCheck>,
 ): MessageContextMenuTrigger<unknown, Context> {
   return trigger as MessageContextMenuTrigger<unknown, Context>;
 }
 
-function asUserTrigger<Context>(
-  trigger: TriggerDefinition<unknown>,
+function asUserTrigger<Context, AuthorizationCheck = unknown>(
+  trigger: TriggerDefinition<unknown, Context, AuthorizationCheck>,
 ): UserContextMenuTrigger<unknown, Context> {
   return trigger as UserContextMenuTrigger<unknown, Context>;
 }

@@ -37,10 +37,16 @@ function context(): TestContext {
   return { events: [], invocations: [] };
 }
 
-function action(
-  triggers: readonly TriggerDefinition<string>[],
-  overrides: Partial<Action<string, string, TestContext>> = {},
-): Action<string, string, TestContext> {
+function action<AuthorizationCheck = never>(
+  triggers: readonly TriggerDefinition<
+    string,
+    TestContext,
+    AuthorizationCheck
+  >[],
+  overrides: Partial<
+    Action<string, string, TestContext, AuthorizationCheck>
+  > = {},
+): Action<string, string, TestContext, AuthorizationCheck> {
   return {
     name: "fixture",
     description: "A consumer-owned action",
@@ -590,12 +596,12 @@ describe("built-in Discord interaction providers", () => {
     expect(command.editReply).toHaveBeenCalledWith(reply);
     expect(command.followUp).toHaveBeenCalledWith(reply);
     expect(command.deleteReply).toHaveBeenCalledOnce();
-    expect(vi.mocked(command.editReply).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(command.followUp).mock.invocationCallOrder[0]!,
-    );
-    expect(vi.mocked(command.followUp).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(command.deleteReply).mock.invocationCallOrder[0]!,
-    );
+    expect(
+      vi.mocked(command.editReply).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(command.followUp).mock.invocationCallOrder[0]!);
+    expect(
+      vi.mocked(command.followUp).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(command.deleteReply).mock.invocationCallOrder[0]!);
   });
 
   it.each([

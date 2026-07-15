@@ -13,7 +13,7 @@ export const TEXT_COMMAND_PROVIDER_ID = "discord-text-command";
 export type TextCommandTrigger<
   Input = string,
   Context = unknown,
-> = TriggerDefinition<Input> &
+> = TriggerDefinition<Input, Context> &
   Readonly<{
     providerId: typeof TEXT_COMMAND_PROVIDER_ID;
     parseText?: (argumentTail: string, message: TextCommandMessage) => Input;

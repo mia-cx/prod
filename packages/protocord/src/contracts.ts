@@ -30,12 +30,23 @@ export type ActionReadinessInput<Input> = Readonly<{
   invocation: ActionInvocation<Input>;
 }>;
 
-export type TriggerDefinition<Input> = Readonly<{
+declare const triggerContext: unique symbol;
+declare const triggerAuthorizationCheck: unique symbol;
+
+export type TriggerDefinition<
+  Input,
+  Context = unknown,
+  AuthorizationCheck = never,
+> = Readonly<{
   providerId: string;
   name: string;
   description: string;
   usage: string;
   readonly __input?: Input;
+  /** A trigger may consume this context, so context is contravariant. */
+  readonly [triggerContext]?: (context: Context) => void;
+  /** A trigger may produce this check, so authorization is covariant. */
+  readonly [triggerAuthorizationCheck]?: () => AuthorizationCheck;
 }>;
 
 export type Action<
@@ -47,7 +58,7 @@ export type Action<
   name: string;
   description: string;
   input: ActionInput<Input>;
-  triggers: readonly TriggerDefinition<Input>[];
+  triggers: readonly TriggerDefinition<Input, Context, AuthorizationCheck>[];
   /** Public, invocation-independent availability checked before authorization. */
   availability(context: Context): Awaitable<ActionAvailability>;
   authorization(
@@ -84,11 +95,14 @@ export type InvocationDetails = Readonly<{
 
 export type TriggerProvider<
   Context,
-  Trigger extends TriggerDefinition<unknown> = TriggerDefinition<unknown>,
+  Trigger extends TriggerDefinition<unknown, Context, unknown> =
+    TriggerDefinition<unknown, Context, unknown>,
   Event = unknown,
 > = Readonly<{
   id: string;
-  isTrigger(trigger: TriggerDefinition<unknown>): trigger is Trigger;
+  isTrigger(
+    trigger: TriggerDefinition<unknown, Context, unknown>,
+  ): trigger is Trigger;
   isEvent(event: unknown): event is Event;
   getTriggerKey(trigger: Trigger): string | undefined;
   normalizeLookupKey(key: string): string;
@@ -126,9 +140,12 @@ export type DispatchResult =
       presentationError?: unknown;
     }>;
 
-export type RegisteredTrigger = Readonly<{
+export type RegisteredTrigger<
+  Context = unknown,
+  AuthorizationCheck = unknown,
+> = Readonly<{
   actionName: string;
   providerId: string;
   triggerName: string;
-  trigger: TriggerDefinition<unknown>;
+  trigger: TriggerDefinition<unknown, Context, AuthorizationCheck>;
 }>;

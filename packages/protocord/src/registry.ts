@@ -21,7 +21,7 @@ type AnyProvider<Context> = TriggerProvider<Context>;
 
 type ResolvedTrigger<Context, AuthorizationCheck> = Readonly<{
   action: AnyAction<Context, AuthorizationCheck>;
-  trigger: TriggerDefinition<unknown>;
+  trigger: TriggerDefinition<unknown, Context, AuthorizationCheck>;
   provider: AnyProvider<Context>;
   key: string;
 }>;
@@ -38,8 +38,10 @@ export interface ActionRegistry<Context, AuthorizationCheck = never> {
   getTrigger(
     providerId: string,
     triggerName: string,
-  ): RegisteredTrigger | undefined;
-  getTriggers(providerId: string): readonly RegisteredTrigger[];
+  ): RegisteredTrigger<Context, AuthorizationCheck> | undefined;
+  getTriggers(
+    providerId: string,
+  ): readonly RegisteredTrigger<Context, AuthorizationCheck>[];
   dispatch(
     request: DispatchRequest<Context, AuthorizationCheck>,
   ): Promise<DispatchResult>;
@@ -87,7 +89,11 @@ export function createActionRegistry<
           );
         }
 
-        const erasedTrigger = trigger as TriggerDefinition<unknown>;
+        const erasedTrigger: TriggerDefinition<
+          unknown,
+          Context,
+          AuthorizationCheck
+        > = trigger;
         if (!provider.isTrigger(erasedTrigger)) {
           throw new Error(
             `Trigger ${trigger.name} is invalid for provider ${provider.id}`,
@@ -221,7 +227,7 @@ function resolveTrigger<Context, AuthorizationCheck>(
 
 function toRegisteredTrigger<Context, AuthorizationCheck>(
   entry: ResolvedTrigger<Context, AuthorizationCheck>,
-): RegisteredTrigger {
+): RegisteredTrigger<Context, AuthorizationCheck> {
   return {
     actionName: entry.action.name,
     providerId: entry.provider.id,
