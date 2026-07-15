@@ -14,8 +14,8 @@
     "db:migrate": "node dist/migrate.js"
   },
   "dependencies": {
+    "@mia-cx/protocord-model-settings": "workspace:*",
     "@protocord/ai": "workspace:*",
-    "@protocord/model-config": "workspace:*",
     "@protocord/permissions": "workspace:*",
     "@protocord/settings": "workspace:*",
     "better-sqlite3": "12.11.1",

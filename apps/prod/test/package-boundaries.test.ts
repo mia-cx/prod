@@ -9,7 +9,7 @@ describe("Prod package composition", () => {
       "protocord",
       "@protocord/ai",
       "@protocord/settings",
-      "@protocord/model-config",
+      "@mia-cx/protocord-model-settings",
     ]);
   });
 });

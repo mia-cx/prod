@@ -9,8 +9,8 @@ const errors = [];
 const expectedPackages = new Set([
   "@prod/config-eslint",
   "@prod/config-typescript",
+  "@mia-cx/protocord-model-settings",
   "@protocord/ai",
-  "@protocord/model-config",
   "@protocord/permissions",
   "@protocord/settings",
   "protocord",
@@ -19,8 +19,8 @@ const expectedPackages = new Set([
 const allowedInternalDependencies = new Map([
   ["@prod/config-eslint", new Set()],
   ["@prod/config-typescript", new Set()],
+  ["@mia-cx/protocord-model-settings", new Set(["@protocord/settings"])],
   ["@protocord/ai", new Set(["protocord"])],
-  ["@protocord/model-config", new Set(["@protocord/settings"])],
   ["@protocord/permissions", new Set()],
   ["@protocord/settings", new Set()],
   ["protocord", new Set()],
@@ -110,8 +110,7 @@ for (const { directory, manifest } of packageManifests) {
     const source = await readFile(file, "utf8");
     if (
       source.includes("apps/prod") ||
-      /(?:@prod|@protocord)\/[^"']+\/src(?:\/|["'])/.test(source) ||
-      /["']protocord\/src(?:\/|["'])/.test(source)
+      /(?:@[^/"']+\/[^/"']+|protocord)\/src(?:\/|["'])/.test(source)
     ) {
       errors.push(`${relative(root, file)} imports an application or package internal path`);
     }
@@ -128,8 +127,8 @@ for (const { directory, manifest } of packageManifests) {
 
 const appManifest = await readJson(join(root, "apps/prod/package.json"));
 const expectedAppDependencies = new Set([
+  "@mia-cx/protocord-model-settings",
   "@protocord/ai",
-  "@protocord/model-config",
   "@protocord/permissions",
   "@protocord/settings",
   "protocord",

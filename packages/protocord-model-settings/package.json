@@ -1,5 +1,5 @@
 {
-  "name": "@protocord/model-config",
+  "name": "@mia-cx/protocord-model-settings",
   "version": "0.0.0",
   "private": true,
   "type": "module",

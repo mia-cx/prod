@@ -19,7 +19,8 @@ The MVP will provide:
 - An embedded context-subject-object-verb-permit authorization system.
 - A Components v2 settings UI using combined Discord mentionable selects for users and roles.
 - OpenRouter model configuration and encrypted guild BYOK.
-- Protocord: a componentized Discord.js action framework with AI, permissions, settings, and model-configuration extensions.
+- Protocord: a componentized Discord.js action framework with first-party AI, permissions, and settings extensions.
+- `@mia-cx/protocord-model-settings`: a reusable Components v2 model-settings implementation built on `@protocord/settings`, but not shipped as first-party Protocord.
 - A pnpm workspace orchestrated by Turborepo.
 - SQLite persistence, audit history, Docker, Compose, Kubernetes, Helm, and CI.
 
@@ -47,7 +48,7 @@ Use:
 - ESLint and Prettier
 - Structured logging with secrets redacted
 
-Prod begins as a monorepo. Protocord package identities are deliberate, but every workspace package remains private until publishing and repository extraction are evaluated after the MVP. Prod-specific application and tooling packages retain the `@prod/*` scope.
+Prod begins as a monorepo. Protocord and Mia CX package identities are deliberate, but every workspace package remains private until publishing and repository extraction are evaluated after the MVP. Prod-specific application and tooling packages retain the `@prod/*` scope.
 
 Repository layout:
 
@@ -66,7 +67,7 @@ packages/
   protocord-ai/
   protocord-permissions/
   protocord-settings/
-  protocord-model-config/
+  protocord-model-settings/
   config-eslint/
   config-typescript/
 
@@ -95,11 +96,13 @@ flowchart TD
     PROD --> CORE[protocord]
     PROD --> AI["@protocord/ai"]
     PROD --> SETTINGS["@protocord/settings"]
-    PROD --> MODEL["@protocord/model-config"]
+    PROD --> MODEL["@mia-cx/protocord-model-settings"]
 
     AI --> CORE
     MODEL --> SETTINGS
 ```
+
+`@mia-cx/protocord-model-settings` is an independent consumer of the Protocord settings contract. It is not part of the first-party `@protocord/*` package family.
 
 Rules for deep, extractable packages:
 
@@ -110,7 +113,7 @@ Rules for deep, extractable packages:
 - Workspace dependencies use `workspace:*`.
 - Packages own their schemas and migrations where they persist data; the Prod app invokes package migrations in a fixed startup order.
 - Third-party boundaries remain behind package adapters.
-- Integration glue belongs in `apps/prod` unless one package is intentionally a consumer of another, as with `@protocord/model-config` consuming `@protocord/settings`.
+- Integration glue belongs in `apps/prod` unless one package is intentionally a consumer of another, as with `@mia-cx/protocord-model-settings` consuming `@protocord/settings`.
 - Keep Protocord focused on composable Discord action and interaction contracts; do not turn it into a shared-utils package or move Prod domain behavior into it.
 - CI runs a package packing smoke test so each reusable package can eventually be extracted without source rewrites.
 
@@ -997,9 +1000,9 @@ Each label has a stable ID, display name, normalized unique name, AI-facing desc
 
 ### Model
 
-The Model category is supplied by `packages/protocord-model-config`; it is not implemented directly in `apps/prod`.
+The Model category is supplied by `packages/protocord-model-settings`; it is not implemented directly in `apps/prod`.
 
-`@protocord/model-config` deliberately depends on `@protocord/settings` and exports a ready-to-register category structured around AI providers, models, and BYOK credentials:
+`@mia-cx/protocord-model-settings` deliberately depends on `@protocord/settings` and exports a ready-to-register category structured around AI providers, models, and BYOK credentials:
 
 - Fixed provider: `openrouter`
 - Select or enter triage model
@@ -1011,12 +1014,12 @@ The Model category is supplied by `packages/protocord-model-config`; it is not i
 
 All component and modal routes recheck authorization immediately before mutation.
 
-## 13. `@protocord/model-config` and BYOK security
+## 13. `@mia-cx/protocord-model-settings` and BYOK security
 
-`packages/protocord-model-config` owns both secure model configuration storage and its `@protocord/settings` category. This dependency is intentional:
+`packages/protocord-model-settings` owns both secure model configuration storage and its `@protocord/settings` category. This dependency is intentional:
 
 ```text
-@protocord/model-config -> @protocord/settings
+@mia-cx/protocord-model-settings -> @protocord/settings
 ```
 
 The package owns:
@@ -1061,7 +1064,7 @@ Use checked-in Drizzle migrations applied automatically at startup.
 Migration ownership follows package ownership:
 
 - `@protocord/permissions` owns the permission-rule and permission-rule-event schema and migrations.
-- `@protocord/model-config` owns the model configuration and encrypted-credential schema and migrations.
+- `@mia-cx/protocord-model-settings` owns the model configuration and encrypted-credential schema and migrations.
 - `apps/prod` owns ticket, label, assignee, suggestion, guild setup, and ticket-audit schema and migrations.
 - The Prod startup migrator invokes package migrations in a fixed versioned order before app migrations.
 - Package persistence tests run against isolated in-memory SQLite databases.
@@ -1077,7 +1080,7 @@ Stores hub ID, information-message ID, assistant identity, tone, and initializat
 
 ### `models`
 
-Owned by `@protocord/model-config`.
+Owned by `@mia-cx/protocord-model-settings`.
 
 ```text
 guild_id, purpose, provider, model_id,
@@ -1309,7 +1312,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Wrong encryption keys and malformed ciphertext fail safely.
 - Logs and UI never expose complete keys.
 - Migrations work on empty and initialized databases.
-- Package-owned authorization and model-config migrations compose with app-owned migrations in the documented order.
+- Package-owned permissions and model-settings migrations compose with app-owned migrations in the documented order.
 
 ### Ticket provisioning
 
@@ -1346,7 +1349,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Unauthorized users cannot view or mutate settings.
 - Permission changes are audited.
 - Hub, label, identity, and tone categories round-trip.
-- `@protocord/model-config` registers as a consumer-provided `@protocord/settings` category.
+- `@mia-cx/protocord-model-settings` registers as a consumer-provided `@protocord/settings` category.
 - Model, provider, catalog, and BYOK controls round-trip through that category.
 - Hub information posting is idempotent.
 
@@ -1388,12 +1391,12 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - The reusable `@protocord/permissions` extension supports channel and category context overrides, but Prod MVP creates, resolves, and administers guild-context rules only.
 - Users and roles share combined mentionable settings controls.
 - pnpm owns the workspace and lockfile; Turbo owns only task orchestration and caching.
-- Protocord packages remain private workspace packages during the MVP; publishing strategy and repository extraction are deferred.
+- Reusable Protocord and Mia CX packages remain private workspace packages during the MVP; publishing strategy and repository extraction are deferred.
 - `protocord` includes slash, message-context, user-context, and configurable-prefix text trigger providers, but no concrete actions or default commands.
 - Every MVP action implementation lives in `apps/prod`; a possible generic `/ping` action remains deferred.
 - Webhook triggers are an explicit future extension and are not part of the MVP.
 - `@protocord/ai` depends on `protocord` and adapts eligible actions into AI tools.
-- `@protocord/model-config` depends on `@protocord/settings` and supplies the complete AI provider/model/BYOK category.
+- `@mia-cx/protocord-model-settings` depends on `@protocord/settings` and supplies the complete AI provider/model/BYOK category.
 - Generic labels are editable per guild.
 - Command names are initial MVP names and remain isolated in trigger metadata for cheap later changes.
 - No reporter cancellation action is included; authorized staff close tickets.

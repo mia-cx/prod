@@ -11,7 +11,7 @@ describe("migration composition", () => {
   it("owns package and application manifests in a fixed order", () => {
     expect(migrationManifests.map(({ owner }) => owner)).toEqual([
       "permissions",
-      "model-config",
+      "model-settings",
       "prod",
     ]);
   });

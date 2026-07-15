@@ -1,4 +1,4 @@
-import { modelConfigMigrationManifest } from "@protocord/model-config";
+import { modelSettingsMigrationManifest } from "@mia-cx/protocord-model-settings";
 import { permissionsMigrationManifest } from "@protocord/permissions";
 
 import type { ProdDatabase } from "./database.js";
@@ -20,7 +20,7 @@ export const prodMigrationManifest: MigrationManifest = Object.freeze({
 
 export const migrationManifests: readonly MigrationManifest[] = Object.freeze([
   permissionsMigrationManifest,
-  modelConfigMigrationManifest,
+  modelSettingsMigrationManifest,
   prodMigrationManifest,
 ]);
 
