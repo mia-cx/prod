@@ -38,6 +38,8 @@ describe("SQLite permission rule store", () => {
         guild_id text NOT NULL,
         category_id text,
         channel_id text,
+        category_scope text GENERATED ALWAYS AS (coalesce(category_id, '')) VIRTUAL NOT NULL,
+        channel_scope text GENERATED ALWAYS AS (coalesce(channel_id, '')) VIRTUAL NOT NULL,
         subject_type text NOT NULL,
         subject_id text NOT NULL,
         object_type text NOT NULL,
@@ -50,8 +52,8 @@ describe("SQLite permission rule store", () => {
       );
       CREATE UNIQUE INDEX protocord_permission_rules_identity ON protocord_permission_rules (
         guild_id,
-        coalesce(category_id, ''),
-        coalesce(channel_id, ''),
+        category_scope,
+        channel_scope,
         subject_type,
         subject_id,
         object_type,

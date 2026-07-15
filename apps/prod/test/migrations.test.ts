@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { sql } from "drizzle-orm";
 
 import { openDatabase } from "../src/database.js";
+import { permissionRules } from "../src/schema.js";
 import {
   applyMigrations,
   migrationsFolder,
@@ -14,6 +16,40 @@ describe("application-owned migration history", () => {
 
     try {
       await applyMigrations(connection.database, undefined, onHistoryApplied);
+
+      const tables = connection.database
+        .all<{ name: string }>(
+          sql`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`,
+        )
+        .map((table) => table.name);
+      expect(tables).toEqual(
+        expect.arrayContaining([
+          "protocord_permission_rule_events",
+          "protocord_permission_rules",
+        ]),
+      );
+      const duplicateRule = {
+        id: "rule-1",
+        guildId: "guild-1",
+        categoryId: null,
+        channelId: null,
+        subjectType: "role",
+        subjectId: "role-1",
+        objectType: "ticket",
+        objectId: "*",
+        verb: "close",
+        permit: "allow",
+        createdByUserId: "admin-1",
+        createdAt: "2026-07-16T10:00:00.000Z",
+        updatedAt: "2026-07-16T10:00:00.000Z",
+      } as const;
+      await connection.database.insert(permissionRules).values(duplicateRule);
+      await expect(
+        connection.database.insert(permissionRules).values({
+          ...duplicateRule,
+          id: "rule-2",
+        }),
+      ).rejects.toThrow(/UNIQUE constraint failed/);
     } finally {
       connection.close();
     }

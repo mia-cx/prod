@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { getTableName } from "drizzle-orm";
 
-import { schemaContributors } from "../src/schema.js";
+import {
+  permissionRuleEvents,
+  permissionRules,
+  schemaContributors,
+} from "../src/schema.js";
 
 describe("Drizzle schema composition", () => {
   it("is selected explicitly by the deployable application", () => {
@@ -9,5 +14,12 @@ describe("Drizzle schema composition", () => {
       "@mia-cx/protocord-model-settings",
       "@prod/app",
     ]);
+  });
+
+  it("composes package-prefixed permission tables", () => {
+    expect(getTableName(permissionRules)).toBe("protocord_permission_rules");
+    expect(getTableName(permissionRuleEvents)).toBe(
+      "protocord_permission_rule_events",
+    );
   });
 });

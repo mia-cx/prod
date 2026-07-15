@@ -10,6 +10,12 @@ export const permissionRules = sqliteTable(
     guildId: text("guild_id").notNull(),
     categoryId: text("category_id"),
     channelId: text("channel_id"),
+    categoryScope: text("category_scope")
+      .generatedAlwaysAs(sql`coalesce(category_id, '')`, { mode: "virtual" })
+      .notNull(),
+    channelScope: text("channel_scope")
+      .generatedAlwaysAs(sql`coalesce(channel_id, '')`, { mode: "virtual" })
+      .notNull(),
     subjectType: text("subject_type", {
       enum: ["user", "role", "service", "everyone"],
     }).notNull(),
@@ -44,8 +50,8 @@ export const permissionRules = sqliteTable(
   (table) => [
     uniqueIndex("protocord_permission_rules_identity").on(
       table.guildId,
-      sql`coalesce(${table.categoryId}, '')`,
-      sql`coalesce(${table.channelId}, '')`,
+      table.categoryScope,
+      table.channelScope,
       table.subjectType,
       table.subjectId,
       table.objectType,

@@ -48,3 +48,7 @@ export {
   type DiscordGuildLike,
   type DiscordMemberLike,
 } from "./discord-adapters.js";
+
+export const permissionsBoundary = Object.freeze({
+  name: "@protocord/permissions" as const,
+});
