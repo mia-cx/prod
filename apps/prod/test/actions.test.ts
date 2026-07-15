@@ -4,6 +4,7 @@ import {
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
+  type Message,
 } from "discord.js";
 import type { Logger } from "pino";
 import type { DiscordInteractionHandleResult } from "protocord";
@@ -15,18 +16,22 @@ import {
 } from "../src/actions/runtime.js";
 import { createLogger } from "../src/logger.js";
 
-const pingInteraction = (): ChatInputCommandInteraction => {
+type PingInteractionKind = "message" | "slash" | "user";
+
+const pingInteraction = (
+  kind: PingInteractionKind,
+): ChatInputCommandInteraction => {
   const interaction: Record<string, unknown> = {
-    commandName: "ping",
+    commandName: kind === "slash" ? "ping" : "Ping Prod",
     channelId: "channel-1",
     guildId: "guild-1",
     user: { id: "user-1", username: "reporter", globalName: "Reporter" },
     deferred: false,
     replied: false,
     isAutocomplete: () => false,
-    isChatInputCommand: () => true,
-    isMessageContextMenuCommand: () => false,
-    isUserContextMenuCommand: () => false,
+    isChatInputCommand: () => kind === "slash",
+    isMessageContextMenuCommand: () => kind === "message",
+    isUserContextMenuCommand: () => kind === "user",
     deferReply: vi.fn().mockImplementation(async () => {
       interaction.deferred = true;
     }),
@@ -39,9 +44,11 @@ const pingInteraction = (): ChatInputCommandInteraction => {
 };
 
 describe("Prod action runtime", () => {
-  it("registers only /ping and replies with pong", async () => {
-    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }));
-    const interaction = pingInteraction();
+  it("registers every Discord ping surface from one action", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      "!",
+    );
 
     expect(runtime.actionCount).toBe(1);
     expect(runtime.commands).toEqual([
@@ -50,6 +57,14 @@ describe("Prod action runtime", () => {
         name: "ping",
         description: "Check whether Prod is responsive",
         options: [],
+      },
+      {
+        type: ApplicationCommandType.Message,
+        name: "Ping Prod",
+      },
+      {
+        type: ApplicationCommandType.User,
+        name: "Ping Prod",
       },
     ]);
 
@@ -65,15 +80,50 @@ describe("Prod action runtime", () => {
     await runtime.refreshCommands(client, "guild-1");
     expect(globalSet).toHaveBeenCalledWith([]);
     expect(guildSet).toHaveBeenCalledWith(runtime.commands);
+  });
 
-    await runtime.handleInteraction(interaction as unknown as Interaction);
+  it.each(["slash", "message", "user"] as const)(
+    "replies publicly with pong through the %s surface",
+    async (kind) => {
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        "!",
+      );
+      const interaction = pingInteraction(kind);
 
-    expect(interaction.deferReply).toHaveBeenCalledWith({
-      flags: MessageFlags.Ephemeral,
-    });
-    expect(interaction.deleteReply).toHaveBeenCalledOnce();
-    expect(interaction.followUp).toHaveBeenCalledWith({ content: "pong!" });
-    expect(interaction.editReply).not.toHaveBeenCalled();
+      await runtime.handleInteraction(interaction as unknown as Interaction);
+
+      expect(interaction.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
+      expect(interaction.deleteReply).toHaveBeenCalledOnce();
+      expect(interaction.followUp).toHaveBeenCalledWith({ content: "pong!" });
+      expect(interaction.editReply).not.toHaveBeenCalled();
+    },
+  );
+
+  it("uses the configured prefix and replies with pong through text", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      ";",
+    );
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const message = {
+      content: ";ping",
+      author: {
+        id: "user-1",
+        username: "reporter",
+        globalName: "Reporter",
+        bot: false,
+      },
+      webhookId: null,
+      channelId: "channel-1",
+      guildId: "guild-1",
+      reply,
+    } as unknown as Message;
+
+    await expect(runtime.handleMessage(message)).resolves.toBe(true);
+    expect(reply).toHaveBeenCalledWith({ content: "pong!" });
   });
 
   it.each([
@@ -111,7 +161,7 @@ describe("Prod action runtime", () => {
             trigger: "fixture-trigger",
             err: lifecycleError,
           },
-          "Discord action lifecycle failed",
+          "action lifecycle failed",
         );
       }
       if (presentationFailed) {

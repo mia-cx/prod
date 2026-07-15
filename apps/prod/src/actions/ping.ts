@@ -1,4 +1,10 @@
-import { slashCommand, type Action } from "protocord";
+import {
+  messageContextMenu,
+  slashCommand,
+  textCommandTrigger,
+  userContextMenu,
+  type Action,
+} from "protocord";
 
 import type { ProdActionContext } from "./runtime.js";
 
@@ -25,6 +31,21 @@ export const pingAction: Action<PingInput, string, ProdActionContext> = {
       name: "ping",
       description: "Check whether Prod is responsive",
       visibility: "public",
+      parse: () => ({}),
+    }),
+    messageContextMenu({
+      name: "Ping Prod",
+      visibility: "public",
+      parse: () => ({}),
+    }),
+    userContextMenu({
+      name: "Ping Prod",
+      visibility: "public",
+      parse: () => ({}),
+    }),
+    textCommandTrigger({
+      name: "ping",
+      description: "Check whether Prod is responsive",
       parse: () => ({}),
     }),
   ],

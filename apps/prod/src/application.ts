@@ -49,7 +49,7 @@ export const startProd = async (
   signal.throwIfAborted();
 
   const logger = dependencies.logger;
-  const actions = createProdActionRuntime(logger);
+  const actions = createProdActionRuntime(logger, config.textCommandPrefix);
   const gateway =
     dependencies.gateway ??
     createDiscordGateway({

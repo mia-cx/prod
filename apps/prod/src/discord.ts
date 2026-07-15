@@ -3,6 +3,7 @@ import {
   Events,
   GatewayIntentBits,
   type Interaction,
+  type Message,
 } from "discord.js";
 
 export type DiscordIdentity = Readonly<{
@@ -21,6 +22,7 @@ export type DiscordActionSurface = Readonly<{
     developmentGuildId: string,
   ): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
+  handleMessage(message: Message): Promise<boolean>;
   handleError(error: unknown): void;
 }>;
 
@@ -37,14 +39,27 @@ export type DiscordGatewayOptions =
 export const createDiscordGateway = (
   options: DiscordGatewayOptions = {},
 ): DiscordGateway => {
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const actions = options.actions;
+  const client = new Client({
+    intents: actions
+      ? [
+          GatewayIntentBits.Guilds,
+          GatewayIntentBits.GuildMessages,
+          GatewayIntentBits.MessageContent,
+        ]
+      : [GatewayIntentBits.Guilds],
+  });
   let closed = false;
 
-  const actions = options.actions;
   if (actions) {
     client.on(Events.InteractionCreate, (interaction) => {
       void actions
         .handleInteraction(interaction)
+        .catch((error: unknown) => actions.handleError(error));
+    });
+    client.on(Events.MessageCreate, (message) => {
+      void actions
+        .handleMessage(message)
         .catch((error: unknown) => actions.handleError(error));
     });
   }

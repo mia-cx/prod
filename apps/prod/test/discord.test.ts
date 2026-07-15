@@ -4,6 +4,8 @@ const discordMock = vi.hoisted(() => ({
   autoReady: true,
   readyHandler: undefined as undefined | ((client: unknown) => void),
   interactionHandler: undefined as undefined | ((interaction: unknown) => void),
+  messageHandler: undefined as undefined | ((message: unknown) => void),
+  intents: [] as number[],
   login: vi.fn(async (token: string) => token),
   destroy: vi.fn(),
 }));
@@ -12,18 +14,27 @@ vi.mock("discord.js", () => ({
   Events: {
     ClientReady: "clientReady",
     InteractionCreate: "interactionCreate",
+    MessageCreate: "messageCreate",
   },
-  GatewayIntentBits: { Guilds: 1 },
+  GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4 },
   Client: class {
     user = { id: "345678901234567890", tag: "Prod#0001" };
+
+    constructor(options: { intents: number[] }) {
+      discordMock.intents = options.intents;
+    }
 
     once(_event: string, handler: (client: unknown) => void): this {
       discordMock.readyHandler = handler;
       return this;
     }
 
-    on(_event: string, handler: (interaction: unknown) => void): this {
-      discordMock.interactionHandler = handler;
+    on(event: string, handler: (event: unknown) => void): this {
+      if (event === "interactionCreate") {
+        discordMock.interactionHandler = handler;
+      } else if (event === "messageCreate") {
+        discordMock.messageHandler = handler;
+      }
       return this;
     }
 
@@ -55,6 +66,8 @@ describe("createDiscordGateway", () => {
     discordMock.autoReady = true;
     discordMock.readyHandler = undefined;
     discordMock.interactionHandler = undefined;
+    discordMock.messageHandler = undefined;
+    discordMock.intents = [];
     discordMock.login.mockClear();
     discordMock.destroy.mockClear();
   });
@@ -106,6 +119,7 @@ describe("createDiscordGateway", () => {
       actions: {
         refreshCommands,
         handleInteraction: vi.fn(async () => undefined),
+        handleMessage: vi.fn(async () => false),
         handleError: vi.fn(),
       },
       developmentGuildId: "234567890123456789",
@@ -129,9 +143,15 @@ describe("createDiscordGateway", () => {
   it("refreshes development-guild commands and dispatches interactions", async () => {
     const refreshCommands = vi.fn(async () => undefined);
     const handleInteraction = vi.fn(async () => undefined);
+    const handleMessage = vi.fn(async () => true);
     const handleError = vi.fn();
     const gateway = createDiscordGateway({
-      actions: { refreshCommands, handleInteraction, handleError },
+      actions: {
+        refreshCommands,
+        handleInteraction,
+        handleMessage,
+        handleError,
+      },
       developmentGuildId: "234567890123456789",
     });
 
@@ -146,6 +166,12 @@ describe("createDiscordGateway", () => {
     await vi.waitFor(() =>
       expect(handleInteraction).toHaveBeenCalledWith(interaction),
     );
+
+    const message = { id: "message-1", content: "!ping" };
+    discordMock.messageHandler?.(message);
+    await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledWith(message));
+
+    expect(discordMock.intents).toEqual([1, 2, 4]);
     expect(handleError).not.toHaveBeenCalled();
   });
 });
