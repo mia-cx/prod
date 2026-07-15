@@ -23,7 +23,44 @@
     "dev": {
       "dependsOn": ["^build"],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "DISCORD_TOKEN",
+        "DISCORD_CLIENT_ID",
+        "DISCORD_DEV_GUILD_ID",
+        "TEXT_COMMAND_PREFIX",
+        "DATABASE_URL",
+        "LOG_LEVEL",
+        "OPENROUTER_API_KEY",
+        "API_KEY_ENCRYPTION_KEY",
+        "DEFAULT_TRIAGE_MODEL",
+        "MODEL_CALL_LIMIT",
+        "MODEL_CALL_LIMIT_PER_GUILD",
+        "MODEL_CALL_WINDOW_SECONDS",
+        "MODEL_TIMEOUT_MS",
+        "TRIAGE_CONTEXT_MESSAGE_LIMIT"
+      ]
+    },
+    "start": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": [
+        "DISCORD_TOKEN",
+        "DISCORD_CLIENT_ID",
+        "DISCORD_DEV_GUILD_ID",
+        "TEXT_COMMAND_PREFIX",
+        "DATABASE_URL",
+        "LOG_LEVEL",
+        "OPENROUTER_API_KEY",
+        "API_KEY_ENCRYPTION_KEY",
+        "DEFAULT_TRIAGE_MODEL",
+        "MODEL_CALL_LIMIT",
+        "MODEL_CALL_LIMIT_PER_GUILD",
+        "MODEL_CALL_WINDOW_SECONDS",
+        "MODEL_TIMEOUT_MS",
+        "TRIAGE_CONTEXT_MESSAGE_LIMIT"
+      ]
     },
     "clean": {
       "cache": false
@@ -32,15 +69,62 @@
       "cache": false
     },
     "db:migrate": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": [
+        "DISCORD_TOKEN",
+        "DISCORD_CLIENT_ID",
+        "DISCORD_DEV_GUILD_ID",
+        "TEXT_COMMAND_PREFIX",
+        "DATABASE_URL",
+        "LOG_LEVEL",
+        "OPENROUTER_API_KEY",
+        "API_KEY_ENCRYPTION_KEY",
+        "DEFAULT_TRIAGE_MODEL",
+        "MODEL_CALL_LIMIT",
+        "MODEL_CALL_LIMIT_PER_GUILD",
+        "MODEL_CALL_WINDOW_SECONDS",
+        "MODEL_TIMEOUT_MS",
+        "TRIAGE_CONTEXT_MESSAGE_LIMIT"
+      ]
     },
     "commands:register": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": [
+        "DISCORD_TOKEN",
+        "DISCORD_CLIENT_ID",
+        "DISCORD_DEV_GUILD_ID",
+        "TEXT_COMMAND_PREFIX",
+        "DATABASE_URL",
+        "LOG_LEVEL",
+        "OPENROUTER_API_KEY",
+        "API_KEY_ENCRYPTION_KEY",
+        "DEFAULT_TRIAGE_MODEL",
+        "MODEL_CALL_LIMIT",
+        "MODEL_CALL_LIMIT_PER_GUILD",
+        "MODEL_CALL_WINDOW_SECONDS",
+        "MODEL_TIMEOUT_MS",
+        "TRIAGE_CONTEXT_MESSAGE_LIMIT"
+      ]
     },
     "deploy": {
       "dependsOn": ["build"],
-      "cache": false
+      "cache": false,
+      "passThroughEnv": [
+        "DISCORD_TOKEN",
+        "DISCORD_CLIENT_ID",
+        "DISCORD_DEV_GUILD_ID",
+        "TEXT_COMMAND_PREFIX",
+        "DATABASE_URL",
+        "LOG_LEVEL",
+        "OPENROUTER_API_KEY",
+        "API_KEY_ENCRYPTION_KEY",
+        "DEFAULT_TRIAGE_MODEL",
+        "MODEL_CALL_LIMIT",
+        "MODEL_CALL_LIMIT_PER_GUILD",
+        "MODEL_CALL_WINDOW_SECONDS",
+        "MODEL_TIMEOUT_MS",
+        "TRIAGE_CONTEXT_MESSAGE_LIMIT"
+      ]
     }
   }
 }
-
