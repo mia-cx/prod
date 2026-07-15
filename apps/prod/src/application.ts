@@ -13,6 +13,10 @@ export type RunningProd = Readonly<{
   stop: (reason?: string) => Promise<void>;
 }>;
 
+export type StartProdOptions = Readonly<{
+  signal?: AbortSignal;
+}>;
+
 type ApplicationDependencies = Readonly<{
   logger: Logger;
   gateway?: DiscordGateway;
@@ -20,29 +24,46 @@ type ApplicationDependencies = Readonly<{
   migrate?: (
     database: ProdDatabase,
     onHistoryApplied: (owner: string) => void,
+    signal: AbortSignal,
   ) => Promise<void>;
 }>;
 
 const defaultMigrate: NonNullable<ApplicationDependencies["migrate"]> = (
   database,
   onHistoryApplied,
-) => applyMigrations(database, undefined, onHistoryApplied);
+  signal,
+) => {
+  signal.throwIfAborted();
+  return applyMigrations(database, undefined, onHistoryApplied).then(() => {
+    signal.throwIfAborted();
+  });
+};
 
 export const startProd = async (
   config: ProdConfig,
   dependencies: ApplicationDependencies,
+  options: StartProdOptions = {},
 ): Promise<RunningProd> => {
+  const signal = options.signal ?? new AbortController().signal;
+  signal.throwIfAborted();
+
   const logger = dependencies.logger;
   const gateway = dependencies.gateway ?? createDiscordGateway();
   const connection = (dependencies.openDatabase ?? openDatabase)(config.databaseUrl);
   const migrate = dependencies.migrate ?? defaultMigrate;
 
   try {
-    await migrate(connection.database, (owner) => {
-      logger.debug({ migrationOwner: owner }, "migration history applied");
-    });
+    await migrate(
+      connection.database,
+      (owner) => {
+        logger.debug({ migrationOwner: owner }, "migration history applied");
+      },
+      signal,
+    );
+    signal.throwIfAborted();
 
-    const identity = await gateway.connect(config.discordToken);
+    const identity = await gateway.connect(config.discordToken, signal);
+    signal.throwIfAborted();
     logger.info(
       {
         discordUserId: identity.userId,

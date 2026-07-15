@@ -6,7 +6,7 @@ export type DiscordIdentity = Readonly<{
 }>;
 
 export interface DiscordGateway {
-  connect(token: string): Promise<DiscordIdentity>;
+  connect(token: string, signal: AbortSignal): Promise<DiscordIdentity>;
   close(): Promise<void>;
 }
 
@@ -14,34 +14,47 @@ export const createDiscordGateway = (): DiscordGateway => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   let closed = false;
 
+  const close = async (): Promise<void> => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    client.destroy();
+  };
+
   return {
-    connect: (token) =>
+    connect: (token, signal) =>
       new Promise((resolve, reject) => {
+        signal.throwIfAborted();
         if (closed) {
           reject(new Error("Discord gateway is closed"));
           return;
         }
 
+        const removeListeners = () => {
+          client.off(Events.ClientReady, handleReady);
+          signal.removeEventListener("abort", handleAbort);
+        };
         const handleReady = (readyClient: Client<true>) => {
+          removeListeners();
           resolve({
             userId: readyClient.user.id,
             tag: readyClient.user.tag,
           });
         };
+        const handleAbort = () => {
+          removeListeners();
+          void close();
+          reject(signal.reason);
+        };
 
         client.once(Events.ClientReady, handleReady);
+        signal.addEventListener("abort", handleAbort, { once: true });
         void client.login(token).catch((error: unknown) => {
-          client.off(Events.ClientReady, handleReady);
+          removeListeners();
           reject(error instanceof Error ? error : new Error(String(error)));
         });
       }),
-    close: async () => {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      client.destroy();
-    },
+    close,
   };
 };
-

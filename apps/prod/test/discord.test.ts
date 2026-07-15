@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const discordMock = vi.hoisted(() => ({
+  autoReady: true,
   readyHandler: undefined as
     | undefined
     | ((client: { user: { id: string; tag: string } }) => void),
@@ -27,11 +28,13 @@ vi.mock("discord.js", () => ({
 
     login(token: string): Promise<string> {
       const result = discordMock.login(token);
-      queueMicrotask(() => {
-        discordMock.readyHandler?.({
-          user: { id: "345678901234567890", tag: "Prod#0001" },
+      if (discordMock.autoReady) {
+        queueMicrotask(() => {
+          discordMock.readyHandler?.({
+            user: { id: "345678901234567890", tag: "Prod#0001" },
+          });
         });
-      });
+      }
       return result;
     }
 
@@ -45,6 +48,7 @@ import { createDiscordGateway } from "../src/discord.js";
 
 describe("createDiscordGateway", () => {
   beforeEach(() => {
+    discordMock.autoReady = true;
     discordMock.readyHandler = undefined;
     discordMock.login.mockClear();
     discordMock.destroy.mockClear();
@@ -52,8 +56,9 @@ describe("createDiscordGateway", () => {
 
   it("resolves the ready identity and destroys the client once", async () => {
     const gateway = createDiscordGateway();
+    const signal = new AbortController().signal;
 
-    await expect(gateway.connect("development-token")).resolves.toEqual({
+    await expect(gateway.connect("development-token", signal)).resolves.toEqual({
       userId: "345678901234567890",
       tag: "Prod#0001",
     });
@@ -63,8 +68,22 @@ describe("createDiscordGateway", () => {
     await gateway.close();
 
     expect(discordMock.destroy).toHaveBeenCalledTimes(1);
-    await expect(gateway.connect("development-token")).rejects.toThrow(
+    await expect(gateway.connect("development-token", signal)).rejects.toThrow(
       "Discord gateway is closed",
     );
+  });
+
+  it("aborts a pending login and destroys the client once", async () => {
+    discordMock.autoReady = false;
+    const gateway = createDiscordGateway();
+    const controller = new AbortController();
+    const reason = new DOMException("shutdown", "AbortError");
+
+    const connection = gateway.connect("development-token", controller.signal);
+    controller.abort(reason);
+
+    await expect(connection).rejects.toBe(reason);
+    await gateway.close();
+    expect(discordMock.destroy).toHaveBeenCalledTimes(1);
   });
 });

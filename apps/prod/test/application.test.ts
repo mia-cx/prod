@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { startProd } from "../src/application.js";
 import type { ProdConfig } from "../src/config.js";
-import { openDatabase } from "../src/database.js";
+import { openDatabase, type ProdDatabase } from "../src/database.js";
 import type { DiscordGateway } from "../src/discord.js";
 import { createLogger } from "../src/logger.js";
 
@@ -54,7 +54,8 @@ describe("startProd", () => {
       logger,
       gateway,
       openDatabase: () => ({ ...connection, close: closeDatabase }),
-      migrate: async (_database, onHistoryApplied) => {
+      migrate: async (_database, onHistoryApplied, signal) => {
+        expect(signal.aborted).toBe(false);
         sequence.push("migrate");
         onHistoryApplied("fixture");
       },
@@ -94,5 +95,49 @@ describe("startProd", () => {
 
     expect(gateway.close).toHaveBeenCalledTimes(1);
     expect(closeDatabase).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels startup and closes partial resources exactly once", async () => {
+    const controller = new AbortController();
+    const reason = new DOMException("shutdown", "AbortError");
+    const gateway: DiscordGateway = {
+      connect: vi.fn(async () => ({
+        userId: "345678901234567890",
+        tag: "Prod#0001",
+      })),
+      close: vi.fn(async () => undefined),
+    };
+    const connection = openDatabase(":memory:");
+    const closeDatabase = vi.fn(connection.close);
+    const { logger, output } = captureLogger();
+    const migrate = vi.fn(
+      async (
+        _database: ProdDatabase,
+        _onHistoryApplied: (owner: string) => void,
+        signal: AbortSignal,
+      ) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+
+    const startup = startProd(
+      config,
+      {
+        logger,
+        gateway,
+        openDatabase: () => ({ ...connection, close: closeDatabase }),
+        migrate,
+      },
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(migrate).toHaveBeenCalledOnce());
+    controller.abort(reason);
+
+    await expect(startup).rejects.toBe(reason);
+    expect(gateway.connect).not.toHaveBeenCalled();
+    expect(gateway.close).toHaveBeenCalledOnce();
+    expect(closeDatabase).toHaveBeenCalledOnce();
+    expect(output.join("")).not.toContain("Prod ready");
   });
 });
