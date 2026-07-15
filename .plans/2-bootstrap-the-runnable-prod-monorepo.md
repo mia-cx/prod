@@ -15,7 +15,7 @@ Create the Node 24 pnpm/Turborepo foundation for Prod, including the application
 ## TODOs
 
 - [x] Scaffold the pnpm/Turborepo workspace and explicit compiled package boundaries.
-- [ ] Implement Effect-based environment validation, redacted structured logging, and fixed-order migration composition.
+- [x] Implement Effect-based environment validation, redacted structured logging, and fixed-order migration composition.
 - [ ] Implement the injectable Discord application lifecycle with readiness and graceful-shutdown tests.
 - [ ] Add independent package packing, boundary enforcement, and baseline CI.
 - [ ] Run all automated checks and document the remaining real-Discord HITL gate.
@@ -26,3 +26,4 @@ Create the Node 24 pnpm/Turborepo foundation for Prod, including the application
 - Issue #2 is open, marked `Execution: AFK`, has no blockers, and requires real-environment human validation before closure.
 - Node 24 is the planned runtime. Dependency versions will be locked by `pnpm-lock.yaml`.
 - Workspace validation after scaffolding: `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test` all pass across eight projects; test coverage outputs are cacheable by Turbo.
+- Configuration/persistence validation: app lint and typecheck pass; 7 app tests cover defaults, invalid-key reporting without secret echo, structured redaction, and fixed `authorization` → `model-config` → `prod` migration order. The compiled migration CLI also succeeds against in-memory SQLite.

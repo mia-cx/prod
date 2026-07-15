@@ -5,3 +5,7 @@ export const modelConfigBoundary = Object.freeze({
   settingsRuntime: discordSettingsBoundary.name,
 });
 
+export const modelConfigMigrationManifest = Object.freeze({
+  owner: "model-config" as const,
+  migrations: Object.freeze([]),
+});
