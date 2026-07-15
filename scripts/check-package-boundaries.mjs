@@ -33,6 +33,14 @@ const schemaProvidingPackages = new Set([
 
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
 
+const turboConfig = await readJson(join(root, "turbo.json"));
+for (const taskName of ["start", "db:migrate"]) {
+  const dependencies = turboConfig.tasks?.[taskName]?.dependsOn;
+  if (!Array.isArray(dependencies) || !dependencies.includes("build")) {
+    errors.push(`${taskName} must depend on its package build before running dist output`);
+  }
+}
+
 const listFiles = async (directory) => {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(

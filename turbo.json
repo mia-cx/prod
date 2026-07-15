@@ -43,7 +43,7 @@
       ]
     },
     "start": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["build"],
       "cache": false,
       "persistent": true,
       "passThroughEnv": [
@@ -71,6 +71,7 @@
       "cache": false
     },
     "db:migrate": {
+      "dependsOn": ["build"],
       "cache": false,
       "passThroughEnv": [
         "DISCORD_TOKEN",
