@@ -35,7 +35,7 @@ describe("the app dev process", () => {
     const configuredCommand = packageJson.default.scripts.dev as string;
     expect(configuredCommand).toBe("node scripts/dev-watch.mjs src/main.ts");
     let output = "";
-    let exited = false;
+    let closed = false;
     const child = spawn(
       process.execPath,
       ["scripts/dev-watch.mjs", "test/fixtures/graceful-process.ts"],
@@ -51,28 +51,28 @@ describe("the app dev process", () => {
     child.stderr.on("data", (chunk: Buffer) => {
       output += chunk.toString();
     });
-    const exit = new Promise<{
+    const close = new Promise<{
       code: number | null;
       signal: NodeJS.Signals | null;
-    }>((resolveExit) => {
-      child.once("exit", (code, signal) => {
-        exited = true;
-        resolveExit({ code, signal });
+    }>((resolveClose) => {
+      child.once("close", (code, signal) => {
+        closed = true;
+        resolveClose({ code, signal });
       });
     });
 
     try {
       await waitForOutput(() => output, "fixture ready");
       process.kill(-child.pid!, "SIGINT");
-      const result = await exit;
+      const result = await close;
 
       expect(result).toEqual({ code: 0, signal: null });
       expect(output).toContain("fixture stopping");
       expect(output).toContain("fixture stopped");
     } finally {
-      if (!exited) {
+      if (!closed) {
         process.kill(-child.pid!, "SIGKILL");
-        await exit;
+        await close;
       }
     }
   }, 10_000);
