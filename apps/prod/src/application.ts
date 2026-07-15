@@ -19,14 +19,14 @@ type ApplicationDependencies = Readonly<{
   openDatabase?: (databaseUrl: string) => DatabaseConnection;
   migrate?: (
     database: ProdDatabase,
-    onManifestApplied: (owner: string) => void,
+    onHistoryApplied: (owner: string) => void,
   ) => Promise<void>;
 }>;
 
 const defaultMigrate: NonNullable<ApplicationDependencies["migrate"]> = (
   database,
-  onManifestApplied,
-) => applyMigrations(database, undefined, onManifestApplied);
+  onHistoryApplied,
+) => applyMigrations(database, undefined, onHistoryApplied);
 
 export const startProd = async (
   config: ProdConfig,
@@ -39,7 +39,7 @@ export const startProd = async (
 
   try {
     await migrate(connection.database, (owner) => {
-      logger.debug({ migrationOwner: owner }, "migration manifest applied");
+      logger.debug({ migrationOwner: owner }, "migration history applied");
     });
 
     const identity = await gateway.connect(config.discordToken);
@@ -81,4 +81,3 @@ export const startProd = async (
     },
   });
 };
-

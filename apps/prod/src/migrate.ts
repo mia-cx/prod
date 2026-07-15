@@ -9,10 +9,9 @@ const connection = openDatabase(config.databaseUrl);
 
 try {
   await applyMigrations(connection.database, undefined, (owner) => {
-    logger.debug({ migrationOwner: owner }, "migration manifest applied");
+    logger.debug({ migrationOwner: owner }, "migration history applied");
   });
   logger.info("database migrations applied");
 } finally {
   connection.close();
 }
-

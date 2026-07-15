@@ -111,7 +111,8 @@ Rules for deep, extractable packages:
 - Every package has its own `package.json`, TypeScript configuration, explicit `exports`, build, typecheck, lint, and boundary-test scripts.
 - Use compiled `dist` packages rather than exporting raw TypeScript.
 - Workspace dependencies use `workspace:*`.
-- Packages own their schemas and migrations where they persist data; the Prod app invokes package migrations in a fixed startup order.
+- Persistence-capable plugins own Drizzle schema declarations and expose them through a public `./schema` entrypoint.
+- The deployable app explicitly composes installed plugin schemas with its own schema and owns the single generated migration history. Plugins never generate, ship, or apply a parallel migration stream.
 - Third-party boundaries remain behind package adapters.
 - Integration glue belongs in `apps/prod` unless one package is intentionally a consumer of another, as with `@mia-cx/protocord-model-settings` consuming `@protocord/settings`.
 - Keep Protocord focused on composable Discord action and interaction contracts; do not turn it into a shared-utils package or move Prod domain behavior into it.
@@ -622,6 +623,20 @@ Discord role membership is evaluated from the invoking member's current roles. P
 
 The name combines Proteus and Discord. Protocord is designed as a slot-in extension layer over discord.js: consumers compose a core registry with independently installable trigger providers and capability packages. Extensions depend on public Protocord contracts, never on Prod application code.
 
+### Plugin composition contract
+
+A Protocord plugin can contribute runtime behavior such as actions, trigger providers, settings categories, or adapters. A persistence-capable plugin may additionally expose top-level named Drizzle tables from a public `./schema` package entrypoint. Persistence is optional; Protocord does not require every plugin to depend on Drizzle.
+
+The primary application remains the composition root:
+
+1. Install and register the plugin's runtime entrypoint.
+2. Re-export the plugin's `./schema` entrypoint from the application's Drizzle schema module.
+3. Run the application's `db:generate` task to diff the complete selected schema.
+4. Check the resulting SQL and snapshot into the application's one ordered migration history.
+5. Apply that application-owned history during startup before connecting to Discord.
+
+Plugin packages do not auto-discover a database, mutate schema during registration, or ship an independently applied migration sequence. Explicit schema selection keeps deployments reproducible, exposes table-name collisions during generation, and lets each application decide which plugin version and schema changes it is ready to deploy. MVP schema providers target the application's SQLite dialect and use globally unique, package-prefixed table names.
+
 It ships no concrete actions or default commands in the MVP. All ticketing, staff, settings, and AI-facing action implementations are application code in `apps/prod`. A possible generic default such as `/ping` is deferred until there is a deliberate default-action design.
 
 It owns:
@@ -1031,7 +1046,7 @@ The package owns:
 - Deployment defaults and guild overrides
 - Encrypted BYOK storage
 - Key hints, clearing, fallback, and error semantics
-- Model configuration schema and migrations
+- Model configuration schema declarations
 - A settings-category factory that binds the secure store to `@protocord/settings`
 
 The package does not own:
@@ -1059,16 +1074,18 @@ User and thread text must be wrapped as untrusted prompt content and escaped fro
 
 ## 14. Persistence model
 
-Use checked-in Drizzle migrations applied automatically at startup.
+Use checked-in Drizzle migrations generated and applied by the deployable application.
 
-Migration ownership follows package ownership:
+Schema and migration ownership are deliberately separate:
 
-- `@protocord/permissions` owns the permission-rule and permission-rule-event schema and migrations.
-- `@mia-cx/protocord-model-settings` owns the model configuration and encrypted-credential schema and migrations.
-- `apps/prod` owns ticket, label, assignee, suggestion, guild setup, and ticket-audit schema and migrations.
-- The Prod startup migrator invokes package migrations in a fixed versioned order before app migrations.
+- `@protocord/permissions` owns and exports the permission-rule and permission-rule-event Drizzle declarations.
+- `@mia-cx/protocord-model-settings` owns and exports the model configuration and encrypted-credential Drizzle declarations.
+- `apps/prod` owns ticket, label, assignee, suggestion, guild setup, and ticket-audit declarations.
+- `apps/prod/src/schema.ts` explicitly re-exports the installed plugin declarations selected for this deployment.
+- `apps/prod/drizzle.config.ts` points Drizzle Kit at that aggregate schema and writes the only migration history to `apps/prod/drizzle`.
+- Prod applies that application-owned history before connecting to Discord.
 - Package persistence tests run against isolated in-memory SQLite databases.
-- Package migrations use package-specific table names and cannot silently modify consumer-owned tables.
+- Plugin tables use globally unique package-prefixed names and cannot silently modify application- or sibling-owned tables.
 
 ### `guild_settings`
 
@@ -1312,7 +1329,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Wrong encryption keys and malformed ciphertext fail safely.
 - Logs and UI never expose complete keys.
 - Migrations work on empty and initialized databases.
-- Package-owned permissions and model-settings migrations compose with app-owned migrations in the documented order.
+- Package-owned permissions and model-settings schemas compose into the application-owned migration history.
 
 ### Ticket provisioning
 
@@ -1359,6 +1376,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Side-effectful tasks such as migrations, command registration, and deployment never replay from cache.
 - No package imports from `apps/prod` or another package's internal source paths.
 - Workspace dependencies use `workspace:*` and every package exposes only declared compiled entrypoints.
+- Persistence-capable plugins expose compiled `./schema` entrypoints, and Prod's schema composition names every installed schema provider explicitly.
 - Every reusable package builds, tests, and packs independently.
 
 ### End-to-end acceptance flow
@@ -1397,6 +1415,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Webhook triggers are an explicit future extension and are not part of the MVP.
 - `@protocord/ai` depends on `protocord` and adapts eligible actions into AI tools.
 - `@mia-cx/protocord-model-settings` depends on `@protocord/settings` and supplies the complete AI provider/model/BYOK category.
+- Third-party Protocord plugins may bring optional Drizzle schemas through `./schema`; the consuming application always owns generation and migration rollout.
 - Generic labels are editable per guild.
 - Command names are initial MVP names and remain isolated in trigger metadata for cheap later changes.
 - No reporter cancellation action is included; authorized staff close tickets.

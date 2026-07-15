@@ -26,6 +26,11 @@ const allowedInternalDependencies = new Map([
   ["protocord", new Set()],
 ]);
 
+const schemaProvidingPackages = new Set([
+  "@mia-cx/protocord-model-settings",
+  "@protocord/permissions",
+]);
+
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
 
 const listFiles = async (directory) => {
@@ -81,6 +86,18 @@ for (const { directory, manifest } of packageManifests) {
   }
   if (!Array.isArray(manifest.files) || !manifest.files.includes("dist")) {
     errors.push(`${label} must pack only its dist output`);
+  }
+
+  if (schemaProvidingPackages.has(manifest.name)) {
+    const schemaExport = manifest.exports?.["./schema"];
+    if (
+      typeof schemaExport?.import !== "string" ||
+      !schemaExport.import.startsWith("./dist/") ||
+      typeof schemaExport?.types !== "string" ||
+      !schemaExport.types.startsWith("./dist/")
+    ) {
+      errors.push(`${label} must expose its Drizzle declarations through ./schema`);
+    }
   }
 
   for (const script of ["build", "lint", "typecheck", "test", "pack:check"]) {

@@ -54,9 +54,9 @@ describe("startProd", () => {
       logger,
       gateway,
       openDatabase: () => ({ ...connection, close: closeDatabase }),
-      migrate: async (_database, onManifestApplied) => {
+      migrate: async (_database, onHistoryApplied) => {
         sequence.push("migrate");
-        onManifestApplied("fixture");
+        onHistoryApplied("fixture");
       },
     });
 

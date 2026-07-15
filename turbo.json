@@ -67,6 +67,7 @@
       "cache": false
     },
     "db:generate": {
+      "dependsOn": ["^build"],
       "cache": false
     },
     "db:migrate": {

@@ -18,6 +18,7 @@
     "check": "pnpm boundaries:check && turbo run lint typecheck test build",
     "pack:check": "turbo run pack:check",
     "boundaries:check": "node scripts/check-package-boundaries.mjs",
+    "db:generate": "turbo run db:generate --filter='./apps/*'",
     "db:migrate": "node --env-file-if-exists=.env node_modules/turbo/bin/turbo run db:migrate --filter='./apps/*'",
     "commands:register": "node --env-file-if-exists=.env node_modules/turbo/bin/turbo run commands:register --filter='./apps/*'",
     "deploy": "node --env-file-if-exists=.env node_modules/turbo/bin/turbo run deploy --filter='./apps/*'"
