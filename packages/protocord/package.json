@@ -16,7 +16,10 @@
     "lint": "eslint src test --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage",
-    "pack:check": "pnpm pack --dry-run"
+    "pack:check": "pnpm pack --dry-run && node --input-type=module -e \"const api = await import('protocord'); if (typeof api.createActionRegistry !== 'function' || typeof api.slashCommand !== 'function') throw new Error('compiled Protocord entrypoint is incomplete')\""
+  },
+  "dependencies": {
+    "discord.js": "14.27.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
