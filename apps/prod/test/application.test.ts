@@ -10,7 +10,6 @@ import { createLogger } from "../src/logger.js";
 const config: ProdConfig = {
   discordToken: "development-secret-token",
   discordClientId: "123456789012345678",
-  discordDevGuildId: "234567890123456789",
   textCommandPrefix: "!",
   databaseUrl: ":memory:",
   logLevel: "debug",
@@ -63,7 +62,7 @@ describe("startProd", () => {
 
     expect(sequence).toEqual(["migrate", "connect"]);
     expect(output.join("")).toContain("Prod ready");
-    expect(output.join("")).toContain('"actionCount":0');
+    expect(output.join("")).toContain('"actionCount":1');
     expect(output.join("")).not.toContain(config.discordToken);
 
     await application.stop("test");
@@ -117,7 +116,9 @@ describe("startProd", () => {
         signal: AbortSignal,
       ) =>
         new Promise<void>((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
         }),
     );
 

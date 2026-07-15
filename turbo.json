@@ -28,7 +28,6 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
-        "DISCORD_DEV_GUILD_ID",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",
@@ -49,7 +48,6 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
-        "DISCORD_DEV_GUILD_ID",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",
@@ -76,7 +74,6 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
-        "DISCORD_DEV_GUILD_ID",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",
@@ -95,7 +92,6 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
-        "DISCORD_DEV_GUILD_ID",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",
@@ -115,7 +111,6 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
-        "DISCORD_DEV_GUILD_ID",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",

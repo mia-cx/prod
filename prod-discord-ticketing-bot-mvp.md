@@ -716,8 +716,8 @@ The built-in trigger providers cover:
 
 Text-command behavior:
 
-- `TEXT_COMMAND_PREFIX` configures one prefix, defaulting to `!`.
-- A trimmed empty value disables text commands.
+- Protocord's text-command provider defaults to `!` when a consumer omits its prefix.
+- Prod passes `TEXT_COMMAND_PREFIX` explicitly: an absent or trimmed empty value disables text commands, while a non-empty value opts in.
 - Prefix length is 1-8 Unicode code points.
 - Command names normalize to lowercase.
 - Ignore bot and webhook-authored messages.
@@ -776,7 +776,7 @@ Initial Prod actions, all implemented and composed in `apps/prod`:
 
 Text triggers are registered only when `TEXT_COMMAND_PREFIX` is enabled. Prod uses them for the three reporter ticket-opening aliases to exercise the package boundary without exposing staff-only or settings output through non-ephemeral messages. Slash commands remain the primary documented interface.
 
-Production application commands are global. `DISCORD_DEV_GUILD_ID` switches to instant guild-scoped registration during development and clears the opposite scope.
+Application commands are global. On startup, Prod clears stale guild-scoped commands before publishing the authoritative global catalog so duplicate commands cannot survive a restart.
 
 Command and trigger names are isolated in trigger definitions so later product naming changes do not affect domain actions.
 
@@ -1245,7 +1245,6 @@ Environment configuration:
 ```text
 DISCORD_TOKEN
 DISCORD_CLIENT_ID
-DISCORD_DEV_GUILD_ID
 TEXT_COMMAND_PREFIX
 DATABASE_URL
 LOG_LEVEL

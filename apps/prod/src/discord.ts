@@ -1,4 +1,10 @@
-import { Client, Events, GatewayIntentBits } from "discord.js";
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  type Interaction,
+  type Message,
+} from "discord.js";
 
 export type DiscordIdentity = Readonly<{
   userId: string;
@@ -10,9 +16,47 @@ export interface DiscordGateway {
   close(): Promise<void>;
 }
 
-export const createDiscordGateway = (): DiscordGateway => {
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+export type DiscordActionSurface = Readonly<{
+  refreshCommands(client: Client<true>): Promise<void>;
+  handleInteraction(interaction: Interaction): Promise<void>;
+  handleMessage?(message: Message): Promise<boolean>;
+  handleError(error: unknown): void;
+}>;
+
+export type DiscordGatewayOptions = Readonly<{
+  actions?: DiscordActionSurface;
+}>;
+
+export const createDiscordGateway = (
+  options: DiscordGatewayOptions = {},
+): DiscordGateway => {
+  const actions = options.actions;
+  const handleMessage = actions?.handleMessage;
+  const client = new Client({
+    intents: handleMessage
+      ? [
+          GatewayIntentBits.Guilds,
+          GatewayIntentBits.GuildMessages,
+          GatewayIntentBits.MessageContent,
+        ]
+      : [GatewayIntentBits.Guilds],
+  });
   let closed = false;
+
+  if (actions) {
+    client.on(Events.InteractionCreate, (interaction) => {
+      void actions
+        .handleInteraction(interaction)
+        .catch((error: unknown) => actions.handleError(error));
+    });
+    if (handleMessage) {
+      client.on(Events.MessageCreate, (message) => {
+        void handleMessage(message).catch((error: unknown) =>
+          actions.handleError(error),
+        );
+      });
+    }
+  }
 
   const close = async (): Promise<void> => {
     if (closed) {
@@ -31,30 +75,55 @@ export const createDiscordGateway = (): DiscordGateway => {
           return;
         }
 
+        let settled = false;
         const removeListeners = () => {
           client.off(Events.ClientReady, handleReady);
           signal.removeEventListener("abort", handleAbort);
         };
-        const handleReady = (readyClient: Client<true>) => {
+        const settle = (complete: () => void) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
           removeListeners();
-          resolve({
-            userId: readyClient.user.id,
-            tag: readyClient.user.tag,
-          });
+          complete();
+        };
+        const handleReady = (readyClient: Client<true>) => {
+          client.off(Events.ClientReady, handleReady);
+          void prepareReadyClient(readyClient, options).then(
+            (identity) => settle(() => resolve(identity)),
+            (error: unknown) => settle(() => reject(error)),
+          );
         };
         const handleAbort = () => {
-          removeListeners();
-          void close();
-          reject(signal.reason);
+          settle(() => {
+            void close();
+            reject(signal.reason);
+          });
         };
 
         client.once(Events.ClientReady, handleReady);
         signal.addEventListener("abort", handleAbort, { once: true });
         void client.login(token).catch((error: unknown) => {
-          removeListeners();
-          reject(error instanceof Error ? error : new Error(String(error)));
+          settle(() =>
+            reject(error instanceof Error ? error : new Error(String(error))),
+          );
         });
       }),
     close,
+  };
+};
+
+const prepareReadyClient = async (
+  client: Client<true>,
+  options: DiscordGatewayOptions,
+): Promise<DiscordIdentity> => {
+  if (options.actions) {
+    await options.actions.refreshCommands(client);
+  }
+
+  return {
+    userId: client.user.id,
+    tag: client.user.tag,
   };
 };
