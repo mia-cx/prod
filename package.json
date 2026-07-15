@@ -14,7 +14,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "check": "turbo run lint typecheck test build",
+    "check": "pnpm boundaries:check && turbo run lint typecheck test build",
     "pack:check": "turbo run pack:check",
     "boundaries:check": "node scripts/check-package-boundaries.mjs"
   },
