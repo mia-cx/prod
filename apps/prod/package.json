@@ -6,9 +6,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist coverage",
-    "dev": "tsx watch src/main.ts",
+    "dev": "node scripts/dev-watch.mjs src/main.ts",
     "start": "node dist/main.js",
-    "lint": "eslint src test --max-warnings=0",
+    "lint": "eslint scripts src test --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
