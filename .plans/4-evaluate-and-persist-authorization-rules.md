@@ -23,7 +23,7 @@ Prod policy boundary that only permits guild-level rule administration.
 - [x] Add Discord subject/context adapters and synthetic guild hierarchy tests.
 - [x] Add Prod's guild-only policy boundary, compose a migration, and test rejection of refined contexts.
 - [x] Harden selector validation and preserve accurate audit actors across updates and removals.
-- [~] Run focused and repository-wide validation and prepare the pull request.
+- [x] Run focused and repository-wide validation and prepare the pull request.
 
 ## Notes
 
@@ -36,3 +36,5 @@ Prod policy boundary that only permits guild-level rule administration.
 - 2026-07-16: Prod accepts only guild-level administration/evaluation. The generated app migration creates both package-owned tables and proves COALESCE-equivalent uniqueness through virtual scope columns. App typecheck/lint and 36 tests pass.
 - 2026-07-16: Final audit identified that exact selector kinds should reject `*`, updates should preserve the original `createdByUserId`, and Prod's store wrapper should forward an explicit removal actor.
 - 2026-07-16: Selector/audit hardening passes 25 package tests, all 36 app tests, and the complete build graph.
+- 2026-07-16: `corepack pnpm check` passed all 32 boundary/lint/typecheck/test/build tasks; `corepack pnpm pack:check` passed all 15 build and package extraction tasks.
+- 2026-07-16: Live Discord validation remains intentionally pending on issue #4; the pull request references rather than closes the issue.
