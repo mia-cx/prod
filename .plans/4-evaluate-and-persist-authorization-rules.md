@@ -19,8 +19,8 @@ Prod policy boundary that only permits guild-level rule administration.
 ## TODOs
 
 - [x] Define the public authorization contracts, validation, evaluator, and precedence tests.
-- [~] Add package-owned Drizzle schemas, an audited SQLite rule store, and persistence tests.
-- [ ] Add Discord subject/context adapters and synthetic guild hierarchy tests.
+- [x] Add package-owned Drizzle schemas, an audited SQLite rule store, and persistence tests.
+- [~] Add Discord subject/context adapters and synthetic guild hierarchy tests.
 - [ ] Add Prod's guild-only policy boundary, compose a migration, and test rejection of refined contexts.
 - [ ] Run focused and repository-wide validation and prepare the pull request.
 
@@ -30,3 +30,4 @@ Prod policy boundary that only permits guild-level rule administration.
 - 2026-07-16: The T3 workspace is already an isolated clean worktree on `t3code/slice-three` at current `origin/main`, so it is used instead of nesting another `.worktrees/` checkout.
 - 2026-07-16: Issue #4 requires automated checks before a mandatory live Discord validation gate. The PR must not close the issue until that human checklist is complete.
 - 2026-07-16: Core contracts/evaluator validated with package typecheck, lint, and 9 passing tests.
+- 2026-07-16: SQLite schemas/store validated with package typecheck, lint, and 16 passing tests; nullable context identity is covered by a COALESCE-backed unique index.

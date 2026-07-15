@@ -23,9 +23,14 @@
     "test": "vitest run --coverage",
     "pack:check": "pnpm pack --dry-run"
   },
+  "dependencies": {
+    "drizzle-orm": "0.45.2"
+  },
   "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "better-sqlite3": "12.11.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

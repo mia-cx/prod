@@ -32,3 +32,9 @@ export {
   validateRuleObject,
   validateRuleSubject,
 } from "./validation.js";
+export {
+  createSqlitePermissionRuleStore,
+  type CreateSqlitePermissionRuleStoreOptions,
+  type PermissionRuleEvent,
+  type SqlitePermissionRuleStore,
+} from "./sqlite-store.js";
