@@ -6,11 +6,11 @@ Create the Node 24 pnpm/Turborepo foundation for Prod, including the application
 
 ## Acceptance criteria
 
-- [ ] The workspace contains the planned app and package boundaries with one-way dependencies.
-- [ ] Turbo orders deterministic build, lint, typecheck, test, and pack tasks and does not cache side-effectful tasks.
-- [ ] The Prod process validates configuration, applies empty migrations, connects to Discord, logs readiness, and shuts down cleanly.
-- [ ] Every reusable package builds and packs independently without importing application code.
-- [ ] CI exercises the root checks and package-boundary smoke tests.
+- [x] The workspace contains the planned app and package boundaries with one-way dependencies.
+- [x] Turbo orders deterministic build, lint, typecheck, test, and pack tasks and does not cache side-effectful tasks.
+- [x] The Prod process validates configuration, applies empty migrations, connects to Discord, logs readiness, and shuts down cleanly.
+- [x] Every reusable package builds and packs independently without importing application code.
+- [x] CI exercises the root checks and package-boundary smoke tests.
 
 ## TODOs
 
@@ -18,7 +18,13 @@ Create the Node 24 pnpm/Turborepo foundation for Prod, including the application
 - [x] Implement Effect-based environment validation, redacted structured logging, and fixed-order migration composition.
 - [x] Implement the injectable Discord application lifecycle with readiness and graceful-shutdown tests.
 - [x] Add independent package packing, boundary enforcement, and baseline CI.
-- [ ] Run all automated checks and document the remaining real-Discord HITL gate.
+- [x] Run all automated checks and document the remaining real-Discord HITL gate.
+
+## Human validation
+
+- [x] Automated checks pass before requesting credentials or human action.
+- [ ] Provide a development Discord bot token, client ID, and guild ID through local environment secrets. Start Prod against the development guild and confirm that it connects, reports readiness, and shuts down without leaking credentials.
+- [ ] Record the validation outcome without secrets, raw tokens, private ticket content, or unredacted diagnostics.
 
 ## Notes
 
@@ -29,3 +35,4 @@ Create the Node 24 pnpm/Turborepo foundation for Prod, including the application
 - Configuration/persistence validation: app lint and typecheck pass; 7 app tests cover defaults, invalid-key reporting without secret echo, structured redaction, and fixed `authorization` → `model-config` → `prod` migration order. The compiled migration CLI also succeeds against in-memory SQLite.
 - Discord lifecycle validation: 10 app tests pass, including migration-before-connect ordering, a readiness log with zero actions, startup-failure cleanup, adapter readiness, and idempotent graceful shutdown. A real Discord connection remains part of the issue's HITL gate.
 - Boundary/pack validation: the repository boundary checker accepts exactly seven planned reusable packages and enforces the allowed internal dependency graph; `pnpm pack:check` succeeds for all seven with compiled `dist` files only. CI uses Node 24, pnpm 11, frozen installs, the root check, and package packing.
+- Final validation: `pnpm install --frozen-lockfile`, `pnpm check` (32 successful Turbo tasks), and `pnpm pack:check` (15 successful/cached tasks) pass. The implementation is ready for the mandatory real-Discord HITL validation; issue #2 must remain open until that outcome is recorded.
