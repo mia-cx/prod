@@ -1,0 +1,38 @@
+{
+  "name": "@prod/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist coverage",
+    "dev": "node scripts/dev-watch.mjs src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "eslint scripts src test --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --coverage",
+    "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
+    "db:migrate": "node dist/migrate.js"
+  },
+  "dependencies": {
+    "@mia-cx/protocord-model-settings": "workspace:*",
+    "@protocord/ai": "workspace:*",
+    "@protocord/permissions": "workspace:*",
+    "@protocord/settings": "workspace:*",
+    "better-sqlite3": "12.11.1",
+    "discord.js": "14.27.0",
+    "drizzle-orm": "0.45.2",
+    "effect": "3.22.0",
+    "pino": "10.3.1",
+    "protocord": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "drizzle-kit": "0.31.10",
+    "tsx": "4.23.1",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
