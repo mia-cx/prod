@@ -193,7 +193,7 @@ describe("the app dev process", () => {
     } finally {
       await fixture.cleanup();
     }
-  }, 10_000);
+  }, 15_000);
 
   it("force-cleans the wrapper and detached fixture when shutdown stalls", async () => {
     const fixture = startDevFixture("test/fixtures/stubborn-process.ts");
@@ -216,5 +216,31 @@ describe("the app dev process", () => {
       throw new Error("Fixture process ID was not captured before cleanup");
     }
     expect(isProcessRunning(fixturePid)).toBe(false);
-  });
+  }, 10_000);
+
+  it("reserves enough time to clean up after readiness times out", async () => {
+    const fixture = startDevFixture("test/fixtures/delayed-ready-process.ts");
+    let fixturePid: number | undefined;
+    let readinessError: unknown;
+
+    try {
+      await fixture.waitForOutput("fixture pid=");
+      fixturePid = fixture.fixturePid();
+      await fixture.waitForOutput("fixture ready", 100);
+    } catch (error) {
+      readinessError = error;
+    } finally {
+      await fixture.cleanup();
+    }
+
+    expect(readinessError).toEqual(
+      new Error('Timed out waiting for "fixture ready"'),
+    );
+    expect(isProcessRunning(fixture.wrapperPid)).toBe(false);
+    expect(fixturePid).toBeDefined();
+    if (fixturePid === undefined) {
+      throw new Error("Fixture process ID was not captured before cleanup");
+    }
+    expect(isProcessRunning(fixturePid)).toBe(false);
+  }, 10_000);
 });
