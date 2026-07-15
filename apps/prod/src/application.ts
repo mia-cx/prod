@@ -50,14 +50,12 @@ export const startProd = async (
 
   const logger = dependencies.logger;
   const actions = createProdActionRuntime(logger, {
-    developmentGuildId: config.discordDevGuildId,
     textCommandPrefix: config.textCommandPrefix,
   });
   const gateway =
     dependencies.gateway ??
     createDiscordGateway({
       actions,
-      developmentGuildId: config.discordDevGuildId,
     });
   const connection = (dependencies.openDatabase ?? openDatabase)(
     config.databaseUrl,
@@ -80,7 +78,6 @@ export const startProd = async (
       {
         discordUserId: identity.userId,
         discordUserTag: identity.tag,
-        developmentGuildId: config.discordDevGuildId,
         actionCount: actions.actionCount,
       },
       "Prod ready",

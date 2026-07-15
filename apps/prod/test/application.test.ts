@@ -10,7 +10,6 @@ import { createLogger } from "../src/logger.js";
 const config: ProdConfig = {
   discordToken: "development-secret-token",
   discordClientId: "123456789012345678",
-  discordDevGuildId: "234567890123456789",
   textCommandPrefix: "!",
   databaseUrl: ":memory:",
   logLevel: "debug",

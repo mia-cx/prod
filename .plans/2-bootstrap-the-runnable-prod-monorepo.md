@@ -23,7 +23,7 @@ Create the Node 24 pnpm/Turborepo foundation for Prod, including the application
 ## Human validation
 
 - [x] Automated checks pass before requesting credentials or human action.
-- [ ] Provide a development Discord bot token, client ID, and guild ID through local environment secrets. Start Prod against the development guild and confirm that it connects, reports readiness, and shuts down without leaking credentials.
+- [ ] Provide a private development Discord bot token and client ID through local environment secrets. Start Prod and confirm that it connects, reports readiness, and shuts down without leaking credentials.
 - [ ] Record the validation outcome without secrets, raw tokens, private ticket content, or unredacted diagnostics.
 
 ## Notes

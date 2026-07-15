@@ -5,7 +5,6 @@ import { ConfigurationError, loadConfig } from "../src/config.js";
 const requiredEnvironment = {
   DISCORD_TOKEN: "development-secret-token",
   DISCORD_CLIENT_ID: "123456789012345678",
-  DISCORD_DEV_GUILD_ID: "234567890123456789",
 };
 
 describe("loadConfig", () => {
@@ -13,7 +12,6 @@ describe("loadConfig", () => {
     expect(loadConfig(requiredEnvironment)).toEqual({
       discordToken: "development-secret-token",
       discordClientId: "123456789012345678",
-      discordDevGuildId: "234567890123456789",
       textCommandPrefix: "",
       databaseUrl: "file:./data/prod.sqlite",
       logLevel: "info",

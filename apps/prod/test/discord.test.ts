@@ -107,7 +107,7 @@ describe("createDiscordGateway", () => {
     expect(discordMock.destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("stays abortable while development commands are refreshing", async () => {
+  it("stays abortable while application commands are refreshing", async () => {
     let finishRefresh: (() => void) | undefined;
     const refreshCommands = vi.fn(
       () =>
@@ -122,7 +122,6 @@ describe("createDiscordGateway", () => {
         handleMessage: vi.fn(async () => false),
         handleError: vi.fn(),
       },
-      developmentGuildId: "234567890123456789",
     });
     const controller = new AbortController();
     const reason = new DOMException("shutdown", "AbortError");
@@ -140,7 +139,7 @@ describe("createDiscordGateway", () => {
     expect(discordMock.destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes development-guild commands and dispatches interactions", async () => {
+  it("refreshes global commands and dispatches interactions", async () => {
     const refreshCommands = vi.fn(async () => undefined);
     const handleInteraction = vi.fn(async () => undefined);
     const handleMessage = vi.fn(async () => true);
@@ -152,15 +151,11 @@ describe("createDiscordGateway", () => {
         handleMessage,
         handleError,
       },
-      developmentGuildId: "234567890123456789",
     });
 
     await gateway.connect("development-token", new AbortController().signal);
 
-    expect(refreshCommands).toHaveBeenCalledWith(
-      expect.anything(),
-      "234567890123456789",
-    );
+    expect(refreshCommands).toHaveBeenCalledWith(expect.anything());
     const interaction = { id: "interaction-1" };
     discordMock.interactionHandler?.(interaction);
     await vi.waitFor(() =>
@@ -182,7 +177,6 @@ describe("createDiscordGateway", () => {
         handleInteraction: vi.fn(async () => undefined),
         handleError: vi.fn(),
       },
-      developmentGuildId: "234567890123456789",
     });
 
     await gateway.connect("development-token", new AbortController().signal);

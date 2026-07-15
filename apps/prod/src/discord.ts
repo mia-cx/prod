@@ -17,24 +17,15 @@ export interface DiscordGateway {
 }
 
 export type DiscordActionSurface = Readonly<{
-  refreshCommands(
-    client: Client<true>,
-    developmentGuildId: string,
-  ): Promise<void>;
+  refreshCommands(client: Client<true>): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
   handleMessage?(message: Message): Promise<boolean>;
   handleError(error: unknown): void;
 }>;
 
-export type DiscordGatewayOptions =
-  | Readonly<{
-      actions?: undefined;
-      developmentGuildId?: undefined;
-    }>
-  | Readonly<{
-      actions: DiscordActionSurface;
-      developmentGuildId: string;
-    }>;
+export type DiscordGatewayOptions = Readonly<{
+  actions?: DiscordActionSurface;
+}>;
 
 export const createDiscordGateway = (
   options: DiscordGatewayOptions = {},
@@ -128,7 +119,7 @@ const prepareReadyClient = async (
   options: DiscordGatewayOptions,
 ): Promise<DiscordIdentity> => {
   if (options.actions) {
-    await options.actions.refreshCommands(client, options.developmentGuildId);
+    await options.actions.refreshCommands(client);
   }
 
   return {

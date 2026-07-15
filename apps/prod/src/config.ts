@@ -21,7 +21,6 @@ export type LogLevel = typeof LogLevel.Type;
 export type ProdConfig = Readonly<{
   discordToken: string;
   discordClientId: string;
-  discordDevGuildId: string;
   textCommandPrefix: string;
   databaseUrl: string;
   logLevel: LogLevel;
@@ -74,11 +73,6 @@ export const loadConfig = (environment: Environment): ProdConfig =>
     discordClientId: decodeRequired(
       environment,
       "DISCORD_CLIENT_ID",
-      DiscordSnowflake,
-    ),
-    discordDevGuildId: decodeRequired(
-      environment,
-      "DISCORD_DEV_GUILD_ID",
       DiscordSnowflake,
     ),
     textCommandPrefix: decodeOptional(

@@ -18,7 +18,6 @@ import { createLogger } from "../src/logger.js";
 
 const noMentions = { parse: [], repliedUser: false };
 const runtimeOptions = {
-  developmentGuildId: "guild-1",
   textCommandPrefix: "!",
 };
 
@@ -83,9 +82,9 @@ describe("Prod action runtime", () => {
         fetch: vi.fn(),
       },
     } as unknown as Client<true>;
-    await runtime.refreshCommands(client, "guild-1");
-    expect(globalSet).toHaveBeenCalledWith([]);
-    expect(guildSet).toHaveBeenCalledWith(runtime.commands);
+    await runtime.refreshCommands(client);
+    expect(guildSet).toHaveBeenCalledWith([]);
+    expect(globalSet).toHaveBeenCalledWith(runtime.commands);
   });
 
   it.each(["slash", "message", "user"] as const)(
@@ -168,10 +167,11 @@ describe("Prod action runtime", () => {
       guildId: "guild-2",
       reply: otherGuildReply,
     } as unknown as Message;
-    await expect(runtime.handleMessage!(otherGuildMessage)).resolves.toBe(
-      false,
-    );
-    expect(otherGuildReply).not.toHaveBeenCalled();
+    await expect(runtime.handleMessage!(otherGuildMessage)).resolves.toBe(true);
+    expect(otherGuildReply).toHaveBeenCalledWith({
+      content: "pong!",
+      allowedMentions: noMentions,
+    });
   });
 
   it("removes the text capability when the configured prefix is empty", () => {

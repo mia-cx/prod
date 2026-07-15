@@ -27,7 +27,6 @@ export type ProdActionRuntime = DiscordActionSurface &
   }>;
 
 export type ProdActionRuntimeOptions = Readonly<{
-  developmentGuildId: string;
   textCommandPrefix: string;
 }>;
 
@@ -54,9 +53,6 @@ export const createProdActionRuntime = (
 
   const handleMessage = textProvider.prefix
     ? async (message: Message): Promise<boolean> => {
-        if (message.guildId !== options.developmentGuildId) {
-          return false;
-        }
         const dispatched = await dispatchTextCommand({
           registry,
           provider: textProvider,
@@ -92,10 +88,7 @@ export const createProdActionRuntime = (
   return Object.freeze({
     actionCount: registry.actions.length,
     commands: getDiscordCommandRegistration(registry),
-    refreshCommands: (client, developmentGuildId) =>
-      registerDiscordCommands(client, registry, {
-        target: { kind: "guild", guildId: developmentGuildId },
-      }),
+    refreshCommands: (client) => registerDiscordCommands(client, registry),
     handleInteraction: async (interaction: Interaction) => {
       const handled = await handleDiscordInteraction(
         registry,
