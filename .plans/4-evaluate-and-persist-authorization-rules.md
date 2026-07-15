@@ -20,8 +20,8 @@ Prod policy boundary that only permits guild-level rule administration.
 
 - [x] Define the public authorization contracts, validation, evaluator, and precedence tests.
 - [x] Add package-owned Drizzle schemas, an audited SQLite rule store, and persistence tests.
-- [~] Add Discord subject/context adapters and synthetic guild hierarchy tests.
-- [ ] Add Prod's guild-only policy boundary, compose a migration, and test rejection of refined contexts.
+- [x] Add Discord subject/context adapters and synthetic guild hierarchy tests.
+- [~] Add Prod's guild-only policy boundary, compose a migration, and test rejection of refined contexts.
 - [ ] Run focused and repository-wide validation and prepare the pull request.
 
 ## Notes
@@ -31,3 +31,4 @@ Prod policy boundary that only permits guild-level rule administration.
 - 2026-07-16: Issue #4 requires automated checks before a mandatory live Discord validation gate. The PR must not close the issue until that human checklist is complete.
 - 2026-07-16: Core contracts/evaluator validated with package typecheck, lint, and 9 passing tests.
 - 2026-07-16: SQLite schemas/store validated with package typecheck, lint, and 16 passing tests; nullable context identity is covered by a COALESCE-backed unique index.
+- 2026-07-16: Structural Discord adapters accept live discord.js-shaped objects without a runtime dependency, derive thread/category hierarchy, and pass 24 package tests.

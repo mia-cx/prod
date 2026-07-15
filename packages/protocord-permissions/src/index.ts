@@ -38,3 +38,13 @@ export {
   type PermissionRuleEvent,
   type SqlitePermissionRuleStore,
 } from "./sqlite-store.js";
+export {
+  createDiscordAuthorizationContext,
+  createDiscordUserSubject,
+  InvalidDiscordAuthorizationContextError,
+  type DiscordAuthorizationLocation,
+  type DiscordCategoryLike,
+  type DiscordChannelLike,
+  type DiscordGuildLike,
+  type DiscordMemberLike,
+} from "./discord-adapters.js";
