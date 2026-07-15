@@ -1,4 +1,10 @@
-import { Client, Events, GatewayIntentBits } from "discord.js";
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  type ApplicationCommandData,
+  type Interaction,
+} from "discord.js";
 
 export type DiscordIdentity = Readonly<{
   userId: string;
@@ -10,9 +16,36 @@ export interface DiscordGateway {
   close(): Promise<void>;
 }
 
-export const createDiscordGateway = (): DiscordGateway => {
+export type DiscordActionSurface = Readonly<{
+  commands: readonly ApplicationCommandData[];
+  handleInteraction(interaction: Interaction): Promise<void>;
+  handleError(error: unknown): void;
+}>;
+
+export type DiscordGatewayOptions =
+  | Readonly<{
+      actions?: undefined;
+      developmentGuildId?: undefined;
+    }>
+  | Readonly<{
+      actions: DiscordActionSurface;
+      developmentGuildId: string;
+    }>;
+
+export const createDiscordGateway = (
+  options: DiscordGatewayOptions = {},
+): DiscordGateway => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   let closed = false;
+
+  const actions = options.actions;
+  if (actions) {
+    client.on(Events.InteractionCreate, (interaction) => {
+      void actions
+        .handleInteraction(interaction)
+        .catch((error: unknown) => actions.handleError(error));
+    });
+  }
 
   const close = async (): Promise<void> => {
     if (closed) {
@@ -37,10 +70,7 @@ export const createDiscordGateway = (): DiscordGateway => {
         };
         const handleReady = (readyClient: Client<true>) => {
           removeListeners();
-          resolve({
-            userId: readyClient.user.id,
-            tag: readyClient.user.tag,
-          });
+          void prepareReadyClient(readyClient, options).then(resolve, reject);
         };
         const handleAbort = () => {
           removeListeners();
@@ -56,5 +86,22 @@ export const createDiscordGateway = (): DiscordGateway => {
         });
       }),
     close,
+  };
+};
+
+const prepareReadyClient = async (
+  client: Client<true>,
+  options: DiscordGatewayOptions,
+): Promise<DiscordIdentity> => {
+  if (options.actions) {
+    const guild =
+      client.guilds.cache.get(options.developmentGuildId) ??
+      (await client.guilds.fetch(options.developmentGuildId));
+    await guild.commands.set(options.actions.commands);
+  }
+
+  return {
+    userId: client.user.id,
+    tag: client.user.tag,
   };
 };

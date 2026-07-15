@@ -63,7 +63,7 @@ describe("startProd", () => {
 
     expect(sequence).toEqual(["migrate", "connect"]);
     expect(output.join("")).toContain("Prod ready");
-    expect(output.join("")).toContain('"actionCount":0');
+    expect(output.join("")).toContain('"actionCount":1');
     expect(output.join("")).not.toContain(config.discordToken);
 
     await application.stop("test");
@@ -117,7 +117,9 @@ describe("startProd", () => {
         signal: AbortSignal,
       ) =>
         new Promise<void>((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
         }),
     );
 

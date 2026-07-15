@@ -51,6 +51,8 @@ Implement `protocord` as the reusable canonical action lifecycle and extensible 
 - Built-in trigger constructors should produce opaque typed definitions registered through provider contracts; the canonical runtime must remain open to third-party providers without editing its trigger union.
 - Text commands default to `!`, disable on a trimmed empty prefix, accept prefixes of 1–8 Unicode code points, normalize command names to lowercase, preserve the untouched argument tail, ignore bot/webhook messages, and report whether a message was consumed.
 - Text commands are an opt-in Protocord provider capability. Prod itself does not register the text provider or text triggers in its application composition.
+- Prod composes one app-owned development validation action, `/ping`, registers it in the configured development guild at startup, and replies publicly with `pong!` through the canonical lifecycle.
 - The real-Discord validation gate remains HITL and must not require credentials in issues, commits, fixtures, logs, or screenshots.
 - Package validation: lint, typecheck, build, dry-run pack, compiled-entrypoint smoke import, and 42 focused tests pass with 89.51% statement coverage.
 - Repository validation: `pnpm check` completes 32/32 Turbo tasks and validates all seven reusable-package boundaries; `pnpm pack:check` completes 15/15 tasks.
+- Prod validation: 16/16 app tests pass, including the exact `/ping` registration, `pong!` response, development-guild command publication, and interaction dispatch wiring.

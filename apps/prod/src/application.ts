@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 
 import type { ProdConfig } from "./config.js";
+import { createProdActionRuntime } from "./actions/runtime.js";
 import {
   openDatabase,
   type DatabaseConnection,
@@ -48,8 +49,16 @@ export const startProd = async (
   signal.throwIfAborted();
 
   const logger = dependencies.logger;
-  const gateway = dependencies.gateway ?? createDiscordGateway();
-  const connection = (dependencies.openDatabase ?? openDatabase)(config.databaseUrl);
+  const actions = createProdActionRuntime(logger);
+  const gateway =
+    dependencies.gateway ??
+    createDiscordGateway({
+      actions,
+      developmentGuildId: config.discordDevGuildId,
+    });
+  const connection = (dependencies.openDatabase ?? openDatabase)(
+    config.databaseUrl,
+  );
   const migrate = dependencies.migrate ?? defaultMigrate;
 
   try {
@@ -69,7 +78,7 @@ export const startProd = async (
         discordUserId: identity.userId,
         discordUserTag: identity.tag,
         developmentGuildId: config.discordDevGuildId,
-        actionCount: 0,
+        actionCount: actions.actionCount,
       },
       "Prod ready",
     );
@@ -77,7 +86,10 @@ export const startProd = async (
     try {
       await gateway.close();
     } catch (closeError) {
-      logger.error({ err: closeError }, "failed to close Discord after startup failure");
+      logger.error(
+        { err: closeError },
+        "failed to close Discord after startup failure",
+      );
     } finally {
       connection.close();
     }
