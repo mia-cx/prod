@@ -30,16 +30,19 @@ export const pingAction: Action<PingInput, string, ProdActionContext> = {
     slashCommand({
       name: "ping",
       description: "Check whether Prod is responsive",
+      acknowledgement: "none",
       visibility: "public",
       parse: () => ({}),
     }),
     messageContextMenu({
       name: "Ping Prod",
+      acknowledgement: "none",
       visibility: "public",
       parse: () => ({}),
     }),
     userContextMenu({
       name: "Ping Prod",
+      acknowledgement: "none",
       visibility: "public",
       parse: () => ({}),
     }),

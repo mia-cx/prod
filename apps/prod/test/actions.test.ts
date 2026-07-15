@@ -1,6 +1,5 @@
 import {
   ApplicationCommandType,
-  MessageFlags,
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
@@ -98,26 +97,16 @@ describe("Prod action runtime", () => {
 
       await runtime.handleInteraction(interaction as unknown as Interaction);
 
-      expect(interaction.deferReply).toHaveBeenCalledWith({
-        flags: MessageFlags.Ephemeral,
-      });
       const reply = {
         content: "pong!",
         allowedMentions: noMentions,
       };
-      expect(interaction.editReply).toHaveBeenCalledWith(reply);
-      expect(interaction.followUp).toHaveBeenCalledWith(reply);
-      expect(interaction.deleteReply).toHaveBeenCalledOnce();
-      expect(
-        vi.mocked(interaction.editReply).mock.invocationCallOrder[0],
-      ).toBeLessThan(
-        vi.mocked(interaction.followUp).mock.invocationCallOrder[0]!,
-      );
-      expect(
-        vi.mocked(interaction.followUp).mock.invocationCallOrder[0],
-      ).toBeLessThan(
-        vi.mocked(interaction.deleteReply).mock.invocationCallOrder[0]!,
-      );
+      expect(interaction.reply).toHaveBeenCalledOnce();
+      expect(interaction.reply).toHaveBeenCalledWith(reply);
+      expect(interaction.deferReply).not.toHaveBeenCalled();
+      expect(interaction.editReply).not.toHaveBeenCalled();
+      expect(interaction.followUp).not.toHaveBeenCalled();
+      expect(interaction.deleteReply).not.toHaveBeenCalled();
     },
   );
 
