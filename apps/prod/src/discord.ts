@@ -66,25 +66,39 @@ export const createDiscordGateway = (
           return;
         }
 
+        let settled = false;
         const removeListeners = () => {
           client.off(Events.ClientReady, handleReady);
           signal.removeEventListener("abort", handleAbort);
         };
-        const handleReady = (readyClient: Client<true>) => {
+        const settle = (complete: () => void) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
           removeListeners();
-          void prepareReadyClient(readyClient, options).then(resolve, reject);
+          complete();
+        };
+        const handleReady = (readyClient: Client<true>) => {
+          client.off(Events.ClientReady, handleReady);
+          void prepareReadyClient(readyClient, options).then(
+            (identity) => settle(() => resolve(identity)),
+            (error: unknown) => settle(() => reject(error)),
+          );
         };
         const handleAbort = () => {
-          removeListeners();
-          void close();
-          reject(signal.reason);
+          settle(() => {
+            void close();
+            reject(signal.reason);
+          });
         };
 
         client.once(Events.ClientReady, handleReady);
         signal.addEventListener("abort", handleAbort, { once: true });
         void client.login(token).catch((error: unknown) => {
-          removeListeners();
-          reject(error instanceof Error ? error : new Error(String(error)));
+          settle(() =>
+            reject(error instanceof Error ? error : new Error(String(error))),
+          );
         });
       }),
     close,

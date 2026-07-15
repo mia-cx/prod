@@ -94,6 +94,38 @@ describe("createDiscordGateway", () => {
     expect(discordMock.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("stays abortable while development commands are refreshing", async () => {
+    let finishRefresh: (() => void) | undefined;
+    const refreshCommands = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands,
+        handleInteraction: vi.fn(async () => undefined),
+        handleError: vi.fn(),
+      },
+      developmentGuildId: "234567890123456789",
+    });
+    const controller = new AbortController();
+    const reason = new DOMException("shutdown", "AbortError");
+
+    const connection = gateway.connect("development-token", controller.signal);
+    await vi.waitFor(() => expect(refreshCommands).toHaveBeenCalledOnce());
+    controller.abort(reason);
+
+    await expect(connection).rejects.toBe(reason);
+    expect(discordMock.destroy).toHaveBeenCalledTimes(1);
+
+    finishRefresh?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await gateway.close();
+    expect(discordMock.destroy).toHaveBeenCalledTimes(1);
+  });
+
   it("refreshes development-guild commands and dispatches interactions", async () => {
     const refreshCommands = vi.fn(async () => undefined);
     const handleInteraction = vi.fn(async () => undefined);
