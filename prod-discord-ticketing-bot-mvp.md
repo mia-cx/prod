@@ -716,8 +716,8 @@ The built-in trigger providers cover:
 
 Text-command behavior:
 
-- `TEXT_COMMAND_PREFIX` configures one prefix, defaulting to `!`.
-- A trimmed empty value disables text commands.
+- Protocord's text-command provider defaults to `!` when a consumer omits its prefix.
+- Prod passes `TEXT_COMMAND_PREFIX` explicitly: an absent or trimmed empty value disables text commands, while a non-empty value opts in.
 - Prefix length is 1-8 Unicode code points.
 - Command names normalize to lowercase.
 - Ignore bot and webhook-authored messages.
