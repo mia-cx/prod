@@ -22,6 +22,7 @@ Prod policy boundary that only permits guild-level rule administration.
 - [x] Add package-owned Drizzle schemas, an audited SQLite rule store, and persistence tests.
 - [x] Add Discord subject/context adapters and synthetic guild hierarchy tests.
 - [x] Add Prod's guild-only policy boundary, compose a migration, and test rejection of refined contexts.
+- [x] Harden selector validation and preserve accurate audit actors across updates and removals.
 - [~] Run focused and repository-wide validation and prepare the pull request.
 
 ## Notes
@@ -33,3 +34,5 @@ Prod policy boundary that only permits guild-level rule administration.
 - 2026-07-16: SQLite schemas/store validated with package typecheck, lint, and 16 passing tests; nullable context identity is covered by a COALESCE-backed unique index.
 - 2026-07-16: Structural Discord adapters accept live discord.js-shaped objects without a runtime dependency, derive thread/category hierarchy, and pass 24 package tests.
 - 2026-07-16: Prod accepts only guild-level administration/evaluation. The generated app migration creates both package-owned tables and proves COALESCE-equivalent uniqueness through virtual scope columns. App typecheck/lint and 36 tests pass.
+- 2026-07-16: Final audit identified that exact selector kinds should reject `*`, updates should preserve the original `createdByUserId`, and Prod's store wrapper should forward an explicit removal actor.
+- 2026-07-16: Selector/audit hardening passes 25 package tests, all 36 app tests, and the complete build graph.

@@ -90,7 +90,7 @@ export type AuthorizationDecision = Readonly<{
 
 export interface PermissionRuleStore {
   upsert(rule: PermissionRule): Promise<void>;
-  remove(ruleId: string): Promise<void>;
+  remove(ruleId: string, actorUserId?: string): Promise<void>;
   listForContext(
     context: AuthorizationContext,
   ): Promise<readonly PermissionRule[]>;

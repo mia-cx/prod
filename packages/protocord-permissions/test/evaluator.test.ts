@@ -9,6 +9,8 @@ import {
   type PermissionRule,
   type PermissionRuleStore,
   type RuleObject,
+  validateAuthorizationCheck,
+  validateRuleSubject,
 } from "../src/index.js";
 
 const timestamp = "2026-07-16T10:00:00.000Z";
@@ -235,6 +237,17 @@ describe("authorization precedence", () => {
 });
 
 describe("authorization safety", () => {
+  it("rejects wildcard IDs for exact runtime and stored selectors", () => {
+    expect(() =>
+      validateAuthorizationCheck(
+        baseCheck({ subject: { subjectType: "service", subjectId: "*" } }),
+      ),
+    ).toThrow("service subjects must use an exact subjectId");
+    expect(() =>
+      validateRuleSubject({ subjectType: "role", subjectId: "*" }),
+    ).toThrow("role selectors must use an exact subjectId");
+  });
+
   it.each([
     ["guild_owner", { isGuildOwner: true, isAdministrator: false }],
     ["administrator", { isGuildOwner: false, isAdministrator: true }],

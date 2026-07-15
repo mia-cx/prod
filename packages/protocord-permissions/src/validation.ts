@@ -53,6 +53,11 @@ export const validateAuthorizationSubject = (
   subject: AuthorizationSubject,
 ): void => {
   requireIdentifier(subject.subjectId, "subject.subjectId");
+  if (subject.subjectId === "*") {
+    throw new InvalidAuthorizationInputError(
+      `${subject.subjectType} subjects must use an exact subjectId`,
+    );
+  }
   if (subject.subjectType === "user") {
     for (const roleId of subject.attributes.discordRoleIds) {
       requireIdentifier(roleId, "subject.attributes.discordRoleIds[]");
@@ -65,6 +70,11 @@ export const validateRuleSubject = (subject: RuleSubject): void => {
   if (subject.subjectType === "everyone" && subject.subjectId !== "*") {
     throw new InvalidAuthorizationInputError(
       'everyone selectors must use subjectId "*"',
+    );
+  }
+  if (subject.subjectType !== "everyone" && subject.subjectId === "*") {
+    throw new InvalidAuthorizationInputError(
+      `${subject.subjectType} selectors must use an exact subjectId`,
     );
   }
 };

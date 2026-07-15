@@ -175,6 +175,7 @@ export const createSqlitePermissionRuleStore = (
         const after: PermissionRule = {
           ...rule,
           id: existingRow.id,
+          createdByUserId: existingRow.createdByUserId,
           createdAt: existingRow.createdAt,
         };
         transaction

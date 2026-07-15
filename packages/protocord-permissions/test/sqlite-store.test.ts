@@ -107,17 +107,23 @@ describe("SQLite permission rule store", () => {
       fixtureRule({
         id: "replacement-id",
         permit: "deny",
+        createdByUserId: "admin-2",
         updatedAt: "2026-07-16T11:00:00.000Z",
       }),
     );
 
     const stored = await store.listForContext({ guildId: "guild-1" });
     expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({ id: "rule-1", permit: "deny" });
+    expect(stored[0]).toMatchObject({
+      id: "rule-1",
+      permit: "deny",
+      createdByUserId: "admin-1",
+    });
     await expect(store.listEvents("rule-1")).resolves.toMatchObject([
       { eventType: "created", before: null, after: { permit: "allow" } },
       {
         eventType: "updated",
+        actorUserId: "admin-2",
         before: { permit: "allow" },
         after: { permit: "deny" },
       },

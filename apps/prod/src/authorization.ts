@@ -43,7 +43,8 @@ export const createProdPermissionRuleStore = (
       assertProdAuthorizationContext(rule.context);
       await store.upsert(rule);
     },
-    remove: (ruleId: string): Promise<void> => store.remove(ruleId),
+    remove: (ruleId: string, actorUserId?: string): Promise<void> =>
+      store.remove(ruleId, actorUserId),
     listForContext: async (
       context: AuthorizationContext,
     ): Promise<readonly PermissionRule[]> => {

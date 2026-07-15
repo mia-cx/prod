@@ -79,11 +79,11 @@ describe("Prod authorization policy boundary", () => {
       context: guildRule.context,
       object: guildRule.object,
     });
-    await store.remove(guildRule.id);
+    await store.remove(guildRule.id, "admin-2");
 
     expect(backing.upsert).toHaveBeenCalledWith(guildRule);
     expect(backing.listForObject).toHaveBeenCalledOnce();
-    expect(backing.remove).toHaveBeenCalledWith(guildRule.id);
+    expect(backing.remove).toHaveBeenCalledWith(guildRule.id, "admin-2");
   });
 
   it("refuses to evaluate refined contexts before resource lookup", async () => {
