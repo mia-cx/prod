@@ -1,0 +1,18 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+
+catalog:
+  "@types/node": 24.13.3
+  "@vitest/coverage-v8": 4.1.10
+  eslint: 10.7.0
+  typescript: 5.9.3
+  vitest: 4.1.10
+
+minimumReleaseAgeExclude:
+  - "@discordjs/rest@2.6.2"
+  - discord.js@14.27.0

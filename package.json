@@ -1,0 +1,31 @@
+{
+  "name": "prod",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.13.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "clean": "turbo run clean && rm -rf .turbo coverage",
+    "dev": "turbo run dev --filter=@prod/app",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "check": "turbo run lint typecheck test build",
+    "pack:check": "turbo run pack:check",
+    "boundaries:check": "node scripts/check-package-boundaries.mjs"
+  },
+  "devDependencies": {
+    "eslint": "10.7.0",
+    "pnpm": "11.13.0",
+    "prettier": "3.9.5",
+    "turbo": "2.10.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.64.0",
+    "@vitest/coverage-v8": "4.1.10",
+    "vitest": "4.1.10"
+  }
+}
