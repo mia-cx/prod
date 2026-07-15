@@ -10,7 +10,7 @@ import {
 describe("migration composition", () => {
   it("owns package and application manifests in a fixed order", () => {
     expect(migrationManifests.map(({ owner }) => owner)).toEqual([
-      "authorization",
+      "permissions",
       "model-config",
       "prod",
     ]);

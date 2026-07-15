@@ -1,5 +1,5 @@
-import { authorizationMigrationManifest } from "@prod/authorization";
-import { modelConfigMigrationManifest } from "@prod/model-config";
+import { modelConfigMigrationManifest } from "@protocord/model-config";
+import { permissionsMigrationManifest } from "@protocord/permissions";
 
 import type { ProdDatabase } from "./database.js";
 
@@ -19,7 +19,7 @@ export const prodMigrationManifest: MigrationManifest = Object.freeze({
 });
 
 export const migrationManifests: readonly MigrationManifest[] = Object.freeze([
-  authorizationMigrationManifest,
+  permissionsMigrationManifest,
   modelConfigMigrationManifest,
   prodMigrationManifest,
 ]);
@@ -36,4 +36,3 @@ export const applyMigrations = async (
     onManifestApplied(manifest.owner);
   }
 };
-

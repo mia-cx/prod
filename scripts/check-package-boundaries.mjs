@@ -7,23 +7,23 @@ const packagesRoot = join(root, "packages");
 const errors = [];
 
 const expectedPackages = new Set([
-  "@prod/authorization",
   "@prod/config-eslint",
   "@prod/config-typescript",
-  "@prod/discord-actions",
-  "@prod/discord-actions-ai",
-  "@prod/discord-settings",
-  "@prod/model-config",
+  "@protocord/ai",
+  "@protocord/model-config",
+  "@protocord/permissions",
+  "@protocord/settings",
+  "protocord",
 ]);
 
 const allowedInternalDependencies = new Map([
-  ["@prod/authorization", new Set()],
   ["@prod/config-eslint", new Set()],
   ["@prod/config-typescript", new Set()],
-  ["@prod/discord-actions", new Set()],
-  ["@prod/discord-actions-ai", new Set(["@prod/discord-actions"])],
-  ["@prod/discord-settings", new Set()],
-  ["@prod/model-config", new Set(["@prod/discord-settings"])],
+  ["@protocord/ai", new Set(["protocord"])],
+  ["@protocord/model-config", new Set(["@protocord/settings"])],
+  ["@protocord/permissions", new Set()],
+  ["@protocord/settings", new Set()],
+  ["protocord", new Set()],
 ]);
 
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
@@ -94,7 +94,7 @@ for (const { directory, manifest } of packageManifests) {
     ...manifest.optionalDependencies,
     ...manifest.peerDependencies,
     ...manifest.devDependencies,
-  }).filter(([name]) => name.startsWith("@prod/"));
+  }).filter(([name]) => actualPackages.has(name));
   const allowed = allowedInternalDependencies.get(manifest.name) ?? new Set();
   for (const [dependency, version] of internalDependencies) {
     if (!allowed.has(dependency)) {
@@ -108,7 +108,11 @@ for (const { directory, manifest } of packageManifests) {
   const sourceRoot = join(directory, "src");
   for (const file of (await listFiles(sourceRoot)).filter((path) => path.endsWith(".ts"))) {
     const source = await readFile(file, "utf8");
-    if (source.includes("apps/prod") || /@prod\/[^"']+\/src(?:\/|["'])/.test(source)) {
+    if (
+      source.includes("apps/prod") ||
+      /(?:@prod|@protocord)\/[^"']+\/src(?:\/|["'])/.test(source) ||
+      /["']protocord\/src(?:\/|["'])/.test(source)
+    ) {
       errors.push(`${relative(root, file)} imports an application or package internal path`);
     }
 
@@ -124,14 +128,14 @@ for (const { directory, manifest } of packageManifests) {
 
 const appManifest = await readJson(join(root, "apps/prod/package.json"));
 const expectedAppDependencies = new Set([
-  "@prod/authorization",
-  "@prod/discord-actions",
-  "@prod/discord-actions-ai",
-  "@prod/discord-settings",
-  "@prod/model-config",
+  "@protocord/ai",
+  "@protocord/model-config",
+  "@protocord/permissions",
+  "@protocord/settings",
+  "protocord",
 ]);
 for (const [dependency, version] of Object.entries(appManifest.dependencies ?? {}).filter(
-  ([name]) => name.startsWith("@prod/"),
+  ([name]) => actualPackages.has(name),
 )) {
   if (!expectedAppDependencies.has(dependency)) {
     errors.push(`apps/prod may not depend on ${dependency}`);
@@ -152,4 +156,3 @@ if (errors.length > 0) {
 } else {
   console.log(`Package boundaries valid for ${packageManifests.length} reusable packages.`);
 }
-

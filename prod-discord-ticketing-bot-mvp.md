@@ -19,7 +19,7 @@ The MVP will provide:
 - An embedded context-subject-object-verb-permit authorization system.
 - A Components v2 settings UI using combined Discord mentionable selects for users and roles.
 - OpenRouter model configuration and encrypted guild BYOK.
-- Reusable deep modules for Discord actions, AI tool exposure, settings, model configuration, and authorization.
+- Protocord: a componentized Discord.js action framework with AI, permissions, settings, and model-configuration extensions.
 - A pnpm workspace orchestrated by Turborepo.
 - SQLite persistence, audit history, Docker, Compose, Kubernetes, Helm, and CI.
 
@@ -47,7 +47,7 @@ Use:
 - ESLint and Prettier
 - Structured logging with secrets redacted
 
-Prod begins as a monorepo. Package names are provisional and all workspace packages remain private until after the MVP; naming, registry scope, publishing, and repository extraction are explicitly post-MVP work.
+Prod begins as a monorepo. Protocord package identities are deliberate, but every workspace package remains private until publishing and repository extraction are evaluated after the MVP. Prod-specific application and tooling packages retain the `@prod/*` scope.
 
 Repository layout:
 
@@ -62,11 +62,11 @@ apps/
     package.json
 
 packages/
-  authorization/
-  discord-actions/
-  discord-actions-ai/
-  discord-settings/
-  model-config/
+  protocord/
+  protocord-ai/
+  protocord-permissions/
+  protocord-settings/
+  protocord-model-config/
   config-eslint/
   config-typescript/
 
@@ -91,13 +91,13 @@ Package dependency direction:
 
 ```mermaid
 flowchart TD
-    PROD[apps/prod] --> AUTH[authorization]
-    PROD --> ACTIONS[discord-actions]
-    PROD --> ACTIONSAI[discord-actions-ai]
-    PROD --> SETTINGS[discord-settings]
-    PROD --> MODEL[model-config]
+    PROD[apps/prod] --> PERMISSIONS["@protocord/permissions"]
+    PROD --> CORE[protocord]
+    PROD --> AI["@protocord/ai"]
+    PROD --> SETTINGS["@protocord/settings"]
+    PROD --> MODEL["@protocord/model-config"]
 
-    ACTIONSAI --> ACTIONS
+    AI --> CORE
     MODEL --> SETTINGS
 ```
 
@@ -110,8 +110,8 @@ Rules for deep, extractable packages:
 - Workspace dependencies use `workspace:*`.
 - Packages own their schemas and migrations where they persist data; the Prod app invokes package migrations in a fixed startup order.
 - Third-party boundaries remain behind package adapters.
-- Integration glue belongs in `apps/prod` unless one package is intentionally a consumer of another, as with `model-config` consuming `discord-settings`.
-- Do not create a generic shared-utils or all-purpose bot-framework package.
+- Integration glue belongs in `apps/prod` unless one package is intentionally a consumer of another, as with `@protocord/model-config` consuming `@protocord/settings`.
+- Keep Protocord focused on composable Discord action and interaction contracts; do not turn it into a shared-utils package or move Prod domain behavior into it.
 - CI runs a package packing smoke test so each reusable package can eventually be extracted without source rewrites.
 
 Root scripts delegate to Turbo:
@@ -359,7 +359,7 @@ AI may suggest multiple eligible staff members but cannot assign them in the MVP
 
 ## 6. Embedded fine-grained authorization
 
-Implement `packages/authorization` as a local context-subject-object-verb-permit engine backed by Prod's SQLite database. There is no external authorization process or datastore.
+Implement `@protocord/permissions` in `packages/protocord-permissions` as a local context-subject-object-verb-permit engine backed by consumer-provided SQLite storage. Prod embeds it in-process; there is no external authorization process or datastore.
 
 ### Context, subject, object, verb, and permit
 
@@ -611,11 +611,13 @@ Advanced custom-rule flow:
 
 Discord role membership is evaluated from the invoking member's current roles. Prod does not maintain a user-to-role synchronization table.
 
-## 8. `discord-actions` and `discord-actions-ai`
+## 8. `protocord` and `@protocord/ai`
 
-### `discord-actions`
+### `protocord`
 
-`packages/discord-actions` is the canonical action runtime and Discord trigger framework. It is a deep module, not a collection of command helpers.
+`packages/protocord` is the canonical action runtime and Discord trigger framework. It is a deep module, not a collection of command helpers.
+
+The name combines Proteus and Discord. Protocord is designed as a slot-in extension layer over discord.js: consumers compose a core registry with independently installable trigger providers and capability packages. Extensions depend on public Protocord contracts, never on Prod application code.
 
 It ships no concrete actions or default commands in the MVP. All ticketing, staff, settings, and AI-facing action implementations are application code in `apps/prod`. A possible generic default such as `/ping` is deferred until there is a deliberate default-action design.
 
@@ -706,13 +708,13 @@ Text-command behavior:
 - A consumed text command never continues into Prod's normal AI message pipeline.
 - Duplicate text command names fail at registry construction.
 
-The framework must be extensible by trigger providers rather than a permanently closed trigger union. Built-in trigger constructors return opaque, typed trigger definitions registered with their provider. "Built-in" refers only to trigger providers, never to concrete actions. A future package can register another provider without changing `discord-actions` action execution.
+The framework must be extensible by trigger providers rather than a permanently closed trigger union. Built-in trigger constructors return opaque, typed trigger definitions registered with their provider. "Built-in" refers only to trigger providers, never to concrete actions. A future package can register another provider without changing `protocord` action execution.
 
 Webhook triggers are a planned example of this extension point, but no webhook trigger, HTTP server, webhook authentication, or webhook package is implemented in the MVP.
 
-### `discord-actions-ai`
+### `@protocord/ai`
 
-`packages/discord-actions-ai` depends on `discord-actions` and exposes eligible registered actions as AI tools.
+`packages/protocord-ai` depends on `protocord` and exposes eligible registered actions as AI tools.
 
 It owns:
 
@@ -935,9 +937,9 @@ Each entry includes:
 
 Reporter-visible messages never include labels, assignments, suggestions, permission rules, or internal summaries.
 
-## 12. `discord-settings` and settings categories
+## 12. `@protocord/settings` and settings categories
 
-`packages/discord-settings` is a deep Discord Components v2 settings runtime adapted from Honeybot. It owns the entire render-to-interaction seam rather than exporting shallow component helpers.
+`packages/protocord-settings` is a deep Discord Components v2 settings runtime adapted from Honeybot. It owns the entire render-to-interaction seam rather than exporting shallow component helpers.
 
 It owns:
 
@@ -995,9 +997,9 @@ Each label has a stable ID, display name, normalized unique name, AI-facing desc
 
 ### Model
 
-The Model category is supplied by `packages/model-config`; it is not implemented directly in `apps/prod`.
+The Model category is supplied by `packages/protocord-model-config`; it is not implemented directly in `apps/prod`.
 
-`model-config` deliberately depends on `discord-settings` and exports a ready-to-register category structured around AI providers, models, and BYOK credentials:
+`@protocord/model-config` deliberately depends on `@protocord/settings` and exports a ready-to-register category structured around AI providers, models, and BYOK credentials:
 
 - Fixed provider: `openrouter`
 - Select or enter triage model
@@ -1009,12 +1011,12 @@ The Model category is supplied by `packages/model-config`; it is not implemented
 
 All component and modal routes recheck authorization immediately before mutation.
 
-## 13. `model-config` and BYOK security
+## 13. `@protocord/model-config` and BYOK security
 
-`packages/model-config` owns both secure model configuration storage and its `discord-settings` category. This dependency is intentional:
+`packages/protocord-model-config` owns both secure model configuration storage and its `@protocord/settings` category. This dependency is intentional:
 
 ```text
-model-config -> discord-settings
+@protocord/model-config -> @protocord/settings
 ```
 
 The package owns:
@@ -1027,7 +1029,7 @@ The package owns:
 - Encrypted BYOK storage
 - Key hints, clearing, fallback, and error semantics
 - Model configuration schema and migrations
-- A settings-category factory that binds the secure store to `discord-settings`
+- A settings-category factory that binds the secure store to `@protocord/settings`
 
 The package does not own:
 
@@ -1058,8 +1060,8 @@ Use checked-in Drizzle migrations applied automatically at startup.
 
 Migration ownership follows package ownership:
 
-- `authorization` owns the permission-rule and permission-rule-event schema and migrations.
-- `model-config` owns the model configuration and encrypted-credential schema and migrations.
+- `@protocord/permissions` owns the permission-rule and permission-rule-event schema and migrations.
+- `@protocord/model-config` owns the model configuration and encrypted-credential schema and migrations.
 - `apps/prod` owns ticket, label, assignee, suggestion, guild setup, and ticket-audit schema and migrations.
 - The Prod startup migrator invokes package migrations in a fixed versioned order before app migrations.
 - Package persistence tests run against isolated in-memory SQLite databases.
@@ -1075,7 +1077,7 @@ Stores hub ID, information-message ID, assistant identity, tone, and initializat
 
 ### `models`
 
-Owned by `model-config`.
+Owned by `@protocord/model-config`.
 
 ```text
 guild_id, purpose, provider, model_id,
@@ -1087,7 +1089,7 @@ Initial purpose: `triage`.
 
 ### `permission_rules`
 
-Owned by `authorization`.
+Owned by `@protocord/permissions`.
 
 ```text
 id, guild_id, category_id nullable, channel_id nullable,
@@ -1098,7 +1100,7 @@ created_by_user_id, created_at, updated_at
 
 ### `permission_rule_events`
 
-Owned by `authorization`.
+Owned by `@protocord/permissions`.
 
 ```text
 id, guild_id, category_id nullable, channel_id nullable,
@@ -1243,8 +1245,8 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 
 ### Action system
 
-- `discord-actions` registers a consumer-supplied fixture action with multiple slash aliases.
-- `discord-actions` exports no concrete actions, default commands, or default action catalog.
+- `protocord` registers a consumer-supplied fixture action with multiple slash aliases.
+- `protocord` exports no concrete actions, default commands, or default action catalog.
 - Prod's concrete action catalog is implemented under `apps/prod` and composed into the reusable registry.
 - Slash, message-context, user-context, and text trigger providers dispatch through the same action lifecycle.
 - Text commands honor the configured prefix, normalize command names, preserve the raw argument tail, and ignore bot/webhook messages.
@@ -1252,7 +1254,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Consumed text commands never reach the normal AI message pipeline.
 - Duplicate action and per-provider trigger names fail fast with atomic registry rollback.
 - A synthetic future trigger provider can register and dispatch without modifying built-in trigger code.
-- `discord-actions-ai` exposes only explicitly eligible actions as tools.
+- `@protocord/ai` exposes only explicitly eligible actions as tools.
 - Discord and AI triggers route to the same safe action.
 - Staff and settings actions cannot expose AI tools.
 - Inputs, availability, and authorization are rechecked before execution.
@@ -1336,7 +1338,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 
 ### Settings
 
-- A synthetic `discord-settings` consumer completes render, navigate, select, modal, validate, mutate, and rerender flows through the package boundary.
+- A synthetic `@protocord/settings` consumer completes render, navigate, select, modal, validate, mutate, and rerender flows through the package boundary.
 - Versioned custom IDs round-trip and reject unknown versions.
 - Combined mentionable selects handle users and roles.
 - Presets add the correct individual rules.
@@ -1344,7 +1346,7 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Unauthorized users cannot view or mutate settings.
 - Permission changes are audited.
 - Hub, label, identity, and tone categories round-trip.
-- `model-config` registers as a consumer-provided `discord-settings` category.
+- `@protocord/model-config` registers as a consumer-provided `@protocord/settings` category.
 - Model, provider, catalog, and BYOK controls round-trip through that category.
 - Hub information posting is idempotent.
 
@@ -1381,17 +1383,17 @@ Use Honeybot's current default OpenRouter model as the initial `DEFAULT_TRIAGE_M
 - Discord is the source of truth for message history.
 - A ticket may have any number of assignees.
 - AI assignment is deferred; AI only suggests assignees.
-- The permission engine is embedded in Prod and stored in SQLite.
+- The `@protocord/permissions` engine is embedded in Prod and stored through its SQLite adapter.
 - Authorization uses independent context, subject, object, verb, and permit dimensions; subjects and objects never carry a guild ID.
-- The reusable authorization SDK supports channel and category context overrides, but Prod MVP creates, resolves, and administers guild-context rules only.
+- The reusable `@protocord/permissions` extension supports channel and category context overrides, but Prod MVP creates, resolves, and administers guild-context rules only.
 - Users and roles share combined mentionable settings controls.
 - pnpm owns the workspace and lockfile; Turbo owns only task orchestration and caching.
-- Workspace package names, registry scopes, publishing strategy, and repository extraction are deferred until after the Prod MVP.
-- `discord-actions` includes slash, message-context, user-context, and configurable-prefix text trigger providers, but no concrete actions or default commands.
+- Protocord packages remain private workspace packages during the MVP; publishing strategy and repository extraction are deferred.
+- `protocord` includes slash, message-context, user-context, and configurable-prefix text trigger providers, but no concrete actions or default commands.
 - Every MVP action implementation lives in `apps/prod`; a possible generic `/ping` action remains deferred.
 - Webhook triggers are an explicit future extension and are not part of the MVP.
-- `discord-actions-ai` depends on `discord-actions` and adapts eligible actions into AI tools.
-- `model-config` depends on `discord-settings` and supplies the complete AI provider/model/BYOK category.
+- `@protocord/ai` depends on `protocord` and adapts eligible actions into AI tools.
+- `@protocord/model-config` depends on `@protocord/settings` and supplies the complete AI provider/model/BYOK category.
 - Generic labels are editable per guild.
 - Command names are initial MVP names and remain isolated in trigger metadata for cheap later changes.
 - No reporter cancellation action is included; authorized staff close tickets.

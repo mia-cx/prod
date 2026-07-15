@@ -1,14 +1,13 @@
-import { authorizationBoundary } from "@prod/authorization";
-import { discordActionsBoundary } from "@prod/discord-actions";
-import { discordActionsAiBoundary } from "@prod/discord-actions-ai";
-import { discordSettingsBoundary } from "@prod/discord-settings";
-import { modelConfigBoundary } from "@prod/model-config";
+import { protocordAiBoundary } from "@protocord/ai";
+import { modelConfigBoundary } from "@protocord/model-config";
+import { permissionsBoundary } from "@protocord/permissions";
+import { settingsBoundary } from "@protocord/settings";
+import { protocordBoundary } from "protocord";
 
 export const packageBoundaries = Object.freeze([
-  authorizationBoundary.name,
-  discordActionsBoundary.name,
-  discordActionsAiBoundary.name,
-  discordSettingsBoundary.name,
+  permissionsBoundary.name,
+  protocordBoundary.name,
+  protocordAiBoundary.name,
+  settingsBoundary.name,
   modelConfigBoundary.name,
 ]);
-
