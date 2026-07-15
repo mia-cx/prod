@@ -248,6 +248,36 @@ describe("built-in Discord interaction providers", () => {
     expect(present).not.toHaveBeenCalled();
   });
 
+  it("responds with no autocomplete choices when completion fails", async () => {
+    const failure = new Error("completion failed");
+    const registry = createActionRegistry<TestContext>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    registry.registerAction(
+      action([
+        slashCommand<string, TestContext>({
+          name: "ticket",
+          description: "Find a ticket",
+          parse: () => "unused",
+          autocomplete: {
+            availability: () => ({ available: true }),
+            access: { kind: "public" },
+            complete: () => Promise.reject(failure),
+          },
+        }),
+      ]),
+    );
+    const respond = vi.fn().mockResolvedValue(undefined);
+    const event = interaction("autocomplete", "ticket", { respond });
+
+    await expect(
+      dispatchDiscordAutocomplete(registry, event, context()),
+    ).rejects.toBe(failure);
+
+    expect(respond).toHaveBeenCalledOnce();
+    expect(respond).toHaveBeenCalledWith([]);
+  });
+
   it("does not expose autocomplete choices when authorization fails", async () => {
     const complete = vi.fn(() => [{ name: "Private ticket", value: "secret" }]);
     const registry = createActionRegistry<TestContext, TestCheck>({

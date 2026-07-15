@@ -387,33 +387,57 @@ export async function dispatchDiscordAutocomplete<
     return false;
   }
 
-  const availability = await autocomplete.availability(context);
+  const runAutocompleteStep = async <Value>(
+    step: () => Value | PromiseLike<Value>,
+  ): Promise<Value> => {
+    try {
+      return await step();
+    } catch (error) {
+      await interaction.respond([]);
+      throw error;
+    }
+  };
+
+  const availability = await runAutocompleteStep(() =>
+    autocomplete.availability(context),
+  );
   if (!availability.available) {
     await interaction.respond([]);
     return true;
   }
 
-  if (autocomplete.access.kind === "authorized") {
+  const access = autocomplete.access;
+  if (access.kind === "authorized") {
     if (!authorize) {
       await interaction.respond([]);
       return true;
     }
-    const check = await autocomplete.access.authorization(interaction, context);
+    const check = await runAutocompleteStep(() =>
+      access.authorization(interaction, context),
+    );
     const invocation = autocompleteInvocation(interaction, trigger.name);
-    const decision = await authorize(check, invocation, context);
+    const decision = await runAutocompleteStep(() =>
+      authorize(check, invocation, context),
+    );
     if (!decision.authorized) {
       await interaction.respond([]);
       return true;
     }
   }
 
-  const readiness = await autocomplete.readiness?.(interaction, context);
+  const readinessCheck = autocomplete.readiness;
+  const readiness = readinessCheck
+    ? await runAutocompleteStep(() => readinessCheck(interaction, context))
+    : undefined;
   if (readiness && !readiness.available) {
     await interaction.respond([]);
     return true;
   }
 
-  await interaction.respond(await autocomplete.complete(interaction, context));
+  const choices = await runAutocompleteStep(() =>
+    autocomplete.complete(interaction, context),
+  );
+  await interaction.respond(choices);
   return true;
 }
 
