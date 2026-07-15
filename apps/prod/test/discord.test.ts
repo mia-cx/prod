@@ -4,7 +4,6 @@ const discordMock = vi.hoisted(() => ({
   autoReady: true,
   readyHandler: undefined as undefined | ((client: unknown) => void),
   interactionHandler: undefined as undefined | ((interaction: unknown) => void),
-  guildCommandSet: vi.fn(async (commands: unknown) => commands),
   login: vi.fn(async (token: string) => token),
   destroy: vi.fn(),
 }));
@@ -17,15 +16,6 @@ vi.mock("discord.js", () => ({
   GatewayIntentBits: { Guilds: 1 },
   Client: class {
     user = { id: "345678901234567890", tag: "Prod#0001" };
-    guilds = {
-      cache: new Map([
-        [
-          "234567890123456789",
-          { commands: { set: discordMock.guildCommandSet } },
-        ],
-      ]),
-      fetch: vi.fn(),
-    };
 
     once(_event: string, handler: (client: unknown) => void): this {
       discordMock.readyHandler = handler;
@@ -65,7 +55,6 @@ describe("createDiscordGateway", () => {
     discordMock.autoReady = true;
     discordMock.readyHandler = undefined;
     discordMock.interactionHandler = undefined;
-    discordMock.guildCommandSet.mockClear();
     discordMock.login.mockClear();
     discordMock.destroy.mockClear();
   });
@@ -105,18 +94,21 @@ describe("createDiscordGateway", () => {
     expect(discordMock.destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("registers development-guild commands and dispatches interactions", async () => {
-    const commands = [{ name: "ping", description: "Ping" }];
+  it("refreshes development-guild commands and dispatches interactions", async () => {
+    const refreshCommands = vi.fn(async () => undefined);
     const handleInteraction = vi.fn(async () => undefined);
     const handleError = vi.fn();
     const gateway = createDiscordGateway({
-      actions: { commands, handleInteraction, handleError },
+      actions: { refreshCommands, handleInteraction, handleError },
       developmentGuildId: "234567890123456789",
     });
 
     await gateway.connect("development-token", new AbortController().signal);
 
-    expect(discordMock.guildCommandSet).toHaveBeenCalledWith(commands);
+    expect(refreshCommands).toHaveBeenCalledWith(
+      expect.anything(),
+      "234567890123456789",
+    );
     const interaction = { id: "interaction-1" };
     discordMock.interactionHandler?.(interaction);
     await vi.waitFor(() =>

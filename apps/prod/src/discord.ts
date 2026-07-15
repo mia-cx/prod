@@ -2,7 +2,6 @@ import {
   Client,
   Events,
   GatewayIntentBits,
-  type ApplicationCommandData,
   type Interaction,
 } from "discord.js";
 
@@ -17,7 +16,10 @@ export interface DiscordGateway {
 }
 
 export type DiscordActionSurface = Readonly<{
-  commands: readonly ApplicationCommandData[];
+  refreshCommands(
+    client: Client<true>,
+    developmentGuildId: string,
+  ): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
   handleError(error: unknown): void;
 }>;
@@ -94,10 +96,7 @@ const prepareReadyClient = async (
   options: DiscordGatewayOptions,
 ): Promise<DiscordIdentity> => {
   if (options.actions) {
-    const guild =
-      client.guilds.cache.get(options.developmentGuildId) ??
-      (await client.guilds.fetch(options.developmentGuildId));
-    await guild.commands.set(options.actions.commands);
+    await options.actions.refreshCommands(client, options.developmentGuildId);
   }
 
   return {

@@ -448,4 +448,58 @@ describe("Discord application command registration", () => {
       { guildId: "guild-2", error: cleanupError },
     );
   });
+
+  it("replaces a guild catalog on restart to update and remove commands", async () => {
+    let published: readonly unknown[] = [];
+    const set = vi.fn(async (commands: readonly unknown[]) => {
+      published = commands;
+    });
+    const guild = { id: "guild-1", commands: { set } };
+    const fetch = vi.fn(async () => guild);
+    const client = {
+      guilds: { cache: new Map(), fetch },
+    } as unknown as Client<true>;
+    const target = { kind: "guild" as const, guildId: "guild-1" };
+    const original = registryWithCommands();
+
+    await registerDiscordCommands(client, original, { target });
+    expect(published).toEqual(getDiscordCommandRegistration(original));
+    expect(published).toContainEqual({
+      type: ApplicationCommandType.Message,
+      name: "Open ticket",
+    });
+
+    const restarted = createActionRegistry<TestContext>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    restarted.registerAction(
+      action([
+        slashCommand({
+          name: "ticket",
+          description: "Find an updated ticket",
+          parse: () => "ticket",
+        }),
+        userContextMenu({ name: "User tickets", parse: () => "user" }),
+      ]),
+    );
+
+    await registerDiscordCommands(client, restarted, { target });
+
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(published).toEqual(getDiscordCommandRegistration(restarted));
+    expect(published).toContainEqual(
+      expect.objectContaining({
+        type: ApplicationCommandType.ChatInput,
+        name: "ticket",
+        description: "Find an updated ticket",
+      }),
+    );
+    expect(published).not.toContainEqual(
+      expect.objectContaining({
+        type: ApplicationCommandType.Message,
+        name: "Open ticket",
+      }),
+    );
+  });
 });

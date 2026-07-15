@@ -450,19 +450,38 @@ export type DiscordCommandRegistrationLogger = Readonly<{
   ): void;
 }>;
 
+export type DiscordCommandRegistrationTarget =
+  | Readonly<{
+      kind: "global";
+      clearGuildCommands?: boolean;
+    }>
+  | Readonly<{
+      kind: "guild";
+      guildId: string;
+    }>;
+
 export async function registerDiscordCommands<Context, AuthorizationCheck>(
   client: Client<true>,
   registry: ActionRegistry<Context, AuthorizationCheck>,
   options?: Readonly<{
-    clearGuildCommands?: boolean;
     logger?: DiscordCommandRegistrationLogger;
+    target?: DiscordCommandRegistrationTarget;
   }>,
 ): Promise<void> {
-  await client.application.commands.set(
-    getDiscordCommandRegistration(registry),
-  );
+  const commands = getDiscordCommandRegistration(registry);
+  const target = options?.target ?? { kind: "global" };
 
-  if (options?.clearGuildCommands === false) {
+  if (target.kind === "guild") {
+    const guild =
+      client.guilds.cache.get(target.guildId) ??
+      (await client.guilds.fetch(target.guildId));
+    await guild.commands.set(commands);
+    return;
+  }
+
+  await client.application.commands.set(commands);
+
+  if (target.clearGuildCommands === false) {
     return;
   }
 

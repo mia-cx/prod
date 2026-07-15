@@ -5,6 +5,7 @@ import {
   createDiscordInteractionProviders,
   getDiscordCommandRegistration,
   handleDiscordInteraction,
+  registerDiscordCommands,
 } from "protocord";
 
 import type { DiscordActionSurface } from "../discord.js";
@@ -30,6 +31,10 @@ export const createProdActionRuntime = (logger: Logger): ProdActionRuntime => {
   return Object.freeze({
     actionCount: registry.actions.length,
     commands: getDiscordCommandRegistration(registry),
+    refreshCommands: (client, developmentGuildId) =>
+      registerDiscordCommands(client, registry, {
+        target: { kind: "guild", guildId: developmentGuildId },
+      }),
     handleInteraction: async (interaction: Interaction) => {
       const handled = await handleDiscordInteraction(
         registry,

@@ -39,6 +39,7 @@ export {
 export type {
   DiscordAcknowledgement,
   DiscordAutocomplete,
+  DiscordCommandRegistrationTarget,
   DiscordCommandRegistrationLogger,
   DiscordInteractionHandleResult,
   MessageContextMenuTrigger,

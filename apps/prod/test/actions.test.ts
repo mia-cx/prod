@@ -1,6 +1,7 @@
 import {
   ApplicationCommandType,
   type ChatInputCommandInteraction,
+  type Client,
   type Interaction,
 } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
@@ -44,6 +45,16 @@ describe("Prod action runtime", () => {
         options: [],
       },
     ]);
+
+    const set = vi.fn().mockResolvedValue(undefined);
+    const client = {
+      guilds: {
+        cache: new Map([["guild-1", { commands: { set } }]]),
+        fetch: vi.fn(),
+      },
+    } as unknown as Client<true>;
+    await runtime.refreshCommands(client, "guild-1");
+    expect(set).toHaveBeenCalledWith(runtime.commands);
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
