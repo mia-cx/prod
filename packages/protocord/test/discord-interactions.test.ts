@@ -278,6 +278,83 @@ describe("built-in Discord interaction providers", () => {
     expect(respond).toHaveBeenCalledWith([]);
   });
 
+  it("preserves autocomplete and fallback response failures", async () => {
+    const completionFailure = new Error("completion failed");
+    const responseFailure = new Error("response failed");
+    const registry = createActionRegistry<TestContext>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    registry.registerAction(
+      action([
+        slashCommand<string, TestContext>({
+          name: "ticket",
+          description: "Find a ticket",
+          parse: () => "unused",
+          autocomplete: {
+            availability: () => ({ available: true }),
+            access: { kind: "public" },
+            complete: () => Promise.reject(completionFailure),
+          },
+        }),
+      ]),
+    );
+    const respond = vi.fn().mockRejectedValue(responseFailure);
+
+    await expect(
+      dispatchDiscordAutocomplete(
+        registry,
+        interaction("autocomplete", "ticket", { respond }),
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      errors: [completionFailure, responseFailure],
+      cause: completionFailure,
+    });
+    expect(respond).toHaveBeenCalledOnce();
+    expect(respond).toHaveBeenCalledWith([]);
+  });
+
+  it("reports a missing autocomplete authorizer after responding safely", async () => {
+    const readiness = vi.fn(() => ({ available: true as const }));
+    const complete = vi.fn(() => [{ name: "Private ticket", value: "secret" }]);
+    const registry = createActionRegistry<TestContext, TestCheck>({
+      providers: createDiscordInteractionProviders<TestContext>(),
+    });
+    registry.registerAction(
+      action([
+        slashCommand<string, TestContext, TestCheck>({
+          name: "ticket",
+          description: "Find a ticket",
+          parse: () => "unused",
+          autocomplete: {
+            availability: () => ({ available: true }),
+            access: {
+              kind: "authorized",
+              authorization: () => ({ permission: "tickets.view" }),
+            },
+            readiness,
+            complete,
+          },
+        }),
+      ]),
+    );
+    const respond = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      dispatchDiscordAutocomplete(
+        registry,
+        interaction("autocomplete", "ticket", { respond }),
+        context(),
+      ),
+    ).rejects.toThrow(
+      "Autocomplete for ticket requires authorization but no authorizer was provided",
+    );
+    expect(respond).toHaveBeenCalledOnce();
+    expect(respond).toHaveBeenCalledWith([]);
+    expect(readiness).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it("does not expose autocomplete choices when authorization fails", async () => {
     const complete = vi.fn(() => [{ name: "Private ticket", value: "secret" }]);
     const registry = createActionRegistry<TestContext, TestCheck>({

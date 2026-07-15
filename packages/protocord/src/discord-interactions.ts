@@ -387,14 +387,26 @@ export async function dispatchDiscordAutocomplete<
     return false;
   }
 
+  const failAutocomplete = async (error: unknown): Promise<never> => {
+    try {
+      await interaction.respond([]);
+    } catch (responseError) {
+      throw new AggregateError(
+        [error, responseError],
+        "Autocomplete failed and its empty fallback response also failed",
+        { cause: error },
+      );
+    }
+    throw error;
+  };
+
   const runAutocompleteStep = async <Value>(
     step: () => Value | PromiseLike<Value>,
   ): Promise<Value> => {
     try {
       return await step();
     } catch (error) {
-      await interaction.respond([]);
-      throw error;
+      return failAutocomplete(error);
     }
   };
 
@@ -409,8 +421,11 @@ export async function dispatchDiscordAutocomplete<
   const access = autocomplete.access;
   if (access.kind === "authorized") {
     if (!authorize) {
-      await interaction.respond([]);
-      return true;
+      return failAutocomplete(
+        new Error(
+          `Autocomplete for ${trigger.name} requires authorization but no authorizer was provided`,
+        ),
+      );
     }
     const check = await runAutocompleteStep(() =>
       access.authorization(interaction, context),
