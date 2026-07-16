@@ -211,7 +211,7 @@ describe("Prod action runtime", () => {
     },
   );
 
-  it("opens the app-owned guild setup settings through /settings", async () => {
+  it("opens settings with no category or subcategory selected", async () => {
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),
       runtimeOptions,
@@ -232,18 +232,24 @@ describe("Prod action runtime", () => {
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
       "Prod settings",
     );
+    const payload = interaction.editReply.mock.calls[0]?.[0];
     expect(
       componentWithCustomId(
-        interaction.editReply.mock.calls[0]?.[0],
+        payload,
         encodeSettingsCustomId({
-          action: "channel-select",
+          action: "category",
           categoryId: "setup",
           subcategoryId: "hub",
-          fieldId: "hub-channel",
           page: 0,
         }),
       ),
-    ).toMatchObject({ min_values: 1, max_values: 1 });
+    ).toMatchObject({
+      min_values: 1,
+      max_values: 1,
+      options: [expect.objectContaining({ value: "setup" })],
+    });
+    expect(JSON.stringify(payload)).not.toContain("Support hub channel");
+    expect(JSON.stringify(payload)).not.toContain('"default":true');
   });
 
   it("routes setup component mutations before ordinary actions", async () => {

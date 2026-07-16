@@ -35,6 +35,13 @@ import {
 } from "./select-constraints.js";
 
 export type SettingsLocation = Readonly<{
+  categoryId?: string;
+  subcategoryId?: string;
+  page: number;
+  pageCount: number;
+}>;
+
+type ResolvedSettingsLocation = Readonly<{
   categoryId: string;
   subcategoryId: string;
   page: number;
@@ -101,10 +108,31 @@ async function renderSettingsView<Context>(
     );
   }
 
-  const requestedCategory =
-    request.categoryId === undefined
-      ? authorizedCategories[0]
-      : definition.categories.find(({ id }) => id === request.categoryId);
+  const routeCategory = authorizedCategories[0]!;
+  const routeSubcategory = routeCategory.subcategories[0]!;
+  const homeChildren: APIComponentInContainer[] = [
+    textDisplay(`# ${definition.title}\n## Settings`),
+    categoryNavigation(
+      authorizedCategories,
+      request.categoryId,
+      routeCategory.id,
+      routeSubcategory.id,
+    ),
+  ];
+  if (request.categoryId === undefined) {
+    const components = [
+      container("home", homeChildren, definition.accentColor),
+    ];
+    constrainTextDisplays(components);
+    return {
+      components,
+      location: { page: 0, pageCount: 0 },
+    };
+  }
+
+  const requestedCategory = definition.categories.find(
+    ({ id }) => id === request.categoryId,
+  );
   if (requestedCategory === undefined) {
     throw stale("category", request.categoryId ?? "");
   }
@@ -118,6 +146,22 @@ async function renderSettingsView<Context>(
     );
   }
 
+  const categoryChildren: APIComponentInContainer[] = [
+    textDisplay(nodeHeading(category.label, category.description)),
+    subcategoryNavigation(category, request.subcategoryId),
+  ];
+  if (request.subcategoryId === undefined) {
+    const components = [
+      container("home", homeChildren, definition.accentColor),
+      container("category", categoryChildren, definition.accentColor),
+    ];
+    constrainTextDisplays(components);
+    return {
+      components,
+      location: { categoryId: category.id, page: 0, pageCount: 0 },
+    };
+  }
+
   const subcategory = selectSubcategory(category, request.subcategoryId);
   const fieldPages = paginateFields(subcategory.fields, fixedComponentCount());
   const requestedPage = request.page ?? 0;
@@ -126,24 +170,12 @@ async function renderSettingsView<Context>(
     throw stale("page", String(requestedPage));
   }
 
-  const location: SettingsLocation = {
+  const location: ResolvedSettingsLocation = {
     categoryId: category.id,
     subcategoryId: subcategory.id,
     page: requestedPage,
     pageCount: fieldPages.length,
   };
-  const homeChildren: APIComponentInContainer[] = [
-    textDisplay(`# ${definition.title}\n## Settings`),
-  ];
-  if (authorizedCategories.length > 1) {
-    homeChildren.push(categoryNavigation(authorizedCategories, location));
-  }
-  const categoryChildren: APIComponentInContainer[] = [
-    textDisplay(nodeHeading(category.label, category.description)),
-  ];
-  if (category.subcategories.length > 1) {
-    categoryChildren.push(subcategoryNavigation(category, location));
-  }
   const subcategoryChildren: APIComponentInContainer[] = [
     textDisplay(nodeHeading(subcategory.label, subcategory.description)),
   ];
@@ -194,11 +226,8 @@ function normalizeAuthorization(
 
 function selectSubcategory<Context>(
   category: SettingsCategory<Context>,
-  requestedId: string | undefined,
+  requestedId: string,
 ): SettingsSubcategory<Context> {
-  if (requestedId === undefined) {
-    return category.subcategories[0]!;
-  }
   const subcategory = category.subcategories.find(({ id }) => id === requestedId);
   if (subcategory === undefined) {
     throw stale("subcategory", requestedId);
@@ -268,7 +297,7 @@ function fieldComponentCost<Context>(field: SettingsField<Context>): number {
 
 async function renderField<Context>(
   field: SettingsField<Context>,
-  location: SettingsLocation,
+  location: ResolvedSettingsLocation,
   context: Context,
 ): Promise<readonly APIComponentInContainer[]> {
   switch (field.kind) {
@@ -301,7 +330,7 @@ async function renderField<Context>(
 
 function renderModalField<Context>(
   field: SettingsModalField<Context>,
-  location: SettingsLocation,
+  location: ResolvedSettingsLocation,
   view: Awaited<ReturnType<SettingsModalField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
   return [
@@ -317,7 +346,7 @@ function renderModalField<Context>(
 
 function renderStringSelect<Context>(
   field: SettingsStringSelectField<Context>,
-  location: SettingsLocation,
+  location: ResolvedSettingsLocation,
   view: Awaited<ReturnType<SettingsStringSelectField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
   const bounds = selectBounds(field.id, view.options.length, view);
@@ -382,7 +411,7 @@ function renderStringSelect<Context>(
 
 function renderMentionableSelect<Context>(
   field: SettingsMentionableSelectField<Context>,
-  location: SettingsLocation,
+  location: ResolvedSettingsLocation,
   view: Awaited<ReturnType<SettingsMentionableSelectField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
   const bounds = selectBounds(field.id, undefined, view);
@@ -422,7 +451,7 @@ function renderMentionableSelect<Context>(
 
 function renderChannelSelect<Context>(
   field: SettingsChannelSelectField<Context>,
-  location: SettingsLocation,
+  location: ResolvedSettingsLocation,
   view: Awaited<ReturnType<SettingsChannelSelectField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
   const bounds = selectBounds(field.id, undefined, view);
@@ -460,15 +489,17 @@ function renderChannelSelect<Context>(
 
 function categoryNavigation<Context>(
   categories: readonly SettingsCategory<Context>[],
-  location: SettingsLocation,
+  selectedCategoryId: string | undefined,
+  routeCategoryId: string,
+  routeSubcategoryId: string,
 ): APIActionRowComponent<APIStringSelectComponent> {
   return actionRow({
     type: ComponentType.StringSelect,
     custom_id: encodeSettingsCustomId({
       action: "category",
-      categoryId: location.categoryId,
-      subcategoryId: location.subcategoryId,
-      page: location.page,
+      categoryId: routeCategoryId,
+      subcategoryId: routeSubcategoryId,
+      page: 0,
     }),
     placeholder: "Choose a settings category",
     min_values: 1,
@@ -479,22 +510,23 @@ function categoryNavigation<Context>(
       ...(category.description === undefined
         ? {}
         : { description: truncate(category.description, 100) }),
-      ...(category.id === location.categoryId ? { default: true } : {}),
+      ...(category.id === selectedCategoryId ? { default: true } : {}),
     })),
   });
 }
 
 function subcategoryNavigation<Context>(
   category: SettingsCategory<Context>,
-  location: SettingsLocation,
+  selectedSubcategoryId: string | undefined,
 ): APIActionRowComponent<APIStringSelectComponent> {
+  const routeSubcategory = category.subcategories[0]!;
   return actionRow({
     type: ComponentType.StringSelect,
     custom_id: encodeSettingsCustomId({
       action: "subcategory",
-      categoryId: location.categoryId,
-      subcategoryId: location.subcategoryId,
-      page: location.page,
+      categoryId: category.id,
+      subcategoryId: routeSubcategory.id,
+      page: 0,
     }),
     placeholder: "Choose a settings page",
     min_values: 1,
@@ -505,13 +537,13 @@ function subcategoryNavigation<Context>(
       ...(subcategory.description === undefined
         ? {}
         : { description: truncate(subcategory.description, 100) }),
-      ...(subcategory.id === location.subcategoryId ? { default: true } : {}),
+      ...(subcategory.id === selectedSubcategoryId ? { default: true } : {}),
     })),
   });
 }
 
 function pageNavigation(
-  location: SettingsLocation,
+  location: ResolvedSettingsLocation,
 ): APIActionRowComponent<APIButtonComponentWithCustomId> {
   return actionRow(
     navigationButton(
@@ -538,7 +570,7 @@ function pageNavigation(
 function navigationButton(
   label: string,
   page: number,
-  location: SettingsLocation,
+  location: ResolvedSettingsLocation,
   forceDisabled = false,
 ): APIButtonComponentWithCustomId {
   return {
@@ -689,7 +721,7 @@ function encodeFieldRoute(
     | "mentionable-select"
     | "channel-select"
     | "modal",
-  location: SettingsLocation,
+  location: ResolvedSettingsLocation,
   fieldId: string,
 ): string {
   return encodeSettingsCustomId({
