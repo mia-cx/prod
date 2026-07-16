@@ -4,6 +4,7 @@ import {
   RESTJSONErrorCodes,
   type Guild,
   type GuildMember,
+  type Message,
   type PermissionOverwriteOptions,
   type PermissionResolvable,
   type TextChannel,
@@ -29,6 +30,9 @@ export const SUPPORT_HUB_BOT_OVERWRITE = Object.freeze({
   SendMessagesInThreads: true,
   CreatePrivateThreads: true,
 } as const);
+
+export const SUPPORT_HUB_INFORMATION_MARKER =
+  "-# Managed by Prod · support-hub-information:v1";
 
 const protectedPermissionBits = Object.freeze({
   SendMessages: PermissionFlagsBits.SendMessages,
@@ -258,7 +262,78 @@ const informationMessageContent = (assistantIdentity: string): string =>
     `## ${assistantIdentity} support`,
     "Use `/issue`, `/report`, or `/debugshare` to open a private support ticket.",
     "Ticket conversations stay in invite-only private threads. Do not post ticket details in this channel.",
+    SUPPORT_HUB_INFORMATION_MARKER,
   ].join("\n\n");
+
+const isManagedInformationMessage = (
+  message: Message,
+  botMember: GuildMember,
+): boolean =>
+  message.author.id === botMember.id &&
+  message.content.includes(SUPPORT_HUB_INFORMATION_MARKER);
+
+const managedInformationMessages = async (
+  channel: TextChannel,
+  botMember: GuildMember,
+  storedMessageId?: string,
+): Promise<Message[]> => {
+  const recent = await channel.messages.fetch({ limit: 100 });
+  const managed = [...recent.values()].filter((message) =>
+    isManagedInformationMessage(message, botMember),
+  );
+  if (
+    storedMessageId !== undefined &&
+    !managed.some(({ id }) => id === storedMessageId)
+  ) {
+    try {
+      const stored = await channel.messages.fetch(storedMessageId);
+      if (isManagedInformationMessage(stored, botMember)) managed.push(stored);
+    } catch (error) {
+      if (!isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMessage)) {
+        throw error;
+      }
+    }
+  }
+  return managed;
+};
+
+const reconcileInformationMessages = async (
+  channel: TextChannel,
+  botMember: GuildMember,
+  payload: Readonly<{
+    content: string;
+    allowedMentions: Readonly<{ parse: readonly [] }>;
+  }>,
+  storedMessageId?: string,
+): Promise<string> => {
+  let managed = await managedInformationMessages(
+    channel,
+    botMember,
+    storedMessageId,
+  );
+  if (managed.length === 0) {
+    const created = await channel.send(payload);
+    managed = await managedInformationMessages(
+      channel,
+      botMember,
+      storedMessageId,
+    );
+    if (!managed.some(({ id }) => id === created.id)) managed.push(created);
+  }
+
+  const selected =
+    managed.find(({ id }) => id === storedMessageId) ??
+    managed.toSorted(
+      (left, right) => left.createdTimestamp - right.createdTimestamp,
+    )[0]!;
+  await selected.edit(payload);
+  await Promise.all(
+    managed
+      .filter(({ id }) => id !== selected.id)
+      .map((duplicate) => duplicate.delete()),
+  );
+  return selected.id;
+};
 
 export const createSupportHubDiscord = (): SupportHubDiscord => {
   const releaseHub = async (
@@ -377,22 +452,12 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
         content: informationMessageContent(input.assistantIdentity),
         allowedMentions: { parse: [] as const },
       };
-      if (input.messageId !== undefined) {
-        try {
-          const message = await resolution.channel.messages.fetch(
-            input.messageId,
-          );
-          await message.edit(payload);
-          return message.id;
-        } catch (error) {
-          if (!isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMessage)) {
-            throw error;
-          }
-        }
-      }
-
-      const message = await resolution.channel.send(payload);
-      return message.id;
+      return reconcileInformationMessages(
+        resolution.channel,
+        resolution.botMember,
+        payload,
+        input.messageId,
+      );
     },
     deleteInformationMessage: async (
       guild: Guild,

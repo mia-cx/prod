@@ -14,6 +14,7 @@ import {
   EMPTY_HUB_REPORTER_OVERWRITE,
   REQUIRED_HUB_BOT_PERMISSION_NAMES,
   SUPPORT_HUB_BOT_OVERWRITE,
+  SUPPORT_HUB_INFORMATION_MARKER,
 } from "../src/support-hub.js";
 
 const allRequiredPermissions: readonly PermissionResolvable[] = [
@@ -62,10 +63,50 @@ const fixture = (
       overwriteCache.set(id, overwrite);
     },
   );
-  const fetchMessage = vi.fn();
-  const send = vi.fn();
   const everyone = { id: "guild-1" };
   const botMember = { id: "bot-1" };
+  type TestMessage = {
+    id: string;
+    author: { id: string };
+    content: string;
+    createdTimestamp: number;
+    edit: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+  };
+  const messageCache = new Collection<string, TestMessage>();
+  let nextMessage = 1;
+  const addMessage = (
+    id: string,
+    content: string,
+    authorId = botMember.id,
+    createdTimestamp = nextMessage,
+  ): TestMessage => {
+    const message: TestMessage = {
+      id,
+      author: { id: authorId },
+      content,
+      createdTimestamp,
+      edit: vi.fn(async (payload: Readonly<{ content: string }>) => {
+        message.content = payload.content;
+        return message;
+      }),
+      delete: vi.fn(async () => {
+        messageCache.delete(id);
+      }),
+    };
+    messageCache.set(id, message);
+    nextMessage += 1;
+    return message;
+  };
+  const fetchMessage = vi.fn(async (input: string | { limit: number }) => {
+    if (typeof input !== "string") return messageCache;
+    const message = messageCache.get(input);
+    if (message !== undefined) return message;
+    throw { code: RESTJSONErrorCodes.UnknownMessage };
+  });
+  const send = vi.fn(async (payload: Readonly<{ content: string }>) =>
+    addMessage(`message-${nextMessage}`, payload.content),
+  );
   const effectiveFor = (
     memberId: string,
     roleIds: readonly string[] = [],
@@ -127,6 +168,8 @@ const fixture = (
     editOverwrite,
     fetchMessage,
     send,
+    messageCache,
+    addMessage,
     effectiveFor,
     addOverwrite,
   };
@@ -246,11 +289,7 @@ describe("Discord support hub", () => {
 
   it("creates one information message and edits that message on refresh", async () => {
     const hub = createSupportHubDiscord();
-    const { guild, fetchMessage, send } = fixture();
-    const edit = vi.fn().mockResolvedValue(undefined);
-    const existing = { id: "message-1", edit };
-    send.mockResolvedValue(existing);
-    fetchMessage.mockResolvedValue(existing);
+    const { guild, messageCache, send } = fixture();
 
     const createdId = await hub.upsertInformationMessage({
       guild,
@@ -267,8 +306,7 @@ describe("Discord support hub", () => {
     expect(createdId).toBe("message-1");
     expect(refreshedId).toBe("message-1");
     expect(send).toHaveBeenCalledOnce();
-    expect(fetchMessage).toHaveBeenCalledWith("message-1");
-    expect(edit).toHaveBeenCalledWith(
+    expect(messageCache.get("message-1")?.edit).toHaveBeenLastCalledWith(
       expect.objectContaining({
         content: expect.stringContaining("## Support Guide support"),
         allowedMentions: { parse: [] },
@@ -276,23 +314,63 @@ describe("Discord support hub", () => {
     );
   });
 
-  it("replaces only a confirmed missing information message", async () => {
+  it("recovers an unpersisted managed message without touching unrelated messages", async () => {
     const hub = createSupportHubDiscord();
-    const missing = fixture();
-    missing.fetchMessage.mockRejectedValue({
-      code: RESTJSONErrorCodes.UnknownMessage,
+    const state = fixture();
+    const unrelated = state.addMessage(
+      "unrelated",
+      "A different bot-authored message",
+    );
+
+    const firstId = await hub.upsertInformationMessage({
+      guild: state.guild,
+      channelId: "hub-1",
+      assistantIdentity: "Prod",
     });
-    missing.send.mockResolvedValue({ id: "message-2" });
+    const recoveredId = await hub.upsertInformationMessage({
+      guild: state.guild,
+      channelId: "hub-1",
+      assistantIdentity: "Prod",
+    });
+
+    expect(recoveredId).toBe(firstId);
+    expect(state.send).toHaveBeenCalledOnce();
+    expect(state.messageCache.has("unrelated")).toBe(true);
+    expect(unrelated.delete).not.toHaveBeenCalled();
+  });
+
+  it("reconciles duplicate marked messages and prefers the persisted one", async () => {
+    const hub = createSupportHubDiscord();
+    const state = fixture();
+    const oldest = state.addMessage(
+      "message-old",
+      `Old copy\n\n${SUPPORT_HUB_INFORMATION_MARKER}`,
+      state.botMember.id,
+      1,
+    );
+    const persisted = state.addMessage(
+      "message-persisted",
+      `Persisted copy\n\n${SUPPORT_HUB_INFORMATION_MARKER}`,
+      state.botMember.id,
+      2,
+    );
 
     await expect(
       hub.upsertInformationMessage({
-        guild: missing.guild,
+        guild: state.guild,
         channelId: "hub-1",
         assistantIdentity: "Prod",
-        messageId: "message-1",
+        messageId: persisted.id,
       }),
-    ).resolves.toBe("message-2");
-    expect(missing.send).toHaveBeenCalledOnce();
+    ).resolves.toBe(persisted.id);
+
+    expect(oldest.delete).toHaveBeenCalledOnce();
+    expect(persisted.delete).not.toHaveBeenCalled();
+    expect(state.messageCache.size).toBe(1);
+  });
+
+  it("does not replace a stored message when Discord fails transiently", async () => {
+    const hub = createSupportHubDiscord();
 
     const transient = fixture();
     transient.fetchMessage.mockRejectedValue(new Error("Discord unavailable"));
@@ -310,12 +388,11 @@ describe("Discord support hub", () => {
   it("deletes an old managed message even after required bot permissions change", async () => {
     const hub = createSupportHubDiscord();
     const stale = fixture([]);
-    const remove = vi.fn().mockResolvedValue(undefined);
-    stale.fetchMessage.mockResolvedValue({ delete: remove });
+    const message = stale.addMessage("message-1", "managed");
 
     await hub.deleteInformationMessage(stale.guild, "hub-1", "message-1");
 
     expect(stale.fetchMessage).toHaveBeenCalledWith("message-1");
-    expect(remove).toHaveBeenCalledOnce();
+    expect(message.delete).toHaveBeenCalledOnce();
   });
 });

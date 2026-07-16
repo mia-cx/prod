@@ -95,4 +95,32 @@ describe("guild setup lifecycle", () => {
       hubPermissionOwnership: ownership("hub-a"),
     });
   });
+
+  it("serializes concurrent information refreshes and reuses the persisted message", async () => {
+    const { discord, service, guild } = await setup();
+    await service.configureHub(guild, "hub-a");
+    let finishFirst: (messageId: string) => void = () => undefined;
+    const firstResult = new Promise<string>((resolve) => {
+      finishFirst = resolve;
+    });
+    vi.mocked(discord.upsertInformationMessage)
+      .mockImplementationOnce(async () => firstResult)
+      .mockResolvedValueOnce("message-1");
+
+    const first = service.refreshInformationMessage(guild);
+    const second = service.refreshInformationMessage(guild);
+    await vi.waitFor(() => {
+      expect(discord.upsertInformationMessage).toHaveBeenCalledOnce();
+    });
+
+    finishFirst("message-1");
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { valid: true },
+      { valid: true },
+    ]);
+    expect(discord.upsertInformationMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ messageId: "message-1" }),
+    );
+  });
 });
