@@ -160,6 +160,9 @@ describe("Prod action runtime", () => {
 
     expect(interaction.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
+      "1 refreshes",
+    );
+    expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).not.toContain(
       "Information refreshed.",
     );
     expect(interaction.reply).not.toHaveBeenCalled();

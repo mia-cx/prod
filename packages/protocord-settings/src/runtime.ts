@@ -34,7 +34,6 @@ import {
   createSettingsRenderer,
   SettingsViewError,
   type SettingsRenderer,
-  type SettingsViewNotice,
   type SettingsViewRequest,
 } from "./render.js";
 import {
@@ -687,20 +686,19 @@ async function finishMutation<Context>(
   result: SettingsMutationResult,
   context: Context,
 ): Promise<SettingsDispatchResult> {
-  const field = resolved.field;
-  const notice: SettingsViewNotice =
+  const request: SettingsViewRequest =
     result.status === "success"
-      ? {
-          kind: "success",
-          message: result.message ?? `${field?.label ?? "Setting"} updated.`,
-        }
-      : { kind: "error", message: formatIssues(result.issues) };
+      ? routeRequest(resolved.route)
+      : {
+          ...routeRequest(resolved.route),
+          notice: { kind: "error", message: formatIssues(result.issues) },
+        };
   try {
     return await updateView(
       renderer,
       interaction,
       context,
-      { ...routeRequest(resolved.route), notice },
+      request,
       result.status === "success" ? "mutated" : "validation-failed",
     );
   } catch (error) {

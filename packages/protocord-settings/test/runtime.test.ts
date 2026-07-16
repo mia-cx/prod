@@ -388,8 +388,8 @@ describe("Discord settings runtime", () => {
     expect(state.count).toBe(1);
     expect(authorize).toHaveBeenCalledTimes(2);
     expect(button.editReply).toHaveBeenCalledOnce();
-    expect(JSON.stringify(button.editReply.mock.calls[0]?.[0])).toContain(
-      "Increment updated.",
+    expect(JSON.stringify(button.editReply.mock.calls[0]?.[0])).not.toContain(
+      "updated",
     );
   });
 

@@ -20,7 +20,7 @@ export type SettingsValidationIssue = Readonly<{
 }>;
 
 export type SettingsMutationResult =
-  | Readonly<{ status: "success"; message?: string }>
+  | Readonly<{ status: "success" }>
   | Readonly<{
       status: "invalid";
       issues: readonly SettingsValidationIssue[];

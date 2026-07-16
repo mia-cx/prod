@@ -90,7 +90,6 @@ export function createSyntheticSettingsConsumer(
                 }),
                 mutate: (context) => {
                   loadState(context).refreshCount += 1;
-                  return { status: "success", message: "Information refreshed." };
                 },
               },
               {
