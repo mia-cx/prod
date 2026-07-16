@@ -117,7 +117,7 @@ export const createGuildSetupService = (
         previous.hubChannelId,
         previous.hubInformationMessageId,
       );
-      await discord.releaseHub(guild, previous.hubPermissionOwnership);
+      await discord.releaseFormerHub(guild, previous.hubPermissionOwnership);
     }
     await store.finishHubTransition(guild.id, transition.id);
     return { valid: true as const };

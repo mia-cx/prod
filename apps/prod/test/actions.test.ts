@@ -64,6 +64,7 @@ const supportHubDiscord: SupportHubDiscord = {
   applyHub: async () => ({ valid: true, permissionOwnership }),
   restoreHub: async () => undefined,
   releaseHub: async () => undefined,
+  releaseFormerHub: async () => undefined,
   upsertInformationMessage: async () => "message-1",
   deleteInformationMessage: async () => undefined,
 };

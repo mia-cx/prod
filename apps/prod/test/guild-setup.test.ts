@@ -1,4 +1,4 @@
-import type { Guild } from "discord.js";
+import { RESTJSONErrorCodes, type Guild } from "discord.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
@@ -50,6 +50,7 @@ const setup = async () => {
     })),
     restoreHub: vi.fn(async () => undefined),
     releaseHub: vi.fn(async () => undefined),
+    releaseFormerHub: vi.fn(async () => undefined),
     upsertInformationMessage: vi.fn(
       async (input) => input.messageId ?? "message-1",
     ),
@@ -84,16 +85,18 @@ describe("guild setup lifecycle", () => {
     const { store, discord, service, guild } = await setup();
     await service.configureHub(guild, "hub-a");
     await store.setHubInformationMessage(guild.id, "message-a");
-    vi.mocked(discord.releaseHub).mockImplementation(async (_guild, owned) => {
-      if (owned.channelId !== "hub-a") return;
-      await expect(store.get(guild.id)).resolves.toMatchObject({
-        hubChannelId: "hub-b",
-        hubPermissionOwnership: ownership("hub-b"),
-      });
-      await expect(store.getHubTransition(guild.id)).resolves.toMatchObject({
-        phase: "promoted",
-      });
-    });
+    vi.mocked(discord.releaseFormerHub).mockImplementation(
+      async (_guild, owned) => {
+        if (owned.channelId !== "hub-a") return;
+        await expect(store.get(guild.id)).resolves.toMatchObject({
+          hubChannelId: "hub-b",
+          hubPermissionOwnership: ownership("hub-b"),
+        });
+        await expect(store.getHubTransition(guild.id)).resolves.toMatchObject({
+          phase: "promoted",
+        });
+      },
+    );
 
     await service.configureHub(guild, "hub-b");
 
@@ -102,7 +105,10 @@ describe("guild setup lifecycle", () => {
       "hub-a",
       "message-a",
     );
-    expect(discord.releaseHub).toHaveBeenCalledWith(guild, ownership("hub-a"));
+    expect(discord.releaseFormerHub).toHaveBeenCalledWith(
+      guild,
+      ownership("hub-a"),
+    );
     await expect(store.get(guild.id)).resolves.toMatchObject({
       hubChannelId: "hub-b",
       hubPermissionOwnership: ownership("hub-b"),
@@ -115,12 +121,14 @@ describe("guild setup lifecycle", () => {
     await service.configureHub(guild, "hub-a");
     await store.setHubInformationMessage(guild.id, "message-a");
     let failCleanup = true;
-    vi.mocked(discord.releaseHub).mockImplementation(async (_guild, owned) => {
-      if (owned.channelId === "hub-a" && failCleanup) {
-        failCleanup = false;
-        throw new Error("cleanup failed");
-      }
-    });
+    vi.mocked(discord.releaseFormerHub).mockImplementation(
+      async (_guild, owned) => {
+        if (owned.channelId === "hub-a" && failCleanup) {
+          failCleanup = false;
+          throw new Error("cleanup failed");
+        }
+      },
+    );
 
     await expect(service.configureHub(guild, "hub-b")).rejects.toThrow(
       "cleanup failed",
@@ -138,7 +146,7 @@ describe("guild setup lifecycle", () => {
     await service.get(guild);
 
     await expect(store.getHubTransition(guild.id)).resolves.toBeUndefined();
-    expect(discord.releaseHub).toHaveBeenCalledTimes(2);
+    expect(discord.releaseFormerHub).toHaveBeenCalledTimes(2);
   });
 
   it("resumes a durable transition after Discord side effects and process reconstruction", async () => {
@@ -160,7 +168,7 @@ describe("guild setup lifecycle", () => {
     await discord.applyHub(guild, transition.next);
     await store.promoteHubTransition(guild.id, transition);
     await discord.deleteInformationMessage(guild, "hub-a", "message-a");
-    await discord.releaseHub(guild, ownership("hub-a"));
+    await discord.releaseFormerHub(guild, ownership("hub-a"));
 
     const restarted = createGuildSetupService(store, discord);
     await expect(restarted.get(guild)).resolves.toMatchObject({
@@ -175,8 +183,8 @@ describe("guild setup lifecycle", () => {
       "hub-a",
       "message-a",
     );
-    expect(discord.releaseHub).toHaveBeenCalledTimes(2);
-    expect(discord.releaseHub).toHaveBeenLastCalledWith(
+    expect(discord.releaseFormerHub).toHaveBeenCalledTimes(2);
+    expect(discord.releaseFormerHub).toHaveBeenLastCalledWith(
       guild,
       ownership("hub-a"),
     );
@@ -208,6 +216,25 @@ describe("guild setup lifecycle", () => {
     );
 
     expect(discord.restoreHub).toHaveBeenCalledWith(guild, ownership("hub-a"));
+  });
+
+  it("retains prepared ownership when candidate rollback cannot be confirmed", async () => {
+    const { store, discord, service, guild } = await setup();
+    vi.mocked(discord.applyHub).mockRejectedValueOnce(
+      new Error("candidate apply failed"),
+    );
+    vi.mocked(discord.releaseHub).mockRejectedValueOnce({
+      code: RESTJSONErrorCodes.MissingPermissions,
+    });
+
+    await expect(service.configureHub(guild, "hub-a")).rejects.toThrow(
+      "could not be fully compensated",
+    );
+
+    await expect(store.getHubTransition(guild.id)).resolves.toMatchObject({
+      phase: "prepared",
+      next: ownership("hub-a"),
+    });
   });
 
   it("serializes concurrent information refreshes and reuses the persisted message", async () => {

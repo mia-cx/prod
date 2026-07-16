@@ -88,6 +88,10 @@ export interface SupportHubDiscord {
   ): Promise<ConfigureSupportHubResult>;
   restoreHub(guild: Guild, ownership: HubPermissionOwnership): Promise<void>;
   releaseHub(guild: Guild, ownership: HubPermissionOwnership): Promise<void>;
+  releaseFormerHub(
+    guild: Guild,
+    ownership: HubPermissionOwnership,
+  ): Promise<void>;
   upsertInformationMessage(input: UpsertHubInformationInput): Promise<string>;
   deleteInformationMessage(
     guild: Guild,
@@ -387,7 +391,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
     }
   };
 
-  const releaseHub = async (
+  const releaseFormerHub = async (
     guild: Guild,
     ownership: HubPermissionOwnership,
   ): Promise<void> => {
@@ -461,7 +465,8 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
         : postcondition;
     },
     restoreHub,
-    releaseHub,
+    releaseHub: releaseHubWithAccess,
+    releaseFormerHub,
     upsertInformationMessage: async (input: UpsertHubInformationInput) => {
       const resolution = await resolveHub(input.guild, input.channelId);
       if (!resolution.valid) {

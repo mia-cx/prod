@@ -67,6 +67,7 @@ const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
     })),
     restoreHub: vi.fn(async () => undefined),
     releaseHub: vi.fn(async () => undefined),
+    releaseFormerHub: vi.fn(async () => undefined),
     upsertInformationMessage: vi.fn(async () => informationMessageId),
     deleteInformationMessage: vi.fn(async () => undefined),
     ...overrides,

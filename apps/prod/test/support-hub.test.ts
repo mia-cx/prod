@@ -323,7 +323,7 @@ describe("Discord support hub", () => {
       vi.mocked(state.guild.channels.fetch).mockRejectedValue({ code });
 
       await expect(
-        hub.releaseHub(state.guild, prepared.permissionOwnership),
+        hub.releaseFormerHub(state.guild, prepared.permissionOwnership),
       ).resolves.toBeUndefined();
       await expect(
         hub.deleteInformationMessage(state.guild, "hub-1"),
@@ -340,7 +340,7 @@ describe("Discord support hub", () => {
     });
 
     await expect(
-      hub.releaseHub(forbidden.guild, prepared.permissionOwnership),
+      hub.releaseFormerHub(forbidden.guild, prepared.permissionOwnership),
     ).resolves.toBeUndefined();
   });
 
