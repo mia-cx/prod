@@ -28,6 +28,11 @@ import type {
 } from "./contracts.js";
 import { SETTINGS_LIMITS, validateSettingsDefinition } from "./definition.js";
 import { encodeSettingsCustomId } from "./routes.js";
+import {
+  assertSelectionCount,
+  resolveSelectBounds,
+  SettingsSelectConstraintError,
+} from "./select-constraints.js";
 
 export type SettingsLocation = Readonly<{
   categoryId: string;
@@ -119,7 +124,6 @@ async function renderSettingsView<Context>(
     fixedComponentCount(
       authorizedCategories.length,
       category.subcategories.length,
-      request.notice,
     ),
   );
   const requestedPage = request.page ?? 0;
@@ -145,7 +149,7 @@ async function renderSettingsView<Context>(
   }
   if (request.notice !== undefined) {
     const marker = request.notice.kind === "success" ? "✅" : "⚠️";
-    children.push(textDisplay(`${marker} ${request.notice.message}`));
+    children.push(textDisplay(truncate(`${marker} ${request.notice.message}`, 4_000)));
   }
   for (const field of fields) {
     children.push(...(await renderField(field, location, context)));
@@ -208,13 +212,11 @@ function selectSubcategory<Context>(
 function fixedComponentCount(
   categoryCount: number,
   subcategoryCount: number,
-  notice: SettingsViewNotice | undefined,
 ): number {
   return (
-    1 +
+    2 +
     (categoryCount > 1 ? 1 : 0) +
-    (subcategoryCount > 1 ? 1 : 0) +
-    (notice === undefined ? 0 : 1)
+    (subcategoryCount > 1 ? 1 : 0)
   );
 }
 
@@ -328,11 +330,40 @@ function renderStringSelect<Context>(
   location: SettingsLocation,
   view: Awaited<ReturnType<SettingsStringSelectField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
-  validateSelectBounds(field.id, view.options.length, view.minValues, view.maxValues);
+  const bounds = selectBounds(field.id, view.options.length, view);
   if (view.options.length === 0) {
     throw invalidField(field.id, "must provide at least one option");
   }
+  const optionValues = new Set<string>();
+  for (const option of view.options) {
+    validateDynamicText(field.id, "option label", option.label, 100);
+    validateDynamicText(field.id, "option value", option.value, 100);
+    if (option.description !== undefined) {
+      validateDynamicText(
+        field.id,
+        "option description",
+        option.description,
+        100,
+      );
+    }
+    if (optionValues.has(option.value)) {
+      throw invalidField(field.id, `has duplicate option value ${option.value}`);
+    }
+    optionValues.add(option.value);
+  }
+  validatePlaceholder(field.id, view.placeholder);
+  for (const value of view.selectedValues ?? []) {
+    if (!optionValues.has(value)) {
+      throw invalidField(field.id, `selects unknown option ${value}`);
+    }
+  }
   const selectedValues = new Set(view.selectedValues ?? []);
+  for (const option of view.options) {
+    if (option.default === true) {
+      selectedValues.add(option.value);
+    }
+  }
+  assertDefaultSelectionCount(field.id, selectedValues.size, bounds);
   const component: APIStringSelectComponent = {
     type: ComponentType.StringSelect,
     custom_id: encodeFieldRoute("string-select", location, field.id),
@@ -364,14 +395,21 @@ function renderMentionableSelect<Context>(
   location: SettingsLocation,
   view: Awaited<ReturnType<SettingsMentionableSelectField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
-  validateSelectBounds(field.id, undefined, view.minValues, view.maxValues);
+  const bounds = selectBounds(field.id, undefined, view);
+  validatePlaceholder(field.id, view.placeholder);
+  validateDefaultIds(
+    field.id,
+    view.defaults?.map(({ id }) => id) ?? [],
+    bounds,
+  );
+  const defaults = view.defaults?.length ? view.defaults : undefined;
   const component: APIMentionableSelectComponent = {
     type: ComponentType.MentionableSelect,
     custom_id: encodeFieldRoute("mentionable-select", location, field.id),
-    ...(view.defaults === undefined
+    ...(defaults === undefined
       ? {}
       : {
-          default_values: view.defaults.map((value) => ({
+          default_values: defaults.map((value) => ({
             id: value.id,
             type:
               value.kind === "user"
@@ -397,14 +435,19 @@ function renderChannelSelect<Context>(
   location: SettingsLocation,
   view: Awaited<ReturnType<SettingsChannelSelectField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
-  validateSelectBounds(field.id, undefined, view.minValues, view.maxValues);
+  const bounds = selectBounds(field.id, undefined, view);
+  validatePlaceholder(field.id, view.placeholder);
+  validateDefaultIds(field.id, view.defaultChannelIds ?? [], bounds);
+  const defaultChannelIds = view.defaultChannelIds?.length
+    ? view.defaultChannelIds
+    : undefined;
   const component: APIChannelSelectComponent = {
     type: ComponentType.ChannelSelect,
     custom_id: encodeFieldRoute("channel-select", location, field.id),
-    ...(view.defaultChannelIds === undefined
+    ...(defaultChannelIds === undefined
       ? {}
       : {
-          default_values: view.defaultChannelIds.map((id) => ({
+          default_values: defaultChannelIds.map((id) => ({
             id,
             type: SelectMenuDefaultValueType.Channel,
           })),
@@ -601,30 +644,79 @@ function encodeFieldRoute(
   });
 }
 
-function validateSelectBounds(
+function selectBounds(
   fieldId: string,
   optionCount: number | undefined,
-  minimum: number | undefined,
-  maximum: number | undefined,
+  view: Readonly<{ minValues?: number; maxValues?: number }>,
+) {
+  try {
+    return resolveSelectBounds({
+      fieldId,
+      ...(optionCount === undefined ? {} : { optionCount }),
+      ...(view.minValues === undefined ? {} : { minimum: view.minValues }),
+      ...(view.maxValues === undefined ? {} : { maximum: view.maxValues }),
+    });
+  } catch (error) {
+    if (error instanceof SettingsSelectConstraintError) {
+      throw new SettingsViewError("invalid-view", error.message);
+    }
+    throw error;
+  }
+}
+
+function assertDefaultSelectionCount(
+  fieldId: string,
+  count: number,
+  bounds: ReturnType<typeof resolveSelectBounds>,
 ): void {
-  if (optionCount !== undefined && optionCount > SETTINGS_LIMITS.selectOptions) {
+  try {
+    assertSelectionCount(fieldId, count, bounds, "default selection", true);
+  } catch (error) {
+    if (error instanceof SettingsSelectConstraintError) {
+      throw new SettingsViewError("invalid-view", error.message);
+    }
+    throw error;
+  }
+}
+
+function validateDefaultIds(
+  fieldId: string,
+  ids: readonly string[],
+  bounds: ReturnType<typeof resolveSelectBounds>,
+): void {
+  assertDefaultSelectionCount(fieldId, ids.length, bounds);
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (!/^\d{17,20}$/.test(id)) {
+      throw invalidField(fieldId, `has invalid default ID ${id}`);
+    }
+    if (seen.has(id)) {
+      throw invalidField(fieldId, `has duplicate default ID ${id}`);
+    }
+    seen.add(id);
+  }
+}
+
+function validatePlaceholder(
+  fieldId: string,
+  placeholder: string | undefined,
+): void {
+  if (placeholder !== undefined) {
+    validateDynamicText(fieldId, "placeholder", placeholder, 150);
+  }
+}
+
+function validateDynamicText(
+  fieldId: string,
+  label: string,
+  value: string,
+  maximum: number,
+): void {
+  if (value.length < 1 || value.length > maximum) {
     throw invalidField(
       fieldId,
-      `may provide at most ${SETTINGS_LIMITS.selectOptions} options`,
+      `${label} must contain between 1 and ${String(maximum)} characters`,
     );
-  }
-  const effectiveMaximum = maximum ?? 1;
-  const effectiveMinimum = minimum ?? 1;
-  if (
-    !Number.isInteger(effectiveMinimum) ||
-    !Number.isInteger(effectiveMaximum) ||
-    effectiveMinimum < 0 ||
-    effectiveMaximum < 1 ||
-    effectiveMaximum > SETTINGS_LIMITS.selectOptions ||
-    effectiveMinimum > effectiveMaximum ||
-    (optionCount !== undefined && effectiveMaximum > optionCount)
-  ) {
-    throw invalidField(fieldId, "has invalid select minimum/maximum values");
   }
 }
 
@@ -645,4 +737,3 @@ function stale(kind: string, id: string): SettingsViewError {
 function truncate(value: string, maximum: number): string {
   return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
 }
-

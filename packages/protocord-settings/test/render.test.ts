@@ -119,20 +119,58 @@ describe("Components v2 settings rendering", () => {
       { categoryId: "setup", subcategoryId: "large-page", page: 1 },
       { userId: "admin" },
     );
+    const third = await renderer.render(
+      { categoryId: "setup", subcategoryId: "large-page", page: 2 },
+      { userId: "admin" },
+    );
     const firstContainer = first.components[0];
     const secondContainer = second.components[0];
+    const thirdContainer = third.components[0];
 
-    expect(first.location.pageCount).toBe(2);
+    expect(first.location.pageCount).toBe(3);
     expect(firstContainer?.type).toBe(ComponentType.Container);
     expect(
       firstContainer?.type === ComponentType.Container
         ? firstContainer.components.length
         : 0,
     ).toBeLessThanOrEqual(10);
-    expect(JSON.stringify(firstContainer)).toContain("Page 1 of 2");
-    expect(JSON.stringify(secondContainer)).toContain("Page 2 of 2");
+    expect(JSON.stringify(firstContainer)).toContain("Page 1 of 3");
+    expect(JSON.stringify(secondContainer)).toContain("Page 2 of 3");
+    expect(JSON.stringify(thirdContainer)).toContain("Page 3 of 3");
     expect(JSON.stringify(firstContainer)).toContain("Field 0");
-    expect(JSON.stringify(secondContainer)).toContain("Field 11");
+    expect(JSON.stringify(thirdContainer)).toContain("Field 11");
+  });
+
+  it("keeps page routes stable while transient notices are rendered", async () => {
+    const value: SettingsDefinition<Context> = {
+      title: "Stable pages",
+      categories: [
+        {
+          id: "only",
+          label: "Only",
+          authorize: () => true,
+          subcategories: [
+            {
+              id: "page",
+              label: "Page",
+              fields: Array.from({ length: 16 }, (_, index) =>
+                displayField(index),
+              ),
+            },
+          ],
+        },
+      ],
+    };
+    const renderer = createSettingsRenderer(value);
+
+    const ordinary = await renderer.render({ page: 1 }, { userId: "admin" });
+    const withNotice = await renderer.render(
+      { page: 1, notice: { kind: "success", message: "Saved" } },
+      { userId: "admin" },
+    );
+
+    expect(withNotice.location.pageCount).toBe(ordinary.location.pageCount);
+    expect(withNotice.location.page).toBe(ordinary.location.page);
   });
 
   it("rejects unauthorized, stale, and out-of-range views", async () => {
@@ -195,5 +233,87 @@ describe("Components v2 settings rendering", () => {
     await expect(
       createSettingsRenderer(oversized).render({}, { userId: "admin" }),
     ).rejects.toThrow(/at most 25 options/);
+  });
+
+  it("rejects select payloads that Discord would reject", async () => {
+    const value = definition();
+    const setup = value.categories[0]!;
+    const general = setup.subcategories[0]!;
+    const withField = (
+      field: SettingsField<Context>,
+    ): SettingsDefinition<Context> => ({
+      ...value,
+      categories: [
+        {
+          ...setup,
+          subcategories: [{ ...general, fields: [field] }],
+        },
+      ],
+    });
+
+    await expect(
+      createSettingsRenderer(
+        withField({
+          kind: "string-select",
+          id: "invalid-string",
+          label: "Invalid string",
+          load: () => ({
+            placeholder: "p".repeat(151),
+            options: [{ label: "l".repeat(101), value: "valid" }],
+          }),
+          mutate: () => undefined,
+        }),
+      ).render({}, { userId: "admin" }),
+    ).rejects.toThrow(/placeholder|label/);
+
+    await expect(
+      createSettingsRenderer(
+        withField({
+          kind: "mentionable-select",
+          id: "invalid-defaults",
+          label: "Invalid defaults",
+          load: () => ({
+            maxValues: 1,
+            defaults: [
+              { kind: "user", id: "12345678901234567" },
+              { kind: "role", id: "22345678901234567" },
+            ],
+          }),
+          mutate: () => undefined,
+        }),
+      ).render({}, { userId: "admin" }),
+    ).rejects.toThrow(/default/i);
+  });
+
+  it("omits semantically empty defaults for an optional select", async () => {
+    const value = definition();
+    const setup = value.categories[0]!;
+    const general = setup.subcategories[0]!;
+    const renderer = createSettingsRenderer({
+      ...value,
+      categories: [
+        {
+          ...setup,
+          subcategories: [
+            {
+              ...general,
+              fields: [
+                {
+                  kind: "mentionable-select",
+                  id: "optional",
+                  label: "Optional",
+                  load: () => ({ minValues: 0, defaults: [] }),
+                  mutate: () => undefined,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render({}, { userId: "admin" });
+
+    expect(JSON.stringify(rendered.components)).not.toContain("default_values");
   });
 });
