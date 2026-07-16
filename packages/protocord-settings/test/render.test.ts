@@ -17,6 +17,16 @@ const displayField = (index: number): SettingsField<Context> => ({
   load: () => ({ value: `Value ${String(index)}` }),
 });
 
+function customIds(value: unknown): readonly string[] {
+  if (Array.isArray(value)) return value.flatMap(customIds);
+  if (value === null || typeof value !== "object") return [];
+  const record = value as Readonly<Record<string, unknown>>;
+  return [
+    ...(typeof record.custom_id === "string" ? [record.custom_id] : []),
+    ...Object.values(record).flatMap(customIds),
+  ];
+}
+
 const definition = (
   authorize = vi.fn((context: Context) => context.userId === "admin"),
 ): SettingsDefinition<Context> => ({
@@ -182,6 +192,10 @@ describe("Components v2 settings rendering", () => {
     expect(JSON.stringify(thirdContainer)).toContain("Page 3 of 3");
     expect(JSON.stringify(firstContainer)).toContain("Field 0");
     expect(JSON.stringify(thirdContainer)).toContain("Field 11");
+    for (const container of [firstContainer, thirdContainer]) {
+      const ids = customIds(container);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
   });
 
   it("keeps page routes stable while transient notices are rendered", async () => {

@@ -514,7 +514,11 @@ function pageNavigation(
   location: SettingsLocation,
 ): APIActionRowComponent<APIButtonComponentWithCustomId> {
   return actionRow(
-    navigationButton("Previous", Math.max(0, location.page - 1), location),
+    navigationButton(
+      "Previous",
+      location.page === 0 ? location.pageCount : location.page - 1,
+      location,
+    ),
     navigationButton(
       `Page ${String(location.page + 1)} of ${String(location.pageCount)}`,
       location.page,
@@ -523,7 +527,9 @@ function pageNavigation(
     ),
     navigationButton(
       "Next",
-      Math.min(location.pageCount - 1, location.page + 1),
+      location.page === location.pageCount - 1
+        ? location.pageCount + 1
+        : location.page + 1,
       location,
     ),
   );
