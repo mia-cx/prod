@@ -958,13 +958,25 @@ async function respondOpenError(
   interaction: RepliableInteraction,
   content: string,
 ): Promise<void> {
-  try {
-    if (interaction.deferred && !interaction.replied) {
-      await interaction.editReply({ content, allowedMentions: NO_MENTIONS });
+  if (interaction.deferred && !interaction.replied) {
+    if (interaction.ephemeral !== true) {
+      try {
+        await interaction.editReply({
+          content: "Settings could not be opened here.",
+          allowedMentions: NO_MENTIONS,
+        });
+      } catch {
+        // Still attempt the private response if the public edit failed.
+      }
+      await respondEphemeral(interaction, content);
       return;
     }
-  } catch {
-    // Fall through to the normal safe response path.
+    try {
+      await interaction.editReply({ content, allowedMentions: NO_MENTIONS });
+      return;
+    } catch {
+      // Fall through to the normal safe response path.
+    }
   }
   await respondEphemeral(interaction, content);
 }

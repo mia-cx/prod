@@ -298,6 +298,29 @@ describe("Discord settings runtime", () => {
     );
   });
 
+  it("keeps open errors private when a caller deferred publicly", async () => {
+    state.authorized = false;
+    const command = mockCommand({ deferred: true, ephemeral: false });
+
+    await expect(
+      runtime.open(command.interaction, { userId: "visitor" }),
+    ).resolves.toEqual({ matched: true, status: "unauthorized" });
+
+    expect(command.editReply).toHaveBeenCalledWith({
+      content: "Settings could not be opened here.",
+      allowedMentions: { parse: [], repliedUser: false },
+    });
+    expect(command.editReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("authorized") }),
+    );
+    expect(command.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "You are not authorized to view settings.",
+        flags: MessageFlags.Ephemeral,
+      }),
+    );
+  });
+
   it("bounds modal preparation to Discord's response window", async () => {
     vi.useFakeTimers();
     let release: (() => void) | undefined;
