@@ -4,31 +4,49 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createSqlitePermissionRuleStore,
+  PermissionRuleConflictError,
   type PermissionRule,
+  type PermissionRuleActor,
+  type PermissionRuleInput,
   type SqlitePermissionRuleStore,
 } from "../src/index.js";
 
 const timestamp = "2026-07-16T10:00:00.000Z";
+const updatedTimestamp = "2026-07-16T11:00:00.000Z";
 
 const fixtureRule = (
-  overrides: Partial<PermissionRule> = {},
-): PermissionRule => ({
+  overrides: Partial<PermissionRuleInput> = {},
+): PermissionRuleInput => ({
   id: "rule-1",
   context: { guildId: "guild-1" },
   subject: { subjectType: "user", subjectId: "user-1" },
   object: { objectType: "ticket", objectId: "*" },
   verb: "close",
   permit: "allow",
-  createdByUserId: "admin-1",
-  createdAt: timestamp,
-  updatedAt: timestamp,
   ...overrides,
+});
+
+const actor = (actorId: string): PermissionRuleActor => ({
+  actorType: "user",
+  actorId,
+});
+
+const persistedRule = (
+  rule: PermissionRuleInput,
+  createdByUserId = "admin-1",
+  updatedAt = timestamp,
+): PermissionRule => ({
+  ...rule,
+  createdByUserId,
+  createdAt: timestamp,
+  updatedAt,
 });
 
 describe("SQLite permission rule store", () => {
   let sqlite: Database.Database;
   let store: SqlitePermissionRuleStore;
   let nextId: number;
+  let currentTimestamp: string;
 
   beforeEach(() => {
     sqlite = new Database(":memory:");
@@ -74,9 +92,10 @@ describe("SQLite permission rule store", () => {
       );
     `);
     nextId = 0;
+    currentTimestamp = timestamp;
     store = createSqlitePermissionRuleStore(drizzle(sqlite), {
       createId: () => `event-${++nextId}`,
-      now: () => timestamp,
+      now: () => currentTimestamp,
     });
   });
 
@@ -96,21 +115,33 @@ describe("SQLite permission rule store", () => {
           : { subjectType, subjectId },
     });
 
-    await store.upsert(rule);
+    await store.upsert({
+      context: rule.context,
+      rule,
+      actor: actor("admin-1"),
+    });
 
-    await expect(store.listForContext(rule.context)).resolves.toEqual([rule]);
+    await expect(store.listForContext(rule.context)).resolves.toEqual([
+      persistedRule(rule),
+    ]);
   });
 
   it("keeps null context refinements unique and updates an existing key", async () => {
-    await store.upsert(fixtureRule());
-    await store.upsert(
-      fixtureRule({
+    const original = fixtureRule();
+    await store.upsert({
+      context: original.context,
+      rule: original,
+      actor: actor("admin-1"),
+    });
+    currentTimestamp = updatedTimestamp;
+    await store.upsert({
+      context: original.context,
+      rule: fixtureRule({
         id: "replacement-id",
         permit: "deny",
-        createdByUserId: "admin-2",
-        updatedAt: "2026-07-16T11:00:00.000Z",
       }),
-    );
+      actor: actor("admin-2"),
+    });
 
     const stored = await store.listForContext({ guildId: "guild-1" });
     expect(stored).toHaveLength(1);
@@ -118,6 +149,8 @@ describe("SQLite permission rule store", () => {
       id: "rule-1",
       permit: "deny",
       createdByUserId: "admin-1",
+      createdAt: timestamp,
+      updatedAt: updatedTimestamp,
     });
     await expect(store.listEvents("rule-1")).resolves.toMatchObject([
       { eventType: "created", before: null, after: { permit: "allow" } },
@@ -144,26 +177,46 @@ describe("SQLite permission rule store", () => {
         channelId: "channel-1",
       },
     });
-    await store.upsert(guildRule);
-    await store.upsert(categoryRule);
-    await store.upsert(channelRule);
+    await store.upsert({
+      context: guildRule.context,
+      rule: guildRule,
+      actor: actor("admin-1"),
+    });
+    await store.upsert({
+      context: categoryRule.context,
+      rule: categoryRule,
+      actor: actor("admin-1"),
+    });
+    await store.upsert({
+      context: channelRule.context,
+      rule: channelRule,
+      actor: actor("admin-1"),
+    });
 
     await expect(store.listForContext(guildRule.context)).resolves.toEqual([
-      guildRule,
+      persistedRule(guildRule),
     ]);
     await expect(
       store.listForContext(categoryRule.context),
-    ).resolves.toEqual([categoryRule]);
+    ).resolves.toEqual([persistedRule(categoryRule)]);
     await expect(store.listForObject({
       context: channelRule.context,
       object: channelRule.object,
-    })).resolves.toEqual([channelRule]);
+    })).resolves.toEqual([persistedRule(channelRule)]);
   });
 
   it("records an immutable removal snapshot and actor", async () => {
     const rule = fixtureRule();
-    await store.upsert(rule);
-    await store.remove(rule.id, "admin-2");
+    await store.upsert({
+      context: rule.context,
+      rule,
+      actor: actor("admin-1"),
+    });
+    await store.remove({
+      ruleId: rule.id,
+      context: rule.context,
+      actor: actor("admin-2"),
+    });
 
     await expect(store.listForContext(rule.context)).resolves.toEqual([]);
     await expect(store.listEvents(rule.id)).resolves.toMatchObject([
@@ -171,9 +224,118 @@ describe("SQLite permission rule store", () => {
       {
         eventType: "removed",
         actorUserId: "admin-2",
-        before: rule,
+        before: persistedRule(rule),
         after: null,
       },
     ]);
+  });
+
+  it("rejects an ID collision across identities without changing state or audit", async () => {
+    const guildOneRule = fixtureRule();
+    const guildTwoRule = fixtureRule({
+      context: { guildId: "guild-2" },
+      subject: { subjectType: "user", subjectId: "user-2" },
+    });
+    await store.upsert({
+      context: guildOneRule.context,
+      rule: guildOneRule,
+      actor: actor("admin-1"),
+    });
+
+    await expect(
+      store.upsert({
+        context: guildTwoRule.context,
+        rule: guildTwoRule,
+        actor: actor("admin-2"),
+      }),
+    ).rejects.toBeInstanceOf(PermissionRuleConflictError);
+
+    await expect(
+      store.listForContext(guildOneRule.context),
+    ).resolves.toEqual([persistedRule(guildOneRule)]);
+    await expect(store.listForContext(guildTwoRule.context)).resolves.toEqual(
+      [],
+    );
+    await expect(store.listEvents()).resolves.toHaveLength(1);
+  });
+
+  it("rejects split ID and identity collisions deterministically", async () => {
+    const first = fixtureRule();
+    const second = fixtureRule({
+      id: "rule-2",
+      subject: { subjectType: "role", subjectId: "role-2" },
+    });
+    await store.upsert({
+      context: first.context,
+      rule: first,
+      actor: actor("admin-1"),
+    });
+    await store.upsert({
+      context: second.context,
+      rule: second,
+      actor: actor("admin-1"),
+    });
+
+    await expect(
+      store.upsert({
+        context: second.context,
+        rule: { ...second, id: first.id, permit: "deny" },
+        actor: actor("admin-2"),
+      }),
+    ).rejects.toBeInstanceOf(PermissionRuleConflictError);
+
+    await expect(store.listForContext(first.context)).resolves.toEqual(
+      expect.arrayContaining([persistedRule(first), persistedRule(second)]),
+    );
+    await expect(store.listEvents()).resolves.toHaveLength(2);
+  });
+
+  it("scopes removal atomically to the complete expected context", async () => {
+    const rule = fixtureRule();
+    await store.upsert({
+      context: rule.context,
+      rule,
+      actor: actor("admin-1"),
+    });
+
+    await store.remove({
+      ruleId: rule.id,
+      context: { guildId: "guild-2" },
+      actor: actor("admin-2"),
+    });
+
+    await expect(store.listForContext(rule.context)).resolves.toEqual([
+      persistedRule(rule),
+    ]);
+    await expect(store.listEvents(rule.id)).resolves.toHaveLength(1);
+  });
+
+  it("rejects untrusted mutation context and empty audit actors without side effects", async () => {
+    const rule = fixtureRule();
+    await expect(
+      store.upsert({
+        context: { guildId: "guild-2" },
+        rule,
+        actor: actor("admin-1"),
+      }),
+    ).rejects.toThrow("rule context must match the trusted mutation context");
+
+    await store.upsert({
+      context: rule.context,
+      rule,
+      actor: actor("admin-1"),
+    });
+    await expect(
+      store.remove({
+        ruleId: rule.id,
+        context: rule.context,
+        actor: actor(""),
+      }),
+    ).rejects.toThrow("actor.actorId must not be empty");
+
+    await expect(store.listForContext(rule.context)).resolves.toEqual([
+      persistedRule(rule),
+    ]);
+    await expect(store.listEvents(rule.id)).resolves.toHaveLength(1);
   });
 });

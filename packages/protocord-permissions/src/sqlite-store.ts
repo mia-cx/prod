@@ -6,11 +6,21 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type {
   AuthorizationContext,
   PermissionRule,
+  PermissionRuleInput,
   PermissionRuleStore,
+  RemovePermissionRuleInput,
   RuleObject,
+  UpsertPermissionRuleInput,
 } from "./contracts.js";
 import { permissionRuleEvents, permissionRules } from "./schema.js";
-import { validateAuthorizationContext, validatePermissionRule } from "./validation.js";
+import {
+  authorizationContextsEqual,
+  InvalidAuthorizationInputError,
+  validateAuthorizationContext,
+  validatePermissionRule,
+  validatePermissionRuleActor,
+  validatePermissionRuleInput,
+} from "./validation.js";
 
 type PermissionRuleRow = typeof permissionRules.$inferSelect;
 
@@ -26,8 +36,11 @@ export type PermissionRuleEvent = Readonly<{
 }>;
 
 export interface SqlitePermissionRuleStore extends PermissionRuleStore {
-  remove(ruleId: string, actorUserId?: string): Promise<void>;
   listEvents(ruleId?: string): Promise<readonly PermissionRuleEvent[]>;
+}
+
+export class PermissionRuleConflictError extends Error {
+  override readonly name = "PermissionRuleConflictError";
 }
 
 export type CreateSqlitePermissionRuleStoreOptions = Readonly<{
@@ -45,7 +58,7 @@ const contextConditions = (context: AuthorizationContext): readonly SQL[] => [
     : eq(permissionRules.channelId, context.channelId),
 ];
 
-const identityConditions = (rule: PermissionRule): readonly SQL[] => [
+const identityConditions = (rule: PermissionRuleInput): readonly SQL[] => [
   ...contextConditions(rule.context),
   eq(permissionRules.subjectType, rule.subject.subjectType),
   eq(permissionRules.subjectId, rule.subject.subjectId),
@@ -116,6 +129,7 @@ export const createSqlitePermissionRuleStore = (
   const now = options.now ?? (() => new Date().toISOString());
 
   const writeEvent = (
+    writer: Pick<BetterSQLite3Database, "insert">,
     eventType: PermissionRuleEvent["eventType"],
     actorUserId: string,
     before: PermissionRule | null,
@@ -123,7 +137,7 @@ export const createSqlitePermissionRuleStore = (
   ): void => {
     const rule = after ?? before;
     if (rule === null) return;
-    database.insert(permissionRuleEvents).values({
+    writer.insert(permissionRuleEvents).values({
       id: createId(),
       guildId: rule.context.guildId,
       categoryId: rule.context.categoryId,
@@ -150,61 +164,98 @@ export const createSqlitePermissionRuleStore = (
   };
 
   return Object.freeze({
-    upsert: async (rule: PermissionRule): Promise<void> => {
-      validatePermissionRule(rule);
+    upsert: async (input: UpsertPermissionRuleInput): Promise<void> => {
+      validateAuthorizationContext(input.context);
+      validatePermissionRuleInput(input.rule);
+      validatePermissionRuleActor(input.actor);
+      if (!authorizationContextsEqual(input.context, input.rule.context)) {
+        throw new InvalidAuthorizationInputError(
+          "rule context must match the trusted mutation context",
+        );
+      }
       database.transaction((transaction) => {
         const matchingIdentity = transaction
           .select()
           .from(permissionRules)
-          .where(and(...identityConditions(rule)))
+          .where(and(...identityConditions(input.rule)))
           .get();
         const matchingId = transaction
           .select()
           .from(permissionRules)
-          .where(eq(permissionRules.id, rule.id))
+          .where(eq(permissionRules.id, input.rule.id))
           .get();
-        const existingRow = matchingIdentity ?? matchingId;
 
-        if (existingRow === undefined) {
-          transaction.insert(permissionRules).values(toRow(rule)).run();
-          writeEvent("created", rule.createdByUserId, null, rule);
+        if (
+          matchingId !== undefined &&
+          matchingIdentity?.id !== matchingId.id
+        ) {
+          throw new PermissionRuleConflictError(
+            "Permission rule ID belongs to a different rule identity",
+          );
+        }
+
+        if (matchingIdentity === undefined) {
+          const timestamp = now();
+          const created: PermissionRule = {
+            ...input.rule,
+            createdByUserId: input.actor.actorId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          };
+          transaction.insert(permissionRules).values(toRow(created)).run();
+          writeEvent(
+            transaction,
+            "created",
+            input.actor.actorId,
+            null,
+            created,
+          );
           return;
         }
 
-        const before = toRule(existingRow);
+        const before = toRule(matchingIdentity);
         const after: PermissionRule = {
-          ...rule,
-          id: existingRow.id,
-          createdByUserId: existingRow.createdByUserId,
-          createdAt: existingRow.createdAt,
+          ...before,
+          permit: input.rule.permit,
+          updatedAt: now(),
         };
         transaction
           .update(permissionRules)
           .set(toRow(after))
-          .where(eq(permissionRules.id, existingRow.id))
+          .where(eq(permissionRules.id, matchingIdentity.id))
           .run();
-        writeEvent("updated", rule.createdByUserId, before, after);
+        writeEvent(
+          transaction,
+          "updated",
+          input.actor.actorId,
+          before,
+          after,
+        );
       });
     },
-    remove: async (
-      ruleId: string,
-      actorUserId?: string,
-    ): Promise<void> => {
+    remove: async (input: RemovePermissionRuleInput): Promise<void> => {
+      if (input.ruleId.length === 0) {
+        throw new InvalidAuthorizationInputError("ruleId must not be empty");
+      }
+      validateAuthorizationContext(input.context);
+      validatePermissionRuleActor(input.actor);
       database.transaction((transaction) => {
         const existing = transaction
-          .select()
-          .from(permissionRules)
-          .where(eq(permissionRules.id, ruleId))
+          .delete(permissionRules)
+          .where(
+            and(
+              eq(permissionRules.id, input.ruleId),
+              ...contextConditions(input.context),
+            ),
+          )
+          .returning()
           .get();
         if (existing === undefined) return;
         const before = toRule(existing);
-        transaction
-          .delete(permissionRules)
-          .where(eq(permissionRules.id, ruleId))
-          .run();
         writeEvent(
+          transaction,
           "removed",
-          actorUserId ?? before.createdByUserId,
+          input.actor.actorId,
           before,
           null,
         );

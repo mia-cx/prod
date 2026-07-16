@@ -78,6 +78,32 @@ export type PermissionRule = Readonly<{
   updatedAt: string;
 }>;
 
+export type PermissionRuleInput = Readonly<{
+  id: string;
+  context: AuthorizationContext;
+  subject: RuleSubject;
+  object: RuleObject;
+  verb: PermissionVerb;
+  permit: "allow" | "deny";
+}>;
+
+export type PermissionRuleActor = Readonly<{
+  actorType: "user";
+  actorId: string;
+}>;
+
+export type UpsertPermissionRuleInput = Readonly<{
+  context: AuthorizationContext;
+  rule: PermissionRuleInput;
+  actor: PermissionRuleActor;
+}>;
+
+export type RemovePermissionRuleInput = Readonly<{
+  ruleId: string;
+  context: AuthorizationContext;
+  actor: PermissionRuleActor;
+}>;
+
 export type AuthorizationDecision = Readonly<{
   allowed: boolean;
   reason:
@@ -89,8 +115,8 @@ export type AuthorizationDecision = Readonly<{
 }>;
 
 export interface PermissionRuleStore {
-  upsert(rule: PermissionRule): Promise<void>;
-  remove(ruleId: string, actorUserId?: string): Promise<void>;
+  upsert(input: UpsertPermissionRuleInput): Promise<void>;
+  remove(input: RemovePermissionRuleInput): Promise<void>;
   listForContext(
     context: AuthorizationContext,
   ): Promise<readonly PermissionRule[]>;

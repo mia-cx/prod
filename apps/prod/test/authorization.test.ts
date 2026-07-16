@@ -8,22 +8,23 @@ import {
 } from "../src/authorization.js";
 import type {
   AuthorizationCheck,
-  PermissionRule,
+  PermissionRuleActor,
+  PermissionRuleInput,
   PermissionRuleStore,
 } from "@protocord/permissions";
 
-const timestamp = "2026-07-16T10:00:00.000Z";
-
-const rule = (context: PermissionRule["context"]): PermissionRule => ({
+const rule = (context: PermissionRuleInput["context"]): PermissionRuleInput => ({
   id: "rule-1",
   context,
   subject: { subjectType: "role", subjectId: "role-1" },
   object: { objectType: "ticket", objectId: "*" },
   verb: "close",
   permit: "allow",
-  createdByUserId: "admin-1",
-  createdAt: timestamp,
-  updatedAt: timestamp,
+});
+
+const actor = (actorId: string): PermissionRuleActor => ({
+  actorType: "user",
+  actorId,
 });
 
 const backingStore = (): PermissionRuleStore => ({
@@ -59,14 +60,29 @@ describe("Prod authorization policy boundary", () => {
       channelId: "channel-1",
     },
   ])("refuses to administer refined rule context $context", async (context) => {
-    const store = createProdPermissionRuleStore(backingStore());
+    const backing = backingStore();
+    const store = createProdPermissionRuleStore(backing);
+    const refinedRule = rule(context);
 
-    await expect(store.upsert(rule(context))).rejects.toBeInstanceOf(
-      UnsupportedProdAuthorizationContextError,
-    );
+    await expect(
+      store.upsert({
+        context,
+        rule: refinedRule,
+        actor: actor("admin-1"),
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedProdAuthorizationContextError);
+    await expect(
+      store.remove({
+        ruleId: refinedRule.id,
+        context,
+        actor: actor("admin-1"),
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedProdAuthorizationContextError);
     await expect(store.listForContext(context)).rejects.toBeInstanceOf(
       UnsupportedProdAuthorizationContextError,
     );
+    expect(backing.upsert).not.toHaveBeenCalled();
+    expect(backing.remove).not.toHaveBeenCalled();
   });
 
   it("passes guild-level administration to the package store", async () => {
@@ -74,16 +90,26 @@ describe("Prod authorization policy boundary", () => {
     const store = createProdPermissionRuleStore(backing);
     const guildRule = rule({ guildId: "guild-1" });
 
-    await store.upsert(guildRule);
+    const upsertInput = {
+      context: guildRule.context,
+      rule: guildRule,
+      actor: actor("admin-1"),
+    };
+    const removeInput = {
+      ruleId: guildRule.id,
+      context: guildRule.context,
+      actor: actor("admin-2"),
+    };
+    await store.upsert(upsertInput);
     await store.listForObject({
       context: guildRule.context,
       object: guildRule.object,
     });
-    await store.remove(guildRule.id, "admin-2");
+    await store.remove(removeInput);
 
-    expect(backing.upsert).toHaveBeenCalledWith(guildRule);
+    expect(backing.upsert).toHaveBeenCalledWith(upsertInput);
     expect(backing.listForObject).toHaveBeenCalledOnce();
-    expect(backing.remove).toHaveBeenCalledWith(guildRule.id, "admin-2");
+    expect(backing.remove).toHaveBeenCalledWith(removeInput);
   });
 
   it("refuses to evaluate refined contexts before resource lookup", async () => {

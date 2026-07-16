@@ -1,4 +1,5 @@
 import {
+  authorizationContextsEqual,
   createAuthorizationService,
   InvalidAuthorizationInputError,
   validateAuthorizationContext,
@@ -8,7 +9,9 @@ import {
   type AuthorizationService,
   type PermissionRule,
   type PermissionRuleStore,
+  type RemovePermissionRuleInput,
   type RuleObject,
+  type UpsertPermissionRuleInput,
 } from "@protocord/permissions";
 
 export class UnsupportedProdAuthorizationContextError extends Error {
@@ -39,12 +42,20 @@ export const createProdPermissionRuleStore = (
   store: PermissionRuleStore,
 ): PermissionRuleStore =>
   Object.freeze({
-    upsert: async (rule: PermissionRule): Promise<void> => {
-      assertProdAuthorizationContext(rule.context);
-      await store.upsert(rule);
+    upsert: async (input: UpsertPermissionRuleInput): Promise<void> => {
+      assertProdAuthorizationContext(input.context);
+      assertProdAuthorizationContext(input.rule.context);
+      if (!authorizationContextsEqual(input.context, input.rule.context)) {
+        throw new UnsupportedProdAuthorizationContextError(
+          "Prod rule context must match its trusted mutation context",
+        );
+      }
+      await store.upsert(input);
     },
-    remove: (ruleId: string, actorUserId?: string): Promise<void> =>
-      store.remove(ruleId, actorUserId),
+    remove: async (input: RemovePermissionRuleInput): Promise<void> => {
+      assertProdAuthorizationContext(input.context);
+      await store.remove(input);
+    },
     listForContext: async (
       context: AuthorizationContext,
     ): Promise<readonly PermissionRule[]> => {

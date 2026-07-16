@@ -7,12 +7,16 @@ export type {
   AuthorizationService,
   AuthorizationSubject,
   PermissionRule,
+  PermissionRuleActor,
+  PermissionRuleInput,
   PermissionRuleStore,
   PermissionVerb,
   RuleObject,
   RuleSubject,
+  RemovePermissionRuleInput,
   ServiceAuthorizationSubject,
   UserAuthorizationSubject,
+  UpsertPermissionRuleInput,
 } from "./contracts.js";
 export {
   AuthorizationDeniedError,
@@ -22,12 +26,15 @@ export {
 } from "./evaluator.js";
 export {
   authorizationContextLayers,
+  authorizationContextsEqual,
   InvalidAuthorizationInputError,
   validateAuthorizationCheck,
   validateAuthorizationContext,
   validateAuthorizationObject,
   validateAuthorizationSubject,
   validatePermissionRule,
+  validatePermissionRuleActor,
+  validatePermissionRuleInput,
   validatePermissionVerb,
   validateRuleObject,
   validateRuleSubject,
@@ -35,6 +42,7 @@ export {
 export {
   createSqlitePermissionRuleStore,
   type CreateSqlitePermissionRuleStoreOptions,
+  PermissionRuleConflictError,
   type PermissionRuleEvent,
   type SqlitePermissionRuleStore,
 } from "./sqlite-store.js";

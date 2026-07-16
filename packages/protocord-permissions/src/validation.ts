@@ -4,6 +4,8 @@ import type {
   AuthorizationObject,
   AuthorizationSubject,
   PermissionRule,
+  PermissionRuleActor,
+  PermissionRuleInput,
   PermissionVerb,
   RuleObject,
   RuleSubject,
@@ -48,6 +50,14 @@ export const validateAuthorizationContext = (
     requireIdentifier(context.channelId, "context.channelId");
   }
 };
+
+export const authorizationContextsEqual = (
+  left: AuthorizationContext,
+  right: AuthorizationContext,
+): boolean =>
+  left.guildId === right.guildId &&
+  left.categoryId === right.categoryId &&
+  left.channelId === right.channelId;
 
 export const validateAuthorizationSubject = (
   subject: AuthorizationSubject,
@@ -111,17 +121,34 @@ export const validateAuthorizationCheck = (input: AuthorizationCheck): void => {
 };
 
 export const validatePermissionRule = (rule: PermissionRule): void => {
+  validatePermissionRuleInput(rule);
+  requireIdentifier(rule.createdByUserId, "rule.createdByUserId");
+  requireIdentifier(rule.createdAt, "rule.createdAt");
+  requireIdentifier(rule.updatedAt, "rule.updatedAt");
+};
+
+export const validatePermissionRuleInput = (
+  rule: PermissionRuleInput,
+): void => {
   requireIdentifier(rule.id, "rule.id");
   validateAuthorizationContext(rule.context);
   validateRuleSubject(rule.subject);
   validateRuleObject(rule.object);
   validatePermissionVerb(rule.verb);
-  requireIdentifier(rule.createdByUserId, "rule.createdByUserId");
-  requireIdentifier(rule.createdAt, "rule.createdAt");
-  requireIdentifier(rule.updatedAt, "rule.updatedAt");
   if (rule.permit !== "allow" && rule.permit !== "deny") {
     throw new InvalidAuthorizationInputError(
       `unsupported permit: ${String(rule.permit)}`,
+    );
+  }
+};
+
+export const validatePermissionRuleActor = (
+  actor: PermissionRuleActor,
+): void => {
+  requireIdentifier(actor.actorId, "actor.actorId");
+  if (actor.actorType !== "user") {
+    throw new InvalidAuthorizationInputError(
+      `unsupported actor type: ${String(actor.actorType)}`,
     );
   }
 };
