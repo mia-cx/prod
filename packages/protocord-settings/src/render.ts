@@ -281,7 +281,7 @@ async function renderField<Context>(
       return [
         buttonSection(
           fieldText(field, view.value),
-          view.buttonLabel ?? field.label,
+          view.buttonLabel || field.label,
           encodeFieldRoute("button", location, field.id),
           field.style ?? ButtonStyle.Secondary,
           view.disabled,
@@ -307,7 +307,7 @@ function renderModalField<Context>(
   return [
     buttonSection(
       fieldText(field, view.value),
-      view.buttonLabel ?? field.label,
+      view.buttonLabel || field.label,
       encodeFieldRoute("modal", location, field.id),
       ButtonStyle.Secondary,
       view.disabled,

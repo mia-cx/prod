@@ -108,6 +108,49 @@ describe("Components v2 settings rendering", () => {
     });
   });
 
+  it("falls back to field labels for empty dynamic button labels", async () => {
+    const renderer = createSettingsRenderer({
+      title: "Button labels",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          subcategories: [
+            {
+              id: "general",
+              label: "General",
+              fields: [
+                {
+                  kind: "button",
+                  id: "action",
+                  label: "Action fallback",
+                  load: () => ({ value: "Ready", buttonLabel: "" }),
+                  mutate: () => undefined,
+                },
+                {
+                  kind: "modal",
+                  id: "form",
+                  label: "Form fallback",
+                  title: "Form",
+                  inputs: [{ id: "value", label: "Value" }],
+                  load: () => ({ value: "Ready", buttonLabel: "" }),
+                  mutate: () => undefined,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = await renderer.render({}, { userId: "admin" });
+    const payload = JSON.stringify(view.components);
+
+    expect(payload).toContain('"label":"Action fallback"');
+    expect(payload).toContain('"label":"Form fallback"');
+  });
+
   it("paginates fields without exceeding Discord container limits", async () => {
     const renderer = createSettingsRenderer(definition());
 
