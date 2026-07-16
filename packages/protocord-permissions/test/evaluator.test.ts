@@ -95,6 +95,7 @@ const baseCheck = (overrides: Partial<AuthorizationCheck> = {}) =>
         discordRoleIds: ["role-1", "role-2"],
         isGuildOwner: false,
         isAdministrator: false,
+        canManageGuild: false,
         isApplicationOperator: false,
       },
     },
@@ -273,6 +274,7 @@ describe("authorization safety", () => {
       {
         isGuildOwner: true,
         isAdministrator: false,
+        canManageGuild: false,
         isApplicationOperator: false,
       },
     ],
@@ -281,6 +283,7 @@ describe("authorization safety", () => {
       {
         isGuildOwner: false,
         isAdministrator: true,
+        canManageGuild: true,
         isApplicationOperator: false,
       },
     ],
@@ -289,6 +292,7 @@ describe("authorization safety", () => {
       {
         isGuildOwner: false,
         isAdministrator: false,
+        canManageGuild: false,
         isApplicationOperator: true,
       },
     ],
@@ -313,6 +317,79 @@ describe("authorization safety", () => {
         }),
       ),
     ).resolves.toEqual({ allowed: true, reason, matchedRuleIds: [] });
+  });
+
+  it("limits Manage Server authority to guild configuration management", async () => {
+    const managedSubject = {
+      subjectType: "user" as const,
+      subjectId: "user-1",
+      attributes: {
+        discordRoleIds: [],
+        isGuildOwner: false,
+        isAdministrator: false,
+        canManageGuild: true,
+        isApplicationOperator: false,
+      },
+    };
+    const service = serviceFor([
+      rule("settings-deny", {
+        context: baseCheck().context,
+        subject: { subjectType: "user", subjectId: "user-1" },
+        object: { objectType: "settings", objectId: "*" },
+        verb: "manage",
+        permit: "deny",
+      }),
+      rule("permissions-deny", {
+        context: baseCheck().context,
+        subject: { subjectType: "user", subjectId: "user-1" },
+        object: { objectType: "permissions", objectId: "*" },
+        verb: "manage",
+        permit: "deny",
+      }),
+      rule("ticket-deny", {
+        context: baseCheck().context,
+        subject: { subjectType: "user", subjectId: "user-1" },
+        object: { objectType: "ticket", objectId: "ticket-1" },
+        permit: "deny",
+      }),
+    ]);
+
+    for (const objectType of ["settings", "permissions"] as const) {
+      await expect(
+        service.check(
+          baseCheck({
+            subject: managedSubject,
+            object: { objectType, objectId: "*" },
+            verb: "manage",
+          }),
+        ),
+      ).resolves.toEqual({
+        allowed: true,
+        reason: "manage_guild",
+        matchedRuleIds: [],
+      });
+    }
+    await expect(
+      service.check(baseCheck({ subject: managedSubject })),
+    ).resolves.toMatchObject({ allowed: false, reason: "matched_rule" });
+    await expect(
+      service.check(
+        baseCheck({
+          subject: managedSubject,
+          object: { objectType: "queue", objectId: "*" },
+          verb: "manage",
+        }),
+      ),
+    ).resolves.toMatchObject({ allowed: false, reason: "default_deny" });
+    await expect(
+      service.check(
+        baseCheck({
+          subject: managedSubject,
+          object: { objectType: "settings", objectId: "*" },
+          verb: "view",
+        }),
+      ),
+    ).resolves.toMatchObject({ allowed: false, reason: "default_deny" });
   });
 
   it("defaults to deny and require throws the typed decision", async () => {
@@ -342,6 +419,7 @@ describe("authorization safety", () => {
               discordRoleIds: [],
               isGuildOwner: true,
               isAdministrator: true,
+              canManageGuild: true,
               isApplicationOperator: true,
             },
           },

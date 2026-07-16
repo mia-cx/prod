@@ -139,6 +139,7 @@ describe("Discord user subject adapter", () => {
         discordRoleIds: ["role-1", "role-2"],
         isGuildOwner: false,
         isAdministrator: false,
+        canManageGuild: false,
         isApplicationOperator: false,
       },
     });
@@ -159,6 +160,7 @@ describe("Discord user subject adapter", () => {
     expect(subject.attributes).toMatchObject({
       isGuildOwner: true,
       isAdministrator: true,
+      canManageGuild: true,
     });
     expect(Object.isFrozen(subject.attributes.discordRoleIds)).toBe(true);
   });
@@ -170,6 +172,23 @@ describe("Discord user subject adapter", () => {
     });
 
     expect(subject.attributes.isApplicationOperator).toBe(true);
+  });
+
+  it("derives the Manage Server configuration capability", () => {
+    const context = createDiscordAuthorizationContext({ guild });
+    const subject = createDiscordUserSubject(
+      member({
+        permissions: {
+          has: (permission) => permission === "ManageGuild",
+        },
+      }),
+      context,
+    );
+
+    expect(subject.attributes).toMatchObject({
+      isAdministrator: false,
+      canManageGuild: true,
+    });
   });
 
   it("rejects a member from another guild", () => {

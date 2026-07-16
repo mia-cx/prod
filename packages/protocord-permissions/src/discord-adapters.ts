@@ -18,7 +18,7 @@ export type DiscordMemberLike = Readonly<{
     }>;
   }>;
   permissions: Readonly<{
-    has(permission: "Administrator"): boolean;
+    has(permission: "Administrator" | "ManageGuild"): boolean;
   }>;
 }>;
 
@@ -132,6 +132,7 @@ export const createDiscordUserSubject = (
       discordRoleIds: Object.freeze(discordRoleIds),
       isGuildOwner: member.id === member.guild.ownerId,
       isAdministrator: member.permissions.has("Administrator"),
+      canManageGuild: member.permissions.has("ManageGuild"),
       isApplicationOperator:
         options.isApplicationOperator?.(member.id) ?? false,
     }),

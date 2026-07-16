@@ -106,6 +106,18 @@ export const createAuthorizationService = (
           matchedRuleIds: [],
         };
       }
+      if (
+        input.subject.attributes.canManageGuild &&
+        input.verb === "manage" &&
+        (input.object.objectType === "settings" ||
+          input.object.objectType === "permissions")
+      ) {
+        return {
+          allowed: true,
+          reason: "manage_guild",
+          matchedRuleIds: [],
+        };
+      }
       if (input.subject.attributes.isApplicationOperator) {
         return {
           allowed: true,
