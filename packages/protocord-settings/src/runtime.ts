@@ -168,6 +168,8 @@ async function openSettings<Context>(
     const view = await renderer.render(request, context);
     if (alreadyReplied) {
       await interaction.followUp(replyView(view.components));
+    } else if (interaction.deferred && interaction.ephemeral === null) {
+      await interaction.followUp(replyView(view.components));
     } else if (deferredByRuntime || interaction.ephemeral === true) {
       await interaction.editReply(editView(view.components));
     } else {
@@ -757,9 +759,12 @@ async function requireAuthorization<Context>(
       ? { authorized: rawDecision }
       : rawDecision;
   if (!decision.authorized) {
+    const reason = decision.reason?.trim();
     throw new SettingsViewError(
       "unauthorized",
-      decision.reason ?? "You are not authorized to change this setting.",
+      reason === undefined || reason.length === 0
+        ? "You are not authorized to change this setting."
+        : reason,
     );
   }
 }
@@ -979,6 +984,10 @@ async function respondOpenError(
   content: string,
 ): Promise<void> {
   if (interaction.deferred && !interaction.replied) {
+    if (interaction.ephemeral === null) {
+      await respondEphemeral(interaction, content);
+      return;
+    }
     if (interaction.ephemeral !== true) {
       try {
         await interaction.editReply({

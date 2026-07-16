@@ -163,6 +163,7 @@ function mockInteraction(
     message: { id: "message-1" },
     replied: false,
     deferred: false,
+    ephemeral: null,
     reply,
     followUp,
     update,
@@ -317,6 +318,26 @@ describe("Discord settings runtime", () => {
       expect.objectContaining({
         content: "You are not authorized to view settings.",
         flags: MessageFlags.Ephemeral,
+      }),
+    );
+  });
+
+  it("opens privately after deferUpdate without editing the source message", async () => {
+    const button = mockInteraction("button", route("button", "increment"));
+    await (
+      button.interaction as unknown as { deferUpdate(): Promise<void> }
+    ).deferUpdate();
+
+    await expect(
+      runtime.open(button.interaction as RepliableInteraction, {
+        userId: "admin",
+      }),
+    ).resolves.toEqual({ matched: true, status: "opened" });
+
+    expect(button.editReply).not.toHaveBeenCalled();
+    expect(button.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flags: [MessageFlags.Ephemeral, MessageFlags.IsComponentsV2],
       }),
     );
   });
@@ -694,6 +715,34 @@ describe("Discord settings runtime", () => {
       | { content?: string }
       | undefined;
     expect(response?.content).toHaveLength(2_000);
+  });
+
+  it("replaces blank consumer authorization reasons with a denial", async () => {
+    const category = definition.categories[0]!;
+
+    for (const reason of ["", "   "]) {
+      const deniedRuntime = createSettingsRuntime({
+        definition: {
+          ...definition,
+          categories: [
+            {
+              ...category,
+              authorize: () => ({ authorized: false, reason }),
+            },
+          ],
+        },
+      });
+      const button = mockInteraction("button", route("button", "increment"));
+
+      await deniedRuntime.handle(button.interaction, { userId: "visitor" });
+
+      expect(button.followUp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "You are not authorized to change this setting.",
+          flags: MessageFlags.Ephemeral,
+        }),
+      );
+    }
   });
 
   it("rejects stale selections against freshly loaded field constraints", async () => {
