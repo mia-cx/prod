@@ -8,7 +8,9 @@ import {
   type ProdDatabase,
 } from "./database.js";
 import { createDiscordGateway, type DiscordGateway } from "./discord.js";
+import { createSqliteGuildSettingsStore } from "./guild-settings.js";
 import { applyMigrations } from "./migrations.js";
+import { createSupportHubDiscord } from "./support-hub.js";
 
 export type RunningProd = Readonly<{
   stop: (reason?: string) => Promise<void>;
@@ -49,21 +51,26 @@ export const startProd = async (
   signal.throwIfAborted();
 
   const logger = dependencies.logger;
-  const actions = createProdActionRuntime(logger, {
-    textCommandPrefix: config.textCommandPrefix,
-  });
-  const gateway =
-    dependencies.gateway ??
-    createDiscordGateway({
-      actions,
-      configuredApplicationOperatorUserIds: config.botOperatorUserIds,
-    });
   const connection = (dependencies.openDatabase ?? openDatabase)(
     config.databaseUrl,
   );
   const migrate = dependencies.migrate ?? defaultMigrate;
+  let gateway: DiscordGateway | undefined;
 
   try {
+    const actions = createProdActionRuntime(logger, {
+      textCommandPrefix: config.textCommandPrefix,
+      guildSettingsStore: createSqliteGuildSettingsStore(connection.database),
+      supportHubDiscord: createSupportHubDiscord(),
+    });
+    gateway =
+      dependencies.gateway ??
+      createDiscordGateway({
+        actions,
+        configuredApplicationOperatorUserIds: config.botOperatorUserIds,
+      });
+    const runningGateway = gateway;
+
     await migrate(
       connection.database,
       (owner) => {
@@ -73,7 +80,7 @@ export const startProd = async (
     );
     signal.throwIfAborted();
 
-    const identity = await gateway.connect(config.discordToken, signal);
+    const identity = await runningGateway.connect(config.discordToken, signal);
     signal.throwIfAborted();
     logger.info(
       {
@@ -84,35 +91,43 @@ export const startProd = async (
       },
       "Prod ready",
     );
+
+    let stopped = false;
+    return Object.freeze({
+      stop: async (reason = "requested") => {
+        if (stopped) {
+          return;
+        }
+        stopped = true;
+
+        logger.info({ reason }, "Prod stopping");
+        try {
+          await runningGateway.close();
+        } finally {
+          connection.close();
+        }
+        logger.info("Prod stopped");
+      },
+    });
   } catch (error) {
+    if (gateway !== undefined) {
+      try {
+        await gateway.close();
+      } catch (closeError) {
+        logger.error(
+          { err: closeError },
+          "failed to close Discord after startup failure",
+        );
+      }
+    }
     try {
-      await gateway.close();
+      connection.close();
     } catch (closeError) {
       logger.error(
         { err: closeError },
-        "failed to close Discord after startup failure",
+        "failed to close database after startup failure",
       );
-    } finally {
-      connection.close();
     }
     throw error;
   }
-
-  let stopped = false;
-  return Object.freeze({
-    stop: async (reason = "requested") => {
-      if (stopped) {
-        return;
-      }
-      stopped = true;
-
-      logger.info({ reason }, "Prod stopping");
-      try {
-        await gateway.close();
-      } finally {
-        connection.close();
-      }
-      logger.info("Prod stopped");
-    },
-  });
 };

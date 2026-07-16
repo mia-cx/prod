@@ -1,6 +1,8 @@
 import {
+  ChannelType,
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
+  type Guild,
   type Interaction,
 } from "discord.js";
 import type { Logger } from "pino";
@@ -8,28 +10,26 @@ import {
   createSettingsRuntime,
   type SettingsDefinition,
   type SettingsDispatchResult,
-  type SettingsMentionableReference,
+  type SettingsMutationResult,
+  type SettingsValidationIssue,
 } from "@protocord/settings";
 import { slashCommand, type Action } from "protocord";
 
+import type { GuildSettingsStore } from "../guild-settings.js";
+import { createGuildSetupService } from "../guild-setup.js";
+import type { SupportHubDiscord } from "../support-hub.js";
 import type { ProdActionContext } from "./runtime.js";
 
-type SyntheticSettingsContext = Readonly<{
-  guildId?: string;
+type GuildSetupSettingsContext = Readonly<{
   userId: string;
+  isGuildOwner: boolean;
+  isAdministrator: boolean;
   canManageGuild: boolean;
   isApplicationOperator: boolean;
+  guild?: Guild;
 }>;
 
-type SyntheticGuildSettings = {
-  refreshCount: number;
-  tone: string;
-  staff: readonly SettingsMentionableReference[];
-  hubChannelId?: string;
-  assistantName: string;
-};
-
-export type SyntheticSettingsConsumer = Readonly<{
+export type GuildSetupSettingsConsumer = Readonly<{
   action: Action<
     Readonly<Record<never, never>>,
     SettingsDispatchResult,
@@ -38,189 +38,239 @@ export type SyntheticSettingsConsumer = Readonly<{
   handle(interaction: Interaction): Promise<SettingsDispatchResult>;
 }>;
 
-export function createSyntheticSettingsConsumer(
+const invalid = (
+  issues: readonly SettingsValidationIssue[],
+): SettingsMutationResult => ({
+  status: "invalid",
+  issues,
+});
+
+const issue = (message: string): SettingsValidationIssue => ({ message });
+
+const requireGuild = (context: GuildSetupSettingsContext): Guild => {
+  if (context.guild === undefined) {
+    throw new TypeError("Guild settings require a guild interaction");
+  }
+  return context.guild;
+};
+
+export function createGuildSetupSettingsConsumer(
   logger: Logger,
   isApplicationOperator: (userId: string) => boolean,
-): SyntheticSettingsConsumer {
-  const stateByGuild = new Map<string, SyntheticGuildSettings>();
-  const loadState = (context: SyntheticSettingsContext): SyntheticGuildSettings => {
-    const guildId = context.guildId ?? "direct-message";
-    const existing = stateByGuild.get(guildId);
-    if (existing !== undefined) {
-      return existing;
+  store: GuildSettingsStore,
+  supportHub: SupportHubDiscord,
+): GuildSetupSettingsConsumer {
+  const setup = createGuildSetupService(store, supportHub);
+  const authorize = async (context: GuildSetupSettingsContext) => {
+    if (context.guild === undefined) {
+      return {
+        authorized: false as const,
+        reason: "Settings are available only inside a server.",
+      };
     }
-    const created: SyntheticGuildSettings = {
-      refreshCount: 0,
-      tone: "friendly",
-      staff: [],
-      assistantName: "Prod",
-    };
-    stateByGuild.set(guildId, created);
-    return created;
-  };
-  const authorize = (context: SyntheticSettingsContext) =>
-    context.guildId !== undefined &&
-    (context.canManageGuild || context.isApplicationOperator)
+    const state = await setup.get(context.guild);
+    const isBootstrapAdministrator =
+      context.isGuildOwner || context.isAdministrator;
+    if (state.hubChannelId === undefined && !isBootstrapAdministrator) {
+      return {
+        authorized: false as const,
+        reason:
+          "Only the server owner or an administrator can configure the first support hub.",
+      };
+    }
+    return isBootstrapAdministrator ||
+      context.canManageGuild ||
+      context.isApplicationOperator
       ? { authorized: true as const }
       : {
           authorized: false as const,
           reason:
             "Manage Server permission or bot operator access is required for settings.",
         };
+  };
 
-  const definition: SettingsDefinition<SyntheticSettingsContext> = {
-    title: "Prod development settings",
+  const definition: SettingsDefinition<GuildSetupSettingsContext> = {
+    title: "Prod settings",
     accentColor: 0x5865f2,
     categories: [
       {
-        id: "controls",
-        label: "Controls",
-        description: "Exercise every interactive settings field.",
+        id: "setup",
+        label: "Setup",
+        description:
+          "Configure this server's private support hub and assistant.",
         authorize,
         subcategories: [
           {
-            id: "general",
-            label: "General",
-            description: "Synthetic state is held in memory per development guild.",
+            id: "hub",
+            label: "Support hub",
+            description:
+              "Choose the locked text channel that owns private support threads.",
             fields: [
               {
-                kind: "button",
-                id: "refresh",
-                label: "Refresh information",
-                description: "Exercise a button mutation and rerender.",
-                load: (context) => ({
-                  value: `${String(loadState(context).refreshCount)} refreshes`,
-                  buttonLabel: "Refresh",
-                }),
-                mutate: (context) => {
-                  loadState(context).refreshCount += 1;
-                },
-              },
-              {
-                kind: "string-select",
-                id: "tone",
-                label: "Assistant tone",
-                load: (context) => ({
-                  value: loadState(context).tone,
-                  selectedValues: [loadState(context).tone],
-                  options: [
-                    { label: "Friendly", value: "friendly" },
-                    { label: "Direct", value: "direct" },
-                    { label: "Concise", value: "concise" },
-                  ],
-                }),
-                mutate: (values, context) => {
-                  loadState(context).tone = values[0] ?? "friendly";
-                },
-              },
-              {
-                kind: "mentionable-select",
-                id: "staff",
-                label: "Support staff",
-                description: "Choose any combination of users and roles.",
-                load: (context) => ({
-                  value: `${String(loadState(context).staff.length)} selected`,
-                  defaults: loadState(context).staff,
-                  minValues: 0,
-                  maxValues: 10,
-                }),
-                mutate: (values, context) => {
-                  loadState(context).staff = values.map(({ kind, id }) => ({
-                    kind,
-                    id,
-                  }));
-                },
-              },
-              {
                 kind: "channel-select",
-                id: "hub",
-                label: "Support hub",
-                load: (context) => ({
-                  value: loadState(context).hubChannelId
-                    ? `<#${loadState(context).hubChannelId}>`
-                    : "Not selected",
-                  minValues: 0,
-                  ...(loadState(context).hubChannelId === undefined
-                    ? {}
-                    : {
-                        defaultChannelIds: [loadState(context).hubChannelId!],
-                      }),
-                }),
-                mutate: (values, context) => {
-                  const state = loadState(context);
-                  const selected = values[0]?.id;
+                id: "hub-channel",
+                label: "Support hub channel",
+                description:
+                  "Prod validates its effective permissions before applying the empty-hub privacy boundary.",
+                load: async (context) => {
+                  const state = await setup.get(requireGuild(context));
+                  return {
+                    value:
+                      state.hubChannelId === undefined
+                        ? "Not configured"
+                        : `<#${state.hubChannelId}>`,
+                    channelTypes: [ChannelType.GuildText],
+                    minValues: 1,
+                    maxValues: 1,
+                    ...(state.hubChannelId === undefined
+                      ? {}
+                      : { defaultChannelIds: [state.hubChannelId] }),
+                  };
+                },
+                validate: async (values, context) => {
+                  const selected = values[0];
                   if (selected === undefined) {
-                    delete state.hubChannelId;
-                  } else {
-                    state.hubChannelId = selected;
+                    return [issue("Select one support hub text channel.")];
                   }
+                  const result = await setup.validateHub(
+                    requireGuild(context),
+                    selected.id,
+                  );
+                  return result.valid ? [] : result.issues.map(issue);
+                },
+                mutate: async (values, context) => {
+                  const selected = values[0];
+                  if (selected === undefined) {
+                    return invalid([
+                      issue("Select one support hub text channel."),
+                    ]);
+                  }
+                  const guild = requireGuild(context);
+                  const result = await setup.configureHub(guild, selected.id);
+                  if (!result.valid) return invalid(result.issues.map(issue));
+                  return { status: "success" as const };
                 },
               },
               {
-                kind: "modal",
-                id: "identity",
-                label: "Assistant identity",
-                description: "One character deliberately fails domain validation.",
-                title: "Edit assistant identity",
-                inputs: [
-                  {
-                    id: "name",
-                    label: "Display name",
-                    placeholder: "Prod",
-                    minLength: 1,
-                    maxLength: 32,
-                  },
-                ],
-                load: (context) => ({
-                  value: loadState(context).assistantName,
-                  values: { name: loadState(context).assistantName },
-                  buttonLabel: "Edit",
-                }),
-                validate: (values) =>
-                  (values.name?.trim().length ?? 0) < 2
-                    ? [
-                        {
-                          inputId: "name",
-                          message: "Use at least two visible characters.",
-                        },
-                      ]
-                    : [],
-                mutate: (values, context) => {
-                  loadState(context).assistantName = values.name!.trim();
+                kind: "button",
+                id: "hub-information",
+                label: "Hub information message",
+                description:
+                  "Post the support instructions once, or refresh the existing bot-managed message.",
+                load: async (context) => {
+                  const state = await setup.get(requireGuild(context));
+                  return {
+                    value:
+                      state.hubInformationMessageId === undefined
+                        ? "Not posted"
+                        : `[Open message](https://discord.com/channels/${state.guildId}/${state.hubChannelId!}/${state.hubInformationMessageId})`,
+                    buttonLabel:
+                      state.hubInformationMessageId === undefined
+                        ? "Post information"
+                        : "Refresh information",
+                    disabled: state.hubChannelId === undefined,
+                  };
                 },
+                mutate: async (context) => {
+                  const guild = requireGuild(context);
+                  const configured =
+                    await setup.refreshInformationMessage(guild);
+                  if (!configured.valid) {
+                    return invalid(configured.issues.map(issue));
+                  }
+                  return { status: "success" as const };
+                },
+              },
+              {
+                kind: "display",
+                id: "privacy",
+                label: "Empty-hub privacy",
+                load: () => ({
+                  value:
+                    "Reporters cannot send hub messages, send in threads, or create public/private threads. Ticket provisioning grants private-thread participation per reporter.",
+                }),
               },
             ],
           },
           {
-            id: "pagination",
-            label: "Pagination",
-            description: "A deliberately long field list exercises page controls.",
-            fields: Array.from({ length: 15 }, (_, index) => ({
-              kind: "display" as const,
-              id: `limit-${String(index + 1)}`,
-              label: `Synthetic value ${String(index + 1)}`,
-              load: () => ({ value: `Value ${String(index + 1)}` }),
-            })),
-          },
-        ],
-      },
-      {
-        id: "diagnostics",
-        label: "Diagnostics",
-        description: "Prove consumer-defined category navigation.",
-        authorize,
-        subcategories: [
-          {
-            id: "runtime",
-            label: "Runtime",
+            id: "assistant",
+            label: "Assistant",
+            description:
+              "Configure the identity and tone used in support messages.",
             fields: [
               {
-                kind: "display",
-                id: "boundary",
-                label: "Package boundary",
-                load: () => ({
-                  value: "Rendered by @protocord/settings for an app-owned consumer",
-                }),
+                kind: "modal",
+                id: "assistant-identity",
+                label: "Assistant identity",
+                title: "Edit assistant identity",
+                inputs: [
+                  {
+                    id: "identity",
+                    label: "Display identity",
+                    placeholder: "Prod",
+                    minLength: 2,
+                    maxLength: 32,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context)))
+                    .assistantIdentity;
+                  return {
+                    value,
+                    values: { identity: value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values.identity?.trim().length ?? 0) < 2
+                    ? [
+                        {
+                          inputId: "identity",
+                          message: "Use at least two visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setAssistantIdentity(
+                    requireGuild(context),
+                    values.identity!,
+                  );
+                },
+              },
+              {
+                kind: "modal",
+                id: "assistant-tone",
+                label: "Assistant tone",
+                title: "Edit assistant tone",
+                inputs: [
+                  {
+                    id: "tone",
+                    label: "Tone instruction",
+                    placeholder: "friendly, patient, and concise",
+                    minLength: 3,
+                    maxLength: 500,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context))).tone;
+                  return {
+                    value,
+                    values: { tone: value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values.tone?.trim().length ?? 0) < 3
+                    ? [
+                        {
+                          inputId: "tone",
+                          message: "Use at least three visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setTone(requireGuild(context), values.tone!);
+                },
               },
             ],
           },
@@ -232,12 +282,12 @@ export function createSyntheticSettingsConsumer(
   const runtime = createSettingsRuntime({
     definition,
     onError: (error) => {
-      logger.error({ err: error }, "synthetic settings interaction failed");
+      logger.error({ err: error }, "guild setup settings interaction failed");
     },
   });
-  const action: SyntheticSettingsConsumer["action"] = {
+  const action: GuildSetupSettingsConsumer["action"] = {
     name: "open_settings",
-    description: "Open the development settings validation surface.",
+    description: "Configure Prod for this server.",
     input: {
       parse: (input) => {
         if (!input || typeof input !== "object") {
@@ -254,7 +304,7 @@ export function createSyntheticSettingsConsumer(
     triggers: [
       slashCommand({
         name: "settings",
-        description: "Open the development settings validation surface",
+        description: "Configure Prod for this server",
         parse: () => ({}),
         present: async () => undefined,
       }),
@@ -283,13 +333,18 @@ export function createSyntheticSettingsConsumer(
 function settingsContext(
   interaction: Interaction,
   isApplicationOperator: (userId: string) => boolean,
-): SyntheticSettingsContext {
+): GuildSetupSettingsContext {
+  const guild = interaction.guild ?? undefined;
   return {
-    ...(interaction.guildId === null ? {} : { guildId: interaction.guildId }),
     userId: interaction.user.id,
+    isGuildOwner: guild?.ownerId === interaction.user.id,
+    isAdministrator:
+      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
+      false,
     canManageGuild:
       interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ??
       false,
     isApplicationOperator: isApplicationOperator(interaction.user.id),
+    ...(guild === undefined ? {} : { guild }),
   };
 }

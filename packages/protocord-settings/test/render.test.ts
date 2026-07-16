@@ -107,14 +107,43 @@ const definition = (
 });
 
 describe("Components v2 settings rendering", () => {
-  it("renders home, category, and subcategory as separate containers", async () => {
+  it("requires explicit category and subcategory selection", async () => {
     const authorize = vi.fn(() => true);
     const renderer = createSettingsRenderer(definition(authorize));
 
-    const view = await renderer.render({}, { userId: "admin" });
-    const [home, category, subcategory] = view.components;
+    const homeView = await renderer.render({}, { userId: "admin" });
+    const [home] = homeView.components;
 
     expect(authorize).toHaveBeenCalledOnce();
+    expect(homeView.components).toHaveLength(1);
+    expect(homeView.location).toEqual({ page: 0, pageCount: 0 });
+    expect(JSON.stringify(home)).toContain("Synthetic settings");
+    expect(JSON.stringify(home)).toContain("Labels");
+    expect(JSON.stringify(home)).not.toContain("Private");
+    expect(JSON.stringify(home)).not.toContain("Refresh");
+    expect(JSON.stringify(home)).not.toContain('"default":true');
+
+    const categoryView = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const [, category] = categoryView.components;
+    expect(categoryView.components).toHaveLength(2);
+    expect(categoryView.location).toEqual({
+      categoryId: "setup",
+      page: 0,
+      pageCount: 0,
+    });
+    expect(JSON.stringify(category)).toContain("Setup");
+    expect(JSON.stringify(category)).toContain("Large page");
+    expect(JSON.stringify(category)).not.toContain("Refresh");
+    expect(JSON.stringify(category)).not.toContain('"default":true');
+
+    const view = await renderer.render(
+      { categoryId: "setup", subcategoryId: "general" },
+      { userId: "admin" },
+    );
+    const [, , subcategory] = view.components;
     expect(view.components).toHaveLength(3);
     for (const container of view.components) {
       expect(container).toMatchObject({
@@ -122,13 +151,6 @@ describe("Components v2 settings rendering", () => {
         accent_color: 0x5865f2,
       });
     }
-    expect(JSON.stringify(home)).toContain("Synthetic settings");
-    expect(JSON.stringify(home)).toContain("Labels");
-    expect(JSON.stringify(home)).not.toContain("Private");
-    expect(JSON.stringify(home)).not.toContain("Refresh");
-    expect(JSON.stringify(category)).toContain("Setup");
-    expect(JSON.stringify(category)).toContain("Large page");
-    expect(JSON.stringify(category)).not.toContain("Refresh");
     expect(JSON.stringify(subcategory)).toContain("General");
     expect(JSON.stringify(subcategory)).toContain("Refresh");
     expect(JSON.stringify(subcategory)).toContain("Friendly");
@@ -176,7 +198,10 @@ describe("Components v2 settings rendering", () => {
       ],
     });
 
-    const view = await renderer.render({}, { userId: "admin" });
+    const view = await renderer.render(
+      { categoryId: "setup", subcategoryId: "general" },
+      { userId: "admin" },
+    );
     const payload = JSON.stringify(view.components);
 
     expect(payload).toContain('"label":"Action fallback"');
@@ -355,7 +380,10 @@ describe("Components v2 settings rendering", () => {
     };
 
     await expect(
-      createSettingsRenderer(oversized).render({}, { userId: "admin" }),
+      createSettingsRenderer(oversized).render(
+        { categoryId: "setup", subcategoryId: "general" },
+        { userId: "admin" },
+      ),
     ).rejects.toThrow(/at most 25 options/);
   });
 
@@ -387,7 +415,10 @@ describe("Components v2 settings rendering", () => {
           }),
           mutate: () => undefined,
         }),
-      ).render({}, { userId: "admin" }),
+      ).render(
+        { categoryId: "setup", subcategoryId: "general" },
+        { userId: "admin" },
+      ),
     ).rejects.toThrow(/placeholder|label/);
 
     await expect(
@@ -405,7 +436,10 @@ describe("Components v2 settings rendering", () => {
           }),
           mutate: () => undefined,
         }),
-      ).render({}, { userId: "admin" }),
+      ).render(
+        { categoryId: "setup", subcategoryId: "general" },
+        { userId: "admin" },
+      ),
     ).rejects.toThrow(/default/i);
   });
 
@@ -436,7 +470,10 @@ describe("Components v2 settings rendering", () => {
       ],
     });
 
-    const rendered = await renderer.render({}, { userId: "admin" });
+    const rendered = await renderer.render(
+      { categoryId: "setup", subcategoryId: "general" },
+      { userId: "admin" },
+    );
 
     expect(JSON.stringify(rendered.components)).not.toContain("default_values");
   });
@@ -470,7 +507,10 @@ describe("Components v2 settings rendering", () => {
       ],
     });
 
-    const rendered = await renderer.render({}, { userId: "admin" });
+    const rendered = await renderer.render(
+      { categoryId: "category", subcategoryId: "subcategory" },
+      { userId: "admin" },
+    );
     const contents = textDisplayContents(rendered.components);
 
     expect(contents).toHaveLength(4);
@@ -507,7 +547,10 @@ describe("Components v2 settings rendering", () => {
       ],
     });
 
-    const rendered = await renderer.render({}, { userId: "admin" });
+    const rendered = await renderer.render(
+      { categoryId: "category", subcategoryId: "subcategory" },
+      { userId: "admin" },
+    );
     const contents = textDisplayContents(rendered.components);
 
     expect(contents[1]).toBe(`# Category\n${categoryDescription}`);

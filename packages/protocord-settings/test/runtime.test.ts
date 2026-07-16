@@ -268,6 +268,32 @@ describe("Discord settings runtime", () => {
     );
   });
 
+  it("does not render fields until category and subcategory are selected", async () => {
+    const category = mockInteraction("string", route("category"), {
+      values: ["setup"],
+    });
+
+    await expect(
+      runtime.handle(category.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "viewed" });
+
+    const categoryPayload = JSON.stringify(category.editReply.mock.calls[0]?.[0]);
+    expect(categoryPayload).toContain("General");
+    expect(categoryPayload).not.toContain("Increment");
+
+    const subcategory = mockInteraction("string", route("subcategory"), {
+      values: ["general"],
+    });
+
+    await expect(
+      runtime.handle(subcategory.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "viewed" });
+
+    expect(JSON.stringify(subcategory.editReply.mock.calls[0]?.[0])).toContain(
+      "Increment",
+    );
+  });
+
   it("edits a command response that was already deferred", async () => {
     const command = mockCommand({ deferred: true });
 

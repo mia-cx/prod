@@ -102,6 +102,33 @@ describe("startProd", () => {
     expect(closeDatabase).toHaveBeenCalledTimes(1);
   });
 
+  it("closes the database when action runtime construction fails", async () => {
+    const gateway: DiscordGateway = {
+      connect: vi.fn(async () => {
+        throw new Error("gateway must not connect");
+      }),
+      close: vi.fn(async () => undefined),
+    };
+    const connection = openDatabase(":memory:");
+    const closeDatabase = vi.fn(connection.close);
+    const { logger } = captureLogger();
+
+    await expect(
+      startProd(
+        { ...config, textCommandPrefix: "123456789" },
+        {
+          logger,
+          gateway,
+          openDatabase: () => ({ ...connection, close: closeDatabase }),
+        },
+      ),
+    ).rejects.toThrow("1-8 Unicode code points");
+
+    expect(gateway.connect).not.toHaveBeenCalled();
+    expect(gateway.close).not.toHaveBeenCalled();
+    expect(closeDatabase).toHaveBeenCalledOnce();
+  });
+
   it("cancels startup and closes partial resources exactly once", async () => {
     const controller = new AbortController();
     const reason = new DOMException("shutdown", "AbortError");
