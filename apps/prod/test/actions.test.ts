@@ -1,5 +1,7 @@
 import {
   ApplicationCommandType,
+  MessageFlags,
+  PermissionFlagsBits,
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
@@ -7,6 +9,7 @@ import {
 } from "discord.js";
 import type { Logger } from "pino";
 import type { DiscordInteractionHandleResult } from "protocord";
+import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -19,6 +22,23 @@ const noMentions = { parse: [], repliedUser: false };
 const runtimeOptions = {
   textCommandPrefix: "!",
 };
+
+function componentWithCustomId(
+  value: unknown,
+  customId: string,
+): Readonly<Record<string, unknown>> | undefined {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => componentWithCustomId(item, customId))
+      .find((item) => item !== undefined);
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  const record = value as Readonly<Record<string, unknown>>;
+  if (record.custom_id === customId) return record;
+  return Object.values(record)
+    .map((item) => componentWithCustomId(item, customId))
+    .find((item) => item !== undefined);
+}
 
 type PingInteractionKind = "message" | "slash" | "user";
 
@@ -33,11 +53,17 @@ const pingInteraction = (
     deferred: false,
     replied: false,
     isAutocomplete: () => false,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
     isChatInputCommand: () => kind === "slash",
     isMessageContextMenuCommand: () => kind === "message",
     isUserContextMenuCommand: () => kind === "user",
     deferReply: vi.fn().mockImplementation(async () => {
       interaction.deferred = true;
+      interaction.ephemeral = true;
     }),
     editReply: vi.fn().mockResolvedValue(undefined),
     followUp: vi.fn().mockResolvedValue(undefined),
@@ -54,13 +80,20 @@ describe("Prod action runtime", () => {
       runtimeOptions,
     );
 
-    expect(runtime.actionCount).toBe(1);
+    expect(runtime.actionCount).toBe(2);
     expect(runtime.commands).toEqual([
       {
         type: ApplicationCommandType.ChatInput,
         name: "ping",
         description: "Check whether Prod is responsive",
         options: [],
+      },
+      {
+        type: ApplicationCommandType.ChatInput,
+        name: "settings",
+        description: "Open the development settings validation surface",
+        options: [],
+        defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
       },
       {
         type: ApplicationCommandType.Message,
@@ -128,6 +161,78 @@ describe("Prod action runtime", () => {
     },
   );
 
+  it("opens the app-owned synthetic settings consumer through /settings", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = settingsCommand(true);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flags: MessageFlags.IsComponentsV2,
+        components: expect.any(Array),
+      }),
+    );
+    expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
+      "Prod development settings",
+    );
+    expect(
+      componentWithCustomId(
+        interaction.editReply.mock.calls[0]?.[0],
+        encodeSettingsCustomId({
+          action: "channel-select",
+          categoryId: "controls",
+          subcategoryId: "general",
+          fieldId: "hub",
+          page: 0,
+        }),
+      ),
+    ).toMatchObject({ min_values: 0 });
+  });
+
+  it("routes synthetic component mutations before ordinary actions", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = settingsButton(true);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledOnce();
+    expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
+      "1 refreshes",
+    );
+    expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).not.toContain(
+      "Information refreshed.",
+    );
+    expect(interaction.reply).not.toHaveBeenCalled();
+  });
+
+  it("rechecks synthetic settings authorization for component mutations", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = settingsButton(false);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.update).not.toHaveBeenCalled();
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "Manage Server permission is required for settings.",
+        flags: MessageFlags.Ephemeral,
+      }),
+    );
+  });
+
   it("uses the configured prefix and replies with pong through text", async () => {
     const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
       ...runtimeOptions,
@@ -188,7 +293,7 @@ describe("Prod action runtime", () => {
     });
 
     expect(runtime.handleMessage).toBeUndefined();
-    expect(runtime.commands).toHaveLength(3);
+    expect(runtime.commands).toHaveLength(4);
   });
 
   it.each([
@@ -242,3 +347,76 @@ describe("Prod action runtime", () => {
     },
   );
 });
+
+const settingsCommand = (canManageGuild: boolean) => {
+  const reply = vi.fn().mockResolvedValue(undefined);
+  const interaction: Record<string, unknown> = {
+    commandName: "settings",
+    channelId: "channel-1",
+    guildId: "guild-1",
+    user: { id: "user-1", username: "staff", globalName: "Staff" },
+    memberPermissions: { has: () => canManageGuild },
+    deferred: false,
+    replied: false,
+    isAutocomplete: () => false,
+    isChatInputCommand: () => true,
+    isMessageContextMenuCommand: () => false,
+    isUserContextMenuCommand: () => false,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
+    reply,
+    followUp: vi.fn().mockResolvedValue(undefined),
+    deferReply: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+      interaction.ephemeral = true;
+    }),
+    editReply: vi.fn().mockResolvedValue(undefined),
+  };
+  return interaction as typeof interaction & {
+    reply: ReturnType<typeof vi.fn>;
+    followUp: ReturnType<typeof vi.fn>;
+    deferReply: ReturnType<typeof vi.fn>;
+    editReply: ReturnType<typeof vi.fn>;
+  };
+};
+
+const settingsButton = (canManageGuild: boolean) => {
+  const reply = vi.fn().mockResolvedValue(undefined);
+  const update = vi.fn().mockResolvedValue(undefined);
+  const interaction: Record<string, unknown> = {
+    customId: encodeSettingsCustomId({
+      action: "button",
+      categoryId: "controls",
+      subcategoryId: "general",
+      fieldId: "refresh",
+      page: 0,
+    }),
+    guildId: "guild-1",
+    user: { id: "user-1", username: "staff", globalName: "Staff" },
+    memberPermissions: { has: () => canManageGuild },
+    deferred: false,
+    replied: false,
+    isButton: () => true,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
+    reply,
+    followUp: vi.fn().mockResolvedValue(undefined),
+    update,
+    editReply: vi.fn().mockResolvedValue(undefined),
+    deferUpdate: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+    }),
+    showModal: vi.fn().mockResolvedValue(undefined),
+  };
+  return interaction as typeof interaction & {
+    reply: ReturnType<typeof vi.fn>;
+    followUp: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    editReply: ReturnType<typeof vi.fn>;
+  };
+};
