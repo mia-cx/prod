@@ -16,7 +16,10 @@ export const EMPTY_HUB_REPORTER_OVERWRITE = Object.freeze({
 
 const requiredBotPermissions = Object.freeze([
   ["View Channel", PermissionFlagsBits.ViewChannel],
-  ["Manage Roles (channel permission overwrites)", PermissionFlagsBits.ManageRoles],
+  [
+    "Manage Roles (channel permission overwrites)",
+    PermissionFlagsBits.ManageRoles,
+  ],
   ["Create Private Threads", PermissionFlagsBits.CreatePrivateThreads],
   ["Manage Threads", PermissionFlagsBits.ManageThreads],
   ["Send Messages", PermissionFlagsBits.SendMessages],
@@ -102,6 +105,14 @@ const resolveHub = async (
   return { valid: true, channel };
 };
 
+const fetchTextChannel = async (
+  guild: Guild,
+  channelId: string,
+): Promise<TextChannel | undefined> => {
+  const channel = await guild.channels.fetch(channelId);
+  return channel?.type === ChannelType.GuildText ? channel : undefined;
+};
+
 const informationMessageContent = (assistantIdentity: string): string =>
   [
     `## ${assistantIdentity} support`,
@@ -159,16 +170,18 @@ export const createSupportHubDiscord = (): SupportHubDiscord =>
       channelId: string,
       messageId: string,
     ) => {
-      let resolution: HubResolution;
+      let channel: TextChannel | undefined;
       try {
-        resolution = await resolveHub(guild, channelId);
+        channel = await fetchTextChannel(guild, channelId);
       } catch (error) {
-        if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) return;
+        if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) {
+          return;
+        }
         throw error;
       }
-      if (!resolution.valid) return;
+      if (channel === undefined) return;
       try {
-        const message = await resolution.channel.messages.fetch(messageId);
+        const message = await channel.messages.fetch(messageId);
         await message.delete();
       } catch (error) {
         if (!isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMessage)) {

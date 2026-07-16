@@ -164,4 +164,16 @@ describe("Discord support hub", () => {
     ).rejects.toThrow("Discord unavailable");
     expect(transient.send).not.toHaveBeenCalled();
   });
+
+  it("deletes an old managed message even after required bot permissions change", async () => {
+    const hub = createSupportHubDiscord();
+    const stale = fixture(new Set());
+    const remove = vi.fn().mockResolvedValue(undefined);
+    stale.fetchMessage.mockResolvedValue({ delete: remove });
+
+    await hub.deleteInformationMessage(stale.guild, "hub-1", "message-1");
+
+    expect(stale.fetchMessage).toHaveBeenCalledWith("message-1");
+    expect(remove).toHaveBeenCalledOnce();
+  });
 });

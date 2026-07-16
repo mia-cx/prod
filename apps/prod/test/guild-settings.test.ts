@@ -62,7 +62,9 @@ describe("SQLite guild settings", () => {
       await store.setAssistantIdentity("guild-1", "Support Guide");
       await store.setTone("guild-1", "Warm, direct, and brief");
 
-      const restartedStore = createSqliteGuildSettingsStore(connection.database);
+      const restartedStore = createSqliteGuildSettingsStore(
+        connection.database,
+      );
       await expect(restartedStore.get("guild-1")).resolves.toEqual({
         guildId: "guild-1",
         initialized: true,

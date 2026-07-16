@@ -80,18 +80,23 @@ describe("application-owned migration history", () => {
     const connection = openDatabase(":memory:");
 
     try {
-      connection.database.run(sql.raw(`
+      connection.database.run(
+        sql.raw(`
         CREATE TABLE __drizzle_migrations (
           id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
           hash text NOT NULL,
           created_at numeric
         )
-      `));
-      connection.database.run(sql.raw(`
+      `),
+      );
+      connection.database.run(
+        sql.raw(`
         INSERT INTO __drizzle_migrations (hash, created_at)
           VALUES ('legacy-0000', 1784195942210)
-      `));
-      connection.database.run(sql.raw(`
+      `),
+      );
+      connection.database.run(
+        sql.raw(`
         CREATE TABLE protocord_permission_rule_events (
           id text PRIMARY KEY NOT NULL,
           guild_id text NOT NULL,
@@ -104,14 +109,17 @@ describe("application-owned migration history", () => {
           after_json text,
           created_at text NOT NULL
         )
-      `));
-      connection.database.run(sql.raw(`
+      `),
+      );
+      connection.database.run(
+        sql.raw(`
         INSERT INTO protocord_permission_rule_events
           (id, guild_id, rule_id, event_type, actor_user_id, created_at)
           VALUES
           ('event-created', 'guild-1', 'rule-1', 'created', 'admin-1', '2026-07-16T11:00:00.000Z'),
           ('event-updated', 'guild-1', 'rule-1', 'updated', 'admin-2', '2026-07-16T10:00:00.000Z')
-      `));
+      `),
+      );
 
       await applyMigrations(connection.database);
 

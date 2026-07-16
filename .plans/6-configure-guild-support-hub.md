@@ -6,23 +6,23 @@ Replace Prod's synthetic in-memory settings consumer with persisted, app-owned g
 
 ## Acceptance criteria
 
-- [ ] Only a guild owner or administrator can bootstrap an unconfigured guild.
-- [ ] Hub selection validates channel type and effective bot permissions.
-- [ ] Initialization and default guild data are idempotent.
-- [ ] The hub information message is created or refreshed without duplication.
-- [ ] Identity and tone settings persist and rerender correctly.
-- [ ] The configured hub follows the empty-hub privacy contract.
+- [x] Only a guild owner or administrator can bootstrap an unconfigured guild.
+- [x] Hub selection validates channel type and effective bot permissions.
+- [x] Initialization and default guild data are idempotent.
+- [x] The hub information message is created or refreshed without duplication.
+- [x] Identity and tone settings persist and rerender correctly.
+- [x] The configured hub follows the empty-hub privacy contract.
 
 ## TODOs
 
 - [x] Add the app-owned guild-settings schema, migration, and idempotent SQLite store with persistence tests.
 - [x] Implement and test the Discord support-hub boundary for channel validation, empty-hub permissions, and idempotent information messages.
 - [x] Compose the persisted Setup settings category, enforce bootstrap authorization, and wire it into application startup.
-- [ ] Prove the complete setup workflow with focused integration tests and run repository-wide validation.
+- [x] Prove the complete setup workflow with focused integration tests and run repository-wide validation.
 
 ## Human validation
 
-- [ ] Automated checks pass before requesting credentials or human action.
+- [x] Automated checks pass before requesting credentials or human action.
 - [ ] Provide development Discord credentials and administrator access to a test guild. Configure a real hub through `/settings`, inspect effective bot and reporter permissions, refresh the information message twice, restart Prod, and confirm the setup persists without duplicate messages.
 - [ ] Record the validation outcome without secrets, raw tokens, private ticket content, or unredacted diagnostics.
 
@@ -36,3 +36,5 @@ Replace Prod's synthetic in-memory settings consumer with persisted, app-owned g
 - 2026-07-16: Added the app-owned `guild_settings` key/value schema and generated migration `0002`. The SQLite store loads defaults without writes, initializes with conflict-safe inserts, retains an information-message ID on same-hub writes, clears it when the hub changes, and persists identity/tone across store instances. All 55 app tests, app typecheck, and app lint pass.
 - 2026-07-16: Discord's channel API requires effective `Manage Roles` permission to edit channel overwrites. The support-hub adapter validates that plus every MVP bot permission, accepts only standard text channels, applies the locked reporter overwrite idempotently, edits a stored information message, and creates a replacement only for Discord's confirmed Unknown Message response. All 59 app tests, app typecheck, and app lint pass.
 - 2026-07-16: Replaced the synthetic consumer with the product Setup category. Its hub selection validates and configures Discord before persistence, hub changes remove the previous managed message, the post/refresh button revalidates privacy and persists one message ID, and identity/tone modals use the SQLite store. Application startup now supplies the migrated database-backed store. The app typecheck, lint, and all 59 tests pass.
+- 2026-07-16: Focused integration tests exercise owner/admin-only bootstrap, post-configuration Manage Server access, failed permission validation without persistence, repeated information refresh using the same stored message ID, and identity/tone persistence plus rerendering across a reconstructed store. Old managed messages remain deletable if their former hub later loses setup permissions.
+- 2026-07-16: Final `pnpm check` passes all 32 package-boundary, lint, typecheck, test, and build tasks; Prod has 64 passing tests. Final `pnpm pack:check` passes all 15 build and package checks. The two real-Discord HITL items remain intentionally pending.

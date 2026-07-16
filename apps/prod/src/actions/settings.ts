@@ -37,7 +37,9 @@ export type GuildSetupSettingsConsumer = Readonly<{
   handle(interaction: Interaction): Promise<SettingsDispatchResult>;
 }>;
 
-const invalid = (issues: readonly SettingsValidationIssue[]): SettingsMutationResult => ({
+const invalid = (
+  issues: readonly SettingsValidationIssue[],
+): SettingsMutationResult => ({
   status: "invalid",
   issues,
 });
@@ -92,7 +94,8 @@ export function createGuildSetupSettingsConsumer(
       {
         id: "setup",
         label: "Setup",
-        description: "Configure this server's private support hub and assistant.",
+        description:
+          "Configure this server's private support hub and assistant.",
         authorize,
         subcategories: [
           {
@@ -136,7 +139,9 @@ export function createGuildSetupSettingsConsumer(
                 mutate: async (values, context) => {
                   const selected = values[0];
                   if (selected === undefined) {
-                    return invalid([issue("Select one support hub text channel.")]);
+                    return invalid([
+                      issue("Select one support hub text channel."),
+                    ]);
                   }
                   const guild = requireGuild(context);
                   const result = await supportHub.configureHub(
@@ -186,7 +191,9 @@ export function createGuildSetupSettingsConsumer(
                   const state = await store.get(guild.id);
                   if (state.hubChannelId === undefined) {
                     return invalid([
-                      issue("Configure a support hub before posting information."),
+                      issue(
+                        "Configure a support hub before posting information.",
+                      ),
                     ]);
                   }
                   const configured = await supportHub.configureHub(
@@ -222,7 +229,8 @@ export function createGuildSetupSettingsConsumer(
           {
             id: "assistant",
             label: "Assistant",
-            description: "Configure the identity and tone used in support messages.",
+            description:
+              "Configure the identity and tone used in support messages.",
             fields: [
               {
                 kind: "modal",
@@ -239,10 +247,13 @@ export function createGuildSetupSettingsConsumer(
                   },
                 ],
                 load: async (context) => {
-                  const value = (
-                    await store.get(requireGuild(context).id)
-                  ).assistantIdentity;
-                  return { value, values: { identity: value }, buttonLabel: "Edit" };
+                  const value = (await store.get(requireGuild(context).id))
+                    .assistantIdentity;
+                  return {
+                    value,
+                    values: { identity: value },
+                    buttonLabel: "Edit",
+                  };
                 },
                 validate: (values) =>
                   (values.identity?.trim().length ?? 0) < 2
@@ -275,8 +286,13 @@ export function createGuildSetupSettingsConsumer(
                   },
                 ],
                 load: async (context) => {
-                  const value = (await store.get(requireGuild(context).id)).tone;
-                  return { value, values: { tone: value }, buttonLabel: "Edit" };
+                  const value = (await store.get(requireGuild(context).id))
+                    .tone;
+                  return {
+                    value,
+                    values: { tone: value },
+                    buttonLabel: "Edit",
+                  };
                 },
                 validate: (values) =>
                   (values.tone?.trim().length ?? 0) < 3

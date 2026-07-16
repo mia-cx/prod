@@ -102,9 +102,7 @@ export const createSqliteGuildSettingsStore = (
           .map((row) => [row.key, row.value] as const),
       );
       const hubChannelId = values.get("hub_channel_id");
-      const hubInformationMessageId = values.get(
-        "hub_information_message_id",
-      );
+      const hubInformationMessageId = values.get("hub_information_message_id");
       return Object.freeze({
         guildId,
         initialized: values.get("initialized") === "1",
@@ -139,13 +137,7 @@ export const createSqliteGuildSettingsStore = (
             ),
           )
           .get();
-        upsert(
-          transaction,
-          guildId,
-          "hub_channel_id",
-          channelId,
-          timestamp,
-        );
+        upsert(transaction, guildId, "hub_channel_id", channelId, timestamp);
         if (previous !== undefined && previous.value !== channelId) {
           transaction
             .delete(guildSettings)
