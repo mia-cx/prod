@@ -70,7 +70,7 @@ const definition = (
         {
           id: "large-page",
           label: "Large page",
-          fields: Array.from({ length: 12 }, (_, index) => displayField(index)),
+          fields: Array.from({ length: 15 }, (_, index) => displayField(index)),
         },
       ],
     },
@@ -94,22 +94,31 @@ const definition = (
 });
 
 describe("Components v2 settings rendering", () => {
-  it("renders only authorized category navigation and consumer fields", async () => {
+  it("renders home, category, and subcategory as separate containers", async () => {
     const authorize = vi.fn(() => true);
     const renderer = createSettingsRenderer(definition(authorize));
 
     const view = await renderer.render({}, { userId: "admin" });
-    const container = view.components[0];
+    const [home, category, subcategory] = view.components;
 
     expect(authorize).toHaveBeenCalledOnce();
-    expect(container).toMatchObject({
-      type: ComponentType.Container,
-      accent_color: 0x5865f2,
-    });
-    expect(JSON.stringify(container)).toContain("Synthetic settings");
-    expect(JSON.stringify(container)).toContain("Refresh");
-    expect(JSON.stringify(container)).toContain("Friendly");
-    expect(JSON.stringify(container)).not.toContain("Private");
+    expect(view.components).toHaveLength(3);
+    for (const container of view.components) {
+      expect(container).toMatchObject({
+        type: ComponentType.Container,
+        accent_color: 0x5865f2,
+      });
+    }
+    expect(JSON.stringify(home)).toContain("Synthetic settings");
+    expect(JSON.stringify(home)).toContain("Labels");
+    expect(JSON.stringify(home)).not.toContain("Private");
+    expect(JSON.stringify(home)).not.toContain("Refresh");
+    expect(JSON.stringify(category)).toContain("Setup");
+    expect(JSON.stringify(category)).toContain("Large page");
+    expect(JSON.stringify(category)).not.toContain("Refresh");
+    expect(JSON.stringify(subcategory)).toContain("General");
+    expect(JSON.stringify(subcategory)).toContain("Refresh");
+    expect(JSON.stringify(subcategory)).toContain("Friendly");
     expect(view.location).toEqual({
       categoryId: "setup",
       subcategoryId: "general",
@@ -176,9 +185,9 @@ describe("Components v2 settings rendering", () => {
       { categoryId: "setup", subcategoryId: "large-page", page: 2 },
       { userId: "admin" },
     );
-    const firstContainer = first.components[0];
-    const secondContainer = second.components[0];
-    const thirdContainer = third.components[0];
+    const firstContainer = first.components[2];
+    const secondContainer = second.components[2];
+    const thirdContainer = third.components[2];
 
     expect(first.location.pageCount).toBe(3);
     expect(firstContainer?.type).toBe(ComponentType.Container);
@@ -191,9 +200,9 @@ describe("Components v2 settings rendering", () => {
     expect(JSON.stringify(secondContainer)).toContain("Page 2 of 3");
     expect(JSON.stringify(thirdContainer)).toContain("Page 3 of 3");
     expect(JSON.stringify(firstContainer)).toContain("Field 0");
-    expect(JSON.stringify(thirdContainer)).toContain("Field 11");
-    for (const container of [firstContainer, thirdContainer]) {
-      const ids = customIds(container);
+    expect(JSON.stringify(thirdContainer)).toContain("Field 14");
+    for (const view of [first, third]) {
+      const ids = customIds(view.components);
       expect(new Set(ids).size).toBe(ids.length);
     }
   });
@@ -261,13 +270,13 @@ describe("Components v2 settings rendering", () => {
     };
     const renderer = createSettingsRenderer(value);
     const before = await renderer.render(
-      { categoryId: "main", subcategoryId: "page", page: 2 },
+      { categoryId: "main", subcategoryId: "page", page: 1 },
       { userId: "admin" },
     );
 
     canViewOtherCategory = false;
     const after = await renderer.render(
-      { categoryId: "main", subcategoryId: "page", page: 2 },
+      { categoryId: "main", subcategoryId: "page", page: 1 },
       { userId: "admin" },
     );
 

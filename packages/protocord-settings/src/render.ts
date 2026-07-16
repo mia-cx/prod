@@ -119,10 +119,7 @@ async function renderSettingsView<Context>(
   }
 
   const subcategory = selectSubcategory(category, request.subcategoryId);
-  const fieldPages = paginateFields(
-    subcategory.fields,
-    fixedComponentCount(category.subcategories.length),
-  );
+  const fieldPages = paginateFields(subcategory.fields, fixedComponentCount());
   const requestedPage = request.page ?? 0;
   const fields = fieldPages[requestedPage];
   if (fields === undefined) {
@@ -135,40 +132,45 @@ async function renderSettingsView<Context>(
     page: requestedPage,
     pageCount: fieldPages.length,
   };
-  const children: APIComponentInContainer[] = [
-    textDisplay(renderHeading(definition.title, category, subcategory)),
+  const homeChildren: APIComponentInContainer[] = [
+    textDisplay(`# ${definition.title}\n## Settings`),
   ];
   if (authorizedCategories.length > 1) {
-    children.push(categoryNavigation(authorizedCategories, location));
+    homeChildren.push(categoryNavigation(authorizedCategories, location));
   }
+  const categoryChildren: APIComponentInContainer[] = [
+    textDisplay(nodeHeading(category.label, category.description)),
+  ];
   if (category.subcategories.length > 1) {
-    children.push(subcategoryNavigation(category, location));
+    categoryChildren.push(subcategoryNavigation(category, location));
   }
+  const subcategoryChildren: APIComponentInContainer[] = [
+    textDisplay(nodeHeading(subcategory.label, subcategory.description)),
+  ];
   if (request.notice !== undefined) {
     const marker = request.notice.kind === "success" ? "✅" : "⚠️";
-    children.push(textDisplay(truncate(`${marker} ${request.notice.message}`, 4_000)));
-  }
-  for (const field of fields) {
-    children.push(...(await renderField(field, location, context)));
-  }
-  if (fieldPages.length > 1) {
-    children.push(pageNavigation(location));
-  }
-  if (children.length > SETTINGS_LIMITS.containerComponents) {
-    throw new SettingsViewError(
-      "invalid-view",
-      `settings view exceeds ${SETTINGS_LIMITS.containerComponents} container components`,
+    subcategoryChildren.push(
+      textDisplay(truncate(`${marker} ${request.notice.message}`, 4_000)),
     );
   }
-
-  const container: APIContainerComponent = {
-    type: ComponentType.Container,
-    ...(definition.accentColor === undefined
-      ? {}
-      : { accent_color: definition.accentColor }),
-    components: children,
+  for (const field of fields) {
+    subcategoryChildren.push(...(await renderField(field, location, context)));
+  }
+  if (fieldPages.length > 1) {
+    subcategoryChildren.push(pageNavigation(location));
+  }
+  return {
+    components: [
+      container("home", homeChildren, definition.accentColor),
+      container("category", categoryChildren, definition.accentColor),
+      container(
+        "subcategory",
+        subcategoryChildren,
+        definition.accentColor,
+      ),
+    ],
+    location,
   };
-  return { components: [container], location };
 }
 
 async function findAuthorizedCategories<Context>(
@@ -206,8 +208,8 @@ function selectSubcategory<Context>(
   return subcategory;
 }
 
-function fixedComponentCount(subcategoryCount: number): number {
-  return 3 + (subcategoryCount > 1 ? 1 : 0);
+function fixedComponentCount(): number {
+  return 2;
 }
 
 function paginateFields<Context>(
@@ -584,6 +586,24 @@ function actionRow<Component extends APIComponentInMessageActionRow>(
   return { type: ComponentType.ActionRow, components };
 }
 
+function container(
+  label: "home" | "category" | "subcategory",
+  components: APIComponentInContainer[],
+  accentColor: number | undefined,
+): APIContainerComponent {
+  if (components.length > SETTINGS_LIMITS.containerComponents) {
+    throw new SettingsViewError(
+      "invalid-view",
+      `settings ${label} container exceeds ${SETTINGS_LIMITS.containerComponents} components`,
+    );
+  }
+  return {
+    type: ComponentType.Container,
+    ...(accentColor === undefined ? {} : { accent_color: accentColor }),
+    components,
+  };
+}
+
 function textDisplay(content: string): APITextDisplayComponent {
   if (content.length > 4_000) {
     throw new SettingsViewError(
@@ -594,16 +614,8 @@ function textDisplay(content: string): APITextDisplayComponent {
   return { type: ComponentType.TextDisplay, content };
 }
 
-function renderHeading<Context>(
-  title: string,
-  category: SettingsCategory<Context>,
-  subcategory: SettingsSubcategory<Context>,
-): string {
-  return [
-    `# ${title}`,
-    `## ${category.label} · ${subcategory.label}`,
-    subcategory.description ?? category.description,
-  ]
+function nodeHeading(label: string, description: string | undefined): string {
+  return [`# ${label}`, description]
     .filter((value) => value !== undefined)
     .join("\n");
 }
