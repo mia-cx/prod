@@ -613,16 +613,40 @@ function constrainTextDisplays(
   components: readonly APIMessageTopLevelComponent[],
 ): void {
   const displays = findTextDisplays(components);
-  let remaining = SETTINGS_LIMITS.textDisplayCharactersPerMessage;
+  const budget = SETTINGS_LIMITS.textDisplayCharactersPerMessage;
+  if (
+    displays.reduce((total, display) => total + display.content.length, 0) <=
+    budget
+  ) {
+    return;
+  }
 
-  for (const [index, display] of displays.entries()) {
-    const displaysRemaining = displays.length - index;
-    const fairShare = Math.floor(remaining / displaysRemaining);
-    display.content = truncate(
-      display.content,
-      Math.min(SETTINGS_LIMITS.textDisplayCharacters, fairShare),
+  const byLength = displays
+    .map((display, index) => ({ display, index }))
+    .sort(
+      (left, right) =>
+        left.display.content.length - right.display.content.length ||
+        left.index - right.index,
     );
-    remaining -= display.content.length;
+  let remaining = budget;
+  let firstOverflow = 0;
+  while (firstOverflow < byLength.length) {
+    const candidate = byLength[firstOverflow]!;
+    const fairShare = Math.floor(
+      remaining / (byLength.length - firstOverflow),
+    );
+    if (candidate.display.content.length > fairShare) break;
+    remaining -= candidate.display.content.length;
+    firstOverflow += 1;
+  }
+
+  const overflowing = byLength.slice(firstOverflow);
+  const fairShare = Math.floor(remaining / overflowing.length);
+  let remainder = remaining % overflowing.length;
+  for (const { display } of overflowing) {
+    const maximum = fairShare + (remainder > 0 ? 1 : 0);
+    display.content = truncate(display.content, maximum);
+    remainder = Math.max(0, remainder - 1);
   }
 }
 

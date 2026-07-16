@@ -485,4 +485,34 @@ describe("Components v2 settings rendering", () => {
       expect.stringContaining("Field heading"),
     ]);
   });
+
+  it("preserves text displays when their combined content fits the budget", async () => {
+    const categoryDescription = "c".repeat(3_000);
+    const renderer = createSettingsRenderer({
+      title: "Under budget",
+      categories: [
+        {
+          id: "category",
+          label: "Category",
+          description: categoryDescription,
+          authorize: () => true,
+          subcategories: [
+            {
+              id: "subcategory",
+              label: "Subcategory",
+              fields: [displayField(1)],
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render({}, { userId: "admin" });
+    const contents = textDisplayContents(rendered.components);
+
+    expect(contents[1]).toBe(`# Category\n${categoryDescription}`);
+    expect(contents.reduce((total, content) => total + content.length, 0)).toBeLessThan(
+      4_000,
+    );
+  });
 });
