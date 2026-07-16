@@ -1,7 +1,6 @@
 import {
   ApplicationCommandType,
   MessageFlags,
-  PermissionFlagsBits,
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
@@ -93,7 +92,6 @@ describe("Prod action runtime", () => {
         name: "settings",
         description: "Open the development settings validation surface",
         options: [],
-        defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
       },
       {
         type: ApplicationCommandType.Message,
@@ -215,6 +213,55 @@ describe("Prod action runtime", () => {
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
+  it("rechecks bot operator access for settings opens and mutations", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    runtime.setApplicationOperatorUserIds(["user-1"]);
+
+    const open = settingsCommand(false);
+    await runtime.handleInteraction(open as unknown as Interaction);
+    expect(open.editReply).toHaveBeenCalledOnce();
+    expect(JSON.stringify(open.editReply.mock.calls[0]?.[0])).toContain(
+      "Prod development settings",
+    );
+
+    const mutation = settingsButton(false);
+    await runtime.handleInteraction(mutation as unknown as Interaction);
+    expect(mutation.editReply).toHaveBeenCalledOnce();
+    expect(JSON.stringify(mutation.editReply.mock.calls[0]?.[0])).toContain(
+      "1 refreshes",
+    );
+
+    runtime.setApplicationOperatorUserIds([]);
+    const expiredMutation = settingsButton(false);
+    await runtime.handleInteraction(expiredMutation as unknown as Interaction);
+    expect(expiredMutation.editReply).not.toHaveBeenCalled();
+    expect(expiredMutation.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "Manage Server permission or bot operator access is required for settings.",
+        flags: MessageFlags.Ephemeral,
+      }),
+    );
+  });
+
+  it("denies settings opens for ordinary guild members", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = settingsCommand(false);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "You are not authorized to view settings.",
+      allowedMentions: noMentions,
+    });
+  });
+
   it("rechecks synthetic settings authorization for component mutations", async () => {
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),
@@ -227,7 +274,8 @@ describe("Prod action runtime", () => {
     expect(interaction.update).not.toHaveBeenCalled();
     expect(interaction.followUp).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: "Manage Server permission is required for settings.",
+        content:
+          "Manage Server permission or bot operator access is required for settings.",
         flags: MessageFlags.Ephemeral,
       }),
     );

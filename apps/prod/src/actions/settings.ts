@@ -18,6 +18,7 @@ type SyntheticSettingsContext = Readonly<{
   guildId?: string;
   userId: string;
   canManageGuild: boolean;
+  isApplicationOperator: boolean;
 }>;
 
 type SyntheticGuildSettings = {
@@ -39,6 +40,7 @@ export type SyntheticSettingsConsumer = Readonly<{
 
 export function createSyntheticSettingsConsumer(
   logger: Logger,
+  isApplicationOperator: (userId: string) => boolean,
 ): SyntheticSettingsConsumer {
   const stateByGuild = new Map<string, SyntheticGuildSettings>();
   const loadState = (context: SyntheticSettingsContext): SyntheticGuildSettings => {
@@ -57,11 +59,13 @@ export function createSyntheticSettingsConsumer(
     return created;
   };
   const authorize = (context: SyntheticSettingsContext) =>
-    context.guildId !== undefined && context.canManageGuild
+    context.guildId !== undefined &&
+    (context.canManageGuild || context.isApplicationOperator)
       ? { authorized: true as const }
       : {
           authorized: false as const,
-          reason: "Manage Server permission is required for settings.",
+          reason:
+            "Manage Server permission or bot operator access is required for settings.",
         };
 
   const definition: SettingsDefinition<SyntheticSettingsContext> = {
@@ -251,9 +255,6 @@ export function createSyntheticSettingsConsumer(
       slashCommand({
         name: "settings",
         description: "Open the development settings validation surface",
-        registration: {
-          defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
-        },
         parse: () => ({}),
         present: async () => undefined,
       }),
@@ -262,23 +263,33 @@ export function createSyntheticSettingsConsumer(
     authorization: () => undefined,
     execute: async (invocation) => {
       const interaction = invocation.rawEvent as ChatInputCommandInteraction;
-      return runtime.open(interaction, settingsContext(interaction));
+      return runtime.open(
+        interaction,
+        settingsContext(interaction, isApplicationOperator),
+      );
     },
   };
 
   return Object.freeze({
     action,
     handle: (interaction) =>
-      runtime.handle(interaction, settingsContext(interaction)),
+      runtime.handle(
+        interaction,
+        settingsContext(interaction, isApplicationOperator),
+      ),
   });
 }
 
-function settingsContext(interaction: Interaction): SyntheticSettingsContext {
+function settingsContext(
+  interaction: Interaction,
+  isApplicationOperator: (userId: string) => boolean,
+): SyntheticSettingsContext {
   return {
     ...(interaction.guildId === null ? {} : { guildId: interaction.guildId }),
     userId: interaction.user.id,
     canManageGuild:
       interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ??
       false,
+    isApplicationOperator: isApplicationOperator(interaction.user.id),
   };
 }

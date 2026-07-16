@@ -60,7 +60,10 @@ export const createProdActionRuntime = (
     isApplicationOperator,
     createUserAuthorizationSubject,
   };
-  const settings = createSyntheticSettingsConsumer(logger);
+  const settings = createSyntheticSettingsConsumer(
+    logger,
+    isApplicationOperator,
+  );
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,
     present: async (_trigger, _message, outcome, presentationContext) => {
