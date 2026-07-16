@@ -62,7 +62,7 @@ describe("startProd", () => {
 
     expect(sequence).toEqual(["migrate", "connect"]);
     expect(output.join("")).toContain("Prod ready");
-    expect(output.join("")).toContain('"actionCount":1');
+    expect(output.join("")).toContain('"actionCount":2');
     expect(output.join("")).not.toContain(config.discordToken);
 
     await application.stop("test");

@@ -16,7 +16,7 @@
     "lint": "eslint src test --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage",
-    "pack:check": "pnpm pack --dry-run && node --input-type=module -e \"const api = await import('@protocord/settings'); if (typeof api.defineSettings !== 'function' || typeof api.encodeSettingsCustomId !== 'function') throw new Error('compiled settings entrypoint is incomplete')\""
+    "pack:check": "pnpm pack --dry-run && node --input-type=module -e \"const api = await import('@protocord/settings'); if (typeof api.defineSettings !== 'function' || typeof api.encodeSettingsCustomId !== 'function' || typeof api.createSettingsRuntime !== 'function') throw new Error('compiled settings entrypoint is incomplete')\""
   },
   "dependencies": {
     "discord.js": "14.27.0"

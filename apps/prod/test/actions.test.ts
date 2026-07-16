@@ -1,5 +1,6 @@
 import {
   ApplicationCommandType,
+  MessageFlags,
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
@@ -7,6 +8,7 @@ import {
 } from "discord.js";
 import type { Logger } from "pino";
 import type { DiscordInteractionHandleResult } from "protocord";
+import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -33,6 +35,11 @@ const pingInteraction = (
     deferred: false,
     replied: false,
     isAutocomplete: () => false,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
     isChatInputCommand: () => kind === "slash",
     isMessageContextMenuCommand: () => kind === "message",
     isUserContextMenuCommand: () => kind === "user",
@@ -54,12 +61,18 @@ describe("Prod action runtime", () => {
       runtimeOptions,
     );
 
-    expect(runtime.actionCount).toBe(1);
+    expect(runtime.actionCount).toBe(2);
     expect(runtime.commands).toEqual([
       {
         type: ApplicationCommandType.ChatInput,
         name: "ping",
         description: "Check whether Prod is responsive",
+        options: [],
+      },
+      {
+        type: ApplicationCommandType.ChatInput,
+        name: "settings",
+        description: "Open the development settings validation surface",
         options: [],
       },
       {
@@ -109,6 +122,61 @@ describe("Prod action runtime", () => {
       expect(interaction.deleteReply).not.toHaveBeenCalled();
     },
   );
+
+  it("opens the app-owned synthetic settings consumer through /settings", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = settingsCommand(true);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.reply).toHaveBeenCalledOnce();
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flags: [MessageFlags.Ephemeral, MessageFlags.IsComponentsV2],
+        components: expect.any(Array),
+      }),
+    );
+    expect(JSON.stringify(interaction.reply.mock.calls[0]?.[0])).toContain(
+      "Prod development settings",
+    );
+  });
+
+  it("routes synthetic component mutations before ordinary actions", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = settingsButton(true);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.update).toHaveBeenCalledOnce();
+    expect(JSON.stringify(interaction.update.mock.calls[0]?.[0])).toContain(
+      "Information refreshed.",
+    );
+    expect(interaction.reply).not.toHaveBeenCalled();
+  });
+
+  it("rechecks synthetic settings authorization for component mutations", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = settingsButton(false);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.update).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "Manage Server permission is required for settings.",
+        flags: MessageFlags.Ephemeral,
+      }),
+    );
+  });
 
   it("uses the configured prefix and replies with pong through text", async () => {
     const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
@@ -170,7 +238,7 @@ describe("Prod action runtime", () => {
     });
 
     expect(runtime.handleMessage).toBeUndefined();
-    expect(runtime.commands).toHaveLength(3);
+    expect(runtime.commands).toHaveLength(4);
   });
 
   it.each([
@@ -224,3 +292,57 @@ describe("Prod action runtime", () => {
     },
   );
 });
+
+const settingsCommand = (canManageGuild: boolean) => {
+  const reply = vi.fn().mockResolvedValue(undefined);
+  return {
+    commandName: "settings",
+    channelId: "channel-1",
+    guildId: "guild-1",
+    user: { id: "user-1", username: "staff", globalName: "Staff" },
+    memberPermissions: { has: () => canManageGuild },
+    deferred: false,
+    replied: false,
+    isAutocomplete: () => false,
+    isChatInputCommand: () => true,
+    isMessageContextMenuCommand: () => false,
+    isUserContextMenuCommand: () => false,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
+    reply,
+    followUp: vi.fn().mockResolvedValue(undefined),
+    deferReply: vi.fn().mockResolvedValue(undefined),
+    editReply: vi.fn().mockResolvedValue(undefined),
+  };
+};
+
+const settingsButton = (canManageGuild: boolean) => {
+  const reply = vi.fn().mockResolvedValue(undefined);
+  const update = vi.fn().mockResolvedValue(undefined);
+  return {
+    customId: encodeSettingsCustomId({
+      action: "button",
+      categoryId: "controls",
+      subcategoryId: "general",
+      fieldId: "refresh",
+      page: 0,
+    }),
+    guildId: "guild-1",
+    user: { id: "user-1", username: "staff", globalName: "Staff" },
+    memberPermissions: { has: () => canManageGuild },
+    deferred: false,
+    replied: false,
+    isButton: () => true,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
+    reply,
+    followUp: vi.fn().mockResolvedValue(undefined),
+    update,
+    showModal: vi.fn().mockResolvedValue(undefined),
+  };
+};
