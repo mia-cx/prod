@@ -8,7 +8,9 @@ import {
   type AuthorizationContext,
   type PermissionRule,
   type PermissionRuleStore,
+  type RemovePermissionRuleInput,
   type RuleObject,
+  type UpsertPermissionRuleInput,
   validateAuthorizationCheck,
   validateRuleSubject,
 } from "../src/index.js";
@@ -39,14 +41,22 @@ const sameContext = (
 class MemoryRuleStore implements PermissionRuleStore {
   constructor(private readonly rules: PermissionRule[]) {}
 
-  async upsert(next: PermissionRule): Promise<void> {
+  async upsert(input: UpsertPermissionRuleInput): Promise<void> {
+    const next: PermissionRule = {
+      ...input.rule,
+      createdByUserId: input.actor.actorId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
     const index = this.rules.findIndex((candidate) => candidate.id === next.id);
     if (index === -1) this.rules.push(next);
     else this.rules[index] = next;
   }
 
-  async remove(ruleId: string): Promise<void> {
-    const index = this.rules.findIndex((candidate) => candidate.id === ruleId);
+  async remove(input: RemovePermissionRuleInput): Promise<void> {
+    const index = this.rules.findIndex(
+      (candidate) => candidate.id === input.ruleId,
+    );
     if (index !== -1) this.rules.splice(index, 1);
   }
 
@@ -110,13 +120,13 @@ describe("authorization precedence", () => {
         object: { objectType: "ticket", objectId: "ticket-1" },
         permit: "allow",
       }),
-      rule("category-allow", {
+      rule("category-deny", {
         context: { guildId: "guild-1", categoryId: "category-1" },
         subject: { subjectType: "user", subjectId: "user-1" },
         object: { objectType: "ticket", objectId: "ticket-1" },
-        permit: "allow",
+        permit: "deny",
       }),
-      rule("channel-deny", {
+      rule("channel-allow", {
         context: {
           guildId: "guild-1",
           categoryId: "category-1",
@@ -124,14 +134,25 @@ describe("authorization precedence", () => {
         },
         subject: { subjectType: "role", subjectId: "role-1" },
         object: { objectType: "ticket", objectId: "*" },
-        permit: "deny",
+        permit: "allow",
       }),
     ]);
 
     await expect(service.check(baseCheck())).resolves.toEqual({
+      allowed: true,
+      reason: "matched_rule",
+      matchedRuleIds: ["channel-allow"],
+    });
+    await expect(
+      service.check(
+        baseCheck({
+          context: { guildId: "guild-1", categoryId: "category-1" },
+        }),
+      ),
+    ).resolves.toEqual({
       allowed: false,
       reason: "matched_rule",
-      matchedRuleIds: ["channel-deny"],
+      matchedRuleIds: ["category-deny"],
     });
   });
 
