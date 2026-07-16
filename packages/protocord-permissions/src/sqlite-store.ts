@@ -24,8 +24,7 @@ import {
 
 type PermissionRuleRow = typeof permissionRules.$inferSelect;
 const eventOrder = [
-  asc(permissionRuleEvents.createdAt),
-  asc(permissionRuleEvents.id),
+  asc(permissionRuleEvents.sequence),
 ] as const;
 
 export type PermissionRuleEvent = Readonly<{

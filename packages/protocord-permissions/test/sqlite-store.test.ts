@@ -80,7 +80,8 @@ describe("SQLite permission rule store", () => {
         verb
       );
       CREATE TABLE protocord_permission_rule_events (
-        id text PRIMARY KEY NOT NULL,
+        sequence integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+        id text NOT NULL,
         guild_id text NOT NULL,
         category_id text,
         channel_id text,
@@ -91,6 +92,8 @@ describe("SQLite permission rule store", () => {
         after_json text,
         created_at text NOT NULL
       );
+      CREATE UNIQUE INDEX protocord_permission_rule_events_id
+        ON protocord_permission_rule_events (id);
     `);
     nextId = 0;
     currentTimestamp = timestamp;
@@ -231,7 +234,7 @@ describe("SQLite permission rule store", () => {
     ]);
   });
 
-  it("orders complete and rule-specific audit histories deterministically", async () => {
+  it("orders complete and rule-specific audit histories by mutation sequence", async () => {
     const first = fixtureRule();
     currentTimestamp = updatedTimestamp;
     await store.upsert({
@@ -259,13 +262,13 @@ describe("SQLite permission rule store", () => {
     });
 
     await expect(store.listEvents(first.id)).resolves.toMatchObject([
-      { id: "event-2", eventType: "updated", createdAt: timestamp },
       { id: "event-1", eventType: "created", createdAt: updatedTimestamp },
+      { id: "event-2", eventType: "updated", createdAt: timestamp },
     ]);
     await expect(store.listEvents()).resolves.toMatchObject([
-      { id: "event-3", ruleId: second.id },
-      { id: "event-2", ruleId: first.id },
       { id: "event-1", ruleId: first.id },
+      { id: "event-2", ruleId: first.id },
+      { id: "event-3", ruleId: second.id },
     ]);
   });
 

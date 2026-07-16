@@ -1,5 +1,6 @@
 CREATE TABLE `protocord_permission_rule_events` (
-	`id` text PRIMARY KEY NOT NULL,
+	`sequence` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`id` text NOT NULL,
 	`guild_id` text NOT NULL,
 	`category_id` text,
 	`channel_id` text,
@@ -11,7 +12,8 @@ CREATE TABLE `protocord_permission_rule_events` (
 	`created_at` text NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `protocord_permission_rule_events_rule` ON `protocord_permission_rule_events` (`rule_id`,`created_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `protocord_permission_rule_events_id` ON `protocord_permission_rule_events` (`id`);--> statement-breakpoint
+CREATE INDEX `protocord_permission_rule_events_rule` ON `protocord_permission_rule_events` (`rule_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `protocord_permission_rule_events_context` ON `protocord_permission_rule_events` (`guild_id`,`category_id`,`channel_id`);--> statement-breakpoint
 CREATE TABLE `protocord_permission_rules` (
 	`id` text PRIMARY KEY NOT NULL,

@@ -7,10 +7,17 @@
     "protocord_permission_rule_events": {
       "name": "protocord_permission_rule_events",
       "columns": {
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
         "id": {
           "name": "id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -79,11 +86,18 @@
         }
       },
       "indexes": {
+        "protocord_permission_rule_events_id": {
+          "name": "protocord_permission_rule_events_id",
+          "columns": [
+            "id"
+          ],
+          "isUnique": true
+        },
         "protocord_permission_rule_events_rule": {
           "name": "protocord_permission_rule_events_rule",
           "columns": [
             "rule_id",
-            "created_at"
+            "sequence"
           ],
           "isUnique": false
         },

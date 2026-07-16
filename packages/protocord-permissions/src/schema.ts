@@ -77,7 +77,8 @@ export const permissionRules = sqliteTable(
 export const permissionRuleEvents = sqliteTable(
   "protocord_permission_rule_events",
   {
-    id: text().primaryKey(),
+    sequence: integer().primaryKey({ autoIncrement: true }),
+    id: text().notNull(),
     guildId: text("guild_id").notNull(),
     categoryId: text("category_id"),
     channelId: text("channel_id"),
@@ -91,9 +92,10 @@ export const permissionRuleEvents = sqliteTable(
     createdAt: text("created_at").notNull(),
   },
   (table) => [
+    uniqueIndex("protocord_permission_rule_events_id").on(table.id),
     index("protocord_permission_rule_events_rule").on(
       table.ruleId,
-      table.createdAt,
+      table.sequence,
     ),
     index("protocord_permission_rule_events_context").on(
       table.guildId,
