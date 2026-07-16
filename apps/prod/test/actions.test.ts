@@ -23,6 +23,23 @@ const runtimeOptions = {
   textCommandPrefix: "!",
 };
 
+function componentWithCustomId(
+  value: unknown,
+  customId: string,
+): Readonly<Record<string, unknown>> | undefined {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => componentWithCustomId(item, customId))
+      .find((item) => item !== undefined);
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  const record = value as Readonly<Record<string, unknown>>;
+  if (record.custom_id === customId) return record;
+  return Object.values(record)
+    .map((item) => componentWithCustomId(item, customId))
+    .find((item) => item !== undefined);
+}
+
 type PingInteractionKind = "message" | "slash" | "user";
 
 const pingInteraction = (
@@ -147,6 +164,18 @@ describe("Prod action runtime", () => {
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
       "Prod development settings",
     );
+    expect(
+      componentWithCustomId(
+        interaction.editReply.mock.calls[0]?.[0],
+        encodeSettingsCustomId({
+          action: "channel-select",
+          categoryId: "controls",
+          subcategoryId: "general",
+          fieldId: "hub",
+          page: 0,
+        }),
+      ),
+    ).toMatchObject({ min_values: 0 });
   });
 
   it("routes synthetic component mutations before ordinary actions", async () => {

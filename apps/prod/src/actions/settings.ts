@@ -135,6 +135,7 @@ export function createSyntheticSettingsConsumer(
                   value: loadState(context).hubChannelId
                     ? `<#${loadState(context).hubChannelId}>`
                     : "Not selected",
+                  minValues: 0,
                   ...(loadState(context).hubChannelId === undefined
                     ? {}
                     : {
