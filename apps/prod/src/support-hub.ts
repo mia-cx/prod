@@ -260,8 +260,8 @@ const applyOwnedPermissions = async (
 const informationMessageContent = (assistantIdentity: string): string =>
   [
     `## ${assistantIdentity} support`,
-    "Use `/issue`, `/report`, or `/debugshare` to open a private support ticket.",
-    "Ticket conversations stay in invite-only private threads. Do not post ticket details in this channel.",
+    "Ticket intake is not enabled yet. Once it is available, Prod will create invite-only private threads for support conversations.",
+    "Keep this channel empty, and do not post support details here.",
     SUPPORT_HUB_INFORMATION_MARKER,
   ].join("\n\n");
 

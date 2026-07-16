@@ -306,12 +306,14 @@ describe("Discord support hub", () => {
     expect(createdId).toBe("message-1");
     expect(refreshedId).toBe("message-1");
     expect(send).toHaveBeenCalledOnce();
-    expect(messageCache.get("message-1")?.edit).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("## Support Guide support"),
-        allowedMentions: { parse: [] },
-      }),
-    );
+    const content = messageCache.get("message-1")?.content ?? "";
+    expect(content).toContain("## Support Guide support");
+    expect(content).toContain("Ticket intake is not enabled yet");
+    expect(content).not.toMatch(/\/(issue|report|debugshare)\b/);
+    expect(messageCache.get("message-1")?.edit).toHaveBeenLastCalledWith({
+      content,
+      allowedMentions: { parse: [] },
+    });
   });
 
   it("recovers an unpersisted managed message without touching unrelated messages", async () => {
