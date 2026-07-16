@@ -60,34 +60,11 @@ export const createGuildSetupService = (
   const compensate = async (
     guild: Guild,
     transition: HubTransition,
-    assistantIdentity: string,
   ): Promise<unknown[]> => {
     const errors: unknown[] = [];
     await discord
       .releaseHub(guild, transition.next)
       .catch((error: unknown) => errors.push(error));
-    const previous = transition.previous;
-    if (previous.hubPermissionOwnership !== undefined) {
-      await discord
-        .restoreHub(guild, previous.hubPermissionOwnership)
-        .catch((error: unknown) => errors.push(error));
-    }
-    if (
-      previous.hubChannelId !== undefined &&
-      previous.hubInformationMessageId !== undefined
-    ) {
-      await discord
-        .upsertInformationMessage({
-          guild,
-          channelId: previous.hubChannelId,
-          assistantIdentity,
-          messageId: previous.hubInformationMessageId,
-        })
-        .then((messageId) =>
-          store.setHubInformationMessage(guild.id, messageId),
-        )
-        .catch((error: unknown) => errors.push(error));
-    }
     if (errors.length === 0) {
       await store
         .abortHubTransition(guild.id, transition.id)
@@ -99,58 +76,57 @@ export const createGuildSetupService = (
   const resumeTransition = async (
     guild: Guild,
     transition: HubTransition,
-    assistantIdentity: string,
   ): Promise<SupportHubValidation> => {
-    let configured;
-    try {
-      configured = await discord.applyHub(guild, transition.next);
-    } catch (error) {
-      return throwTransitionFailure(
-        error,
-        await compensate(guild, transition, assistantIdentity),
-      );
-    }
-    if (!configured.valid) {
-      const errors = await compensate(guild, transition, assistantIdentity);
-      if (errors.length > 0) {
-        throw new AggregateError(
-          [new Error(configured.issues.join(" ")), ...errors],
-          "Invalid support hub could not be fully compensated",
+    if (transition.phase === "prepared") {
+      let configured;
+      try {
+        configured = await discord.applyHub(guild, transition.next);
+      } catch (error) {
+        return throwTransitionFailure(
+          error,
+          await compensate(guild, transition),
         );
       }
-      return configured;
-    }
-
-    try {
-      const previous = transition.previous;
-      if (
-        previous.hubChannelId !== undefined &&
-        previous.hubPermissionOwnership !== undefined
-      ) {
-        if (previous.hubInformationMessageId !== undefined) {
-          await discord.deleteInformationMessage(
-            guild,
-            previous.hubChannelId,
-            previous.hubInformationMessageId,
+      if (!configured.valid) {
+        const errors = await compensate(guild, transition);
+        if (errors.length > 0) {
+          throw new AggregateError(
+            [new Error(configured.issues.join(" ")), ...errors],
+            "Invalid support hub could not be fully compensated",
           );
         }
-        await discord.releaseHub(guild, previous.hubPermissionOwnership);
+        return configured;
       }
-      await store.completeHubTransition(guild.id, transition);
-      return { valid: true as const };
-    } catch (error) {
-      return throwTransitionFailure(
-        error,
-        await compensate(guild, transition, assistantIdentity),
-      );
+      try {
+        await store.promoteHubTransition(guild.id, transition);
+      } catch (error) {
+        return throwTransitionFailure(
+          error,
+          await compensate(guild, transition),
+        );
+      }
     }
+
+    const previous = transition.previous;
+    if (
+      previous.hubChannelId !== undefined &&
+      previous.hubPermissionOwnership !== undefined
+    ) {
+      await discord.deleteInformationMessage(
+        guild,
+        previous.hubChannelId,
+        previous.hubInformationMessageId,
+      );
+      await discord.releaseHub(guild, previous.hubPermissionOwnership);
+    }
+    await store.finishHubTransition(guild.id, transition.id);
+    return { valid: true as const };
   };
 
   const recoverPendingTransition = async (guild: Guild): Promise<void> => {
     const transition = await store.getHubTransition(guild.id);
     if (transition === undefined) return;
-    const state = await store.get(guild.id);
-    await resumeTransition(guild, transition, state.assistantIdentity);
+    await resumeTransition(guild, transition);
   };
 
   return Object.freeze({
@@ -198,6 +174,7 @@ export const createGuildSetupService = (
         const transition: HubTransition = Object.freeze({
           version: 1,
           id: randomUUID(),
+          phase: "prepared",
           previous: Object.freeze({
             ...(previous.hubChannelId === undefined
               ? {}
@@ -216,7 +193,7 @@ export const createGuildSetupService = (
           next: prepared.permissionOwnership,
         });
         await store.beginHubTransition(guild.id, transition);
-        return resumeTransition(guild, transition, previous.assistantIdentity);
+        return resumeTransition(guild, transition);
       }),
     refreshInformationMessage: (guild: Guild) =>
       execute(guild.id, async () => {

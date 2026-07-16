@@ -6,6 +6,7 @@ import {
 export type HubTransition = Readonly<{
   version: 1;
   id: string;
+  phase: "prepared" | "promoted";
   previous: Readonly<{
     hubChannelId?: string;
     hubInformationMessageId?: string;
@@ -27,6 +28,7 @@ export const parseHubTransition = (value: string): HubTransition => {
     parsed.version !== 1 ||
     typeof parsed.id !== "string" ||
     parsed.id.length === 0 ||
+    (parsed.phase !== "prepared" && parsed.phase !== "promoted") ||
     !isRecord(parsed.previous) ||
     !isRecord(parsed.next)
   ) {
@@ -61,6 +63,7 @@ export const parseHubTransition = (value: string): HubTransition => {
   return Object.freeze({
     version: 1,
     id: parsed.id,
+    phase: parsed.phase,
     previous: Object.freeze({
       ...(previousChannel === undefined
         ? {}

@@ -54,7 +54,8 @@ const guildSettingsStore: GuildSettingsStore = {
   setTone: async () => undefined,
   getHubTransition: async () => undefined,
   beginHubTransition: async () => undefined,
-  completeHubTransition: async () => undefined,
+  promoteHubTransition: async () => undefined,
+  finishHubTransition: async () => undefined,
   abortHubTransition: async () => undefined,
 };
 const supportHubDiscord: SupportHubDiscord = {

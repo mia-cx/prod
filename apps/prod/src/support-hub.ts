@@ -92,7 +92,7 @@ export interface SupportHubDiscord {
   deleteInformationMessage(
     guild: Guild,
     channelId: string,
-    messageId: string,
+    messageId?: string,
   ): Promise<void>;
 }
 
@@ -469,7 +469,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
     deleteInformationMessage: async (
       guild: Guild,
       channelId: string,
-      messageId: string,
+      messageId?: string,
     ) => {
       let channel: TextChannel | undefined;
       try {

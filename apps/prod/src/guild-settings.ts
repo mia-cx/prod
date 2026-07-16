@@ -34,10 +34,11 @@ export interface GuildSettingsStore {
   setTone(guildId: string, tone: string): Promise<void>;
   getHubTransition(guildId: string): Promise<HubTransition | undefined>;
   beginHubTransition(guildId: string, transition: HubTransition): Promise<void>;
-  completeHubTransition(
+  promoteHubTransition(
     guildId: string,
     transition: HubTransition,
   ): Promise<void>;
+  finishHubTransition(guildId: string, transitionId: string): Promise<void>;
   abortHubTransition(guildId: string, transitionId: string): Promise<void>;
 }
 
@@ -120,16 +121,16 @@ const assertTransition = (
   writer: Pick<ProdDatabase, "select">,
   guildId: string,
   transitionId: string,
-): void => {
+): HubTransition => {
   const serialized = settingValue(writer, guildId, "hub_transition");
-  if (
-    serialized === undefined ||
-    parseHubTransition(serialized).id !== transitionId
-  ) {
+  const transition =
+    serialized === undefined ? undefined : parseHubTransition(serialized);
+  if (transition?.id !== transitionId) {
     throw new GuildTransitionConflictError(
       "The support hub transition is no longer current",
     );
   }
+  return transition;
 };
 
 export const createSqliteGuildSettingsStore = (
@@ -307,6 +308,11 @@ export const createSqliteGuildSettingsStore = (
       transition: HubTransition,
     ): Promise<void> => {
       assertId("guildId", guildId);
+      if (transition.phase !== "prepared") {
+        throw new GuildTransitionConflictError(
+          "A new support hub transition must be prepared",
+        );
+      }
       database.transaction((transaction) => {
         const existing = settingValue(transaction, guildId, "hub_transition");
         if (existing !== undefined) {
@@ -327,13 +333,14 @@ export const createSqliteGuildSettingsStore = (
         );
       });
     },
-    completeHubTransition: async (
+    promoteHubTransition: async (
       guildId: string,
       transition: HubTransition,
     ): Promise<void> => {
       assertId("guildId", guildId);
       database.transaction((transaction) => {
-        assertTransition(transaction, guildId, transition.id);
+        const current = assertTransition(transaction, guildId, transition.id);
+        if (current.phase === "promoted") return;
         const timestamp = now();
         upsert(
           transaction,
@@ -358,6 +365,28 @@ export const createSqliteGuildSettingsStore = (
             ),
           )
           .run();
+        upsert(
+          transaction,
+          guildId,
+          "hub_transition",
+          JSON.stringify({ ...transition, phase: "promoted" }),
+          timestamp,
+        );
+      });
+    },
+    finishHubTransition: async (
+      guildId: string,
+      transitionId: string,
+    ): Promise<void> => {
+      assertId("guildId", guildId);
+      assertId("transitionId", transitionId);
+      database.transaction((transaction) => {
+        const current = assertTransition(transaction, guildId, transitionId);
+        if (current.phase !== "promoted") {
+          throw new GuildTransitionConflictError(
+            "The support hub transition has not been promoted",
+          );
+        }
         transaction
           .delete(guildSettings)
           .where(
@@ -376,7 +405,12 @@ export const createSqliteGuildSettingsStore = (
       assertId("guildId", guildId);
       assertId("transitionId", transitionId);
       database.transaction((transaction) => {
-        assertTransition(transaction, guildId, transitionId);
+        const current = assertTransition(transaction, guildId, transitionId);
+        if (current.phase !== "prepared") {
+          throw new GuildTransitionConflictError(
+            "A promoted support hub transition cannot be aborted",
+          );
+        }
         transaction
           .delete(guildSettings)
           .where(
