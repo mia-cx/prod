@@ -25,6 +25,11 @@ const state = {
   mentionables: [] as readonly SettingsMentionable[],
   channels: [] as readonly SettingsChannel[],
   name: "Prod",
+  identityDisabled: false,
+  mentionableMaximum: 10,
+  allowedChannelTypes: [ChannelType.GuildText] as readonly ChannelType[],
+  incrementGate: undefined as Promise<void> | undefined,
+  incrementStarted: false,
 };
 const authorize = vi.fn(() => state.authorized);
 const mutateMentionables = vi.fn((values: readonly SettingsMentionable[]) => {
@@ -54,7 +59,9 @@ const definition: SettingsDefinition<Context> = {
               id: "increment",
               label: "Increment",
               load: () => ({ value: String(state.count) }),
-              mutate: () => {
+              mutate: async () => {
+                state.incrementStarted = true;
+                await state.incrementGate;
                 state.count += 1;
               },
             },
@@ -78,14 +85,20 @@ const definition: SettingsDefinition<Context> = {
               kind: "mentionable-select",
               id: "staff",
               label: "Staff",
-              load: () => ({ value: `${String(state.mentionables.length)} selected` }),
+              load: () => ({
+                value: `${String(state.mentionables.length)} selected`,
+                maxValues: state.mentionableMaximum,
+              }),
               mutate: mutateMentionables,
             },
             {
               kind: "channel-select",
               id: "hub",
               label: "Hub",
-              load: () => ({ value: state.channels[0]?.channel.name ?? "None" }),
+              load: () => ({
+                value: state.channels[0]?.channel.name ?? "None",
+                channelTypes: state.allowedChannelTypes,
+              }),
               mutate: mutateChannels,
             },
             {
@@ -94,7 +107,11 @@ const definition: SettingsDefinition<Context> = {
               label: "Identity",
               title: "Edit identity",
               inputs: [{ id: "name", label: "Name", minLength: 2 }],
-              load: () => ({ value: state.name, values: { name: state.name } }),
+              load: () => ({
+                value: state.name,
+                values: { name: state.name },
+                disabled: state.identityDisabled,
+              }),
               validate: (values) =>
                 (values.name?.length ?? 0) < 2
                   ? [{ inputId: "name", message: "Use at least two characters." }]
@@ -115,6 +132,8 @@ type MockInteraction = Readonly<{
   reply: ReturnType<typeof vi.fn>;
   followUp: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  editReply: ReturnType<typeof vi.fn>;
+  deferUpdate: ReturnType<typeof vi.fn>;
   showModal: ReturnType<typeof vi.fn>;
 }>;
 
@@ -136,15 +155,21 @@ function mockInteraction(
   const reply = vi.fn(async () => undefined);
   const followUp = vi.fn(async () => undefined);
   const update = vi.fn(async () => undefined);
+  const editReply = vi.fn(async () => undefined);
   const showModal = vi.fn(async () => undefined);
-  const interaction = {
+  const interactionState: Record<string, unknown> = {
     customId,
     user: { id: "admin" },
+    message: { id: "message-1" },
     replied: false,
     deferred: false,
     reply,
     followUp,
     update,
+    editReply,
+    deferUpdate: vi.fn(async () => {
+      interactionState.deferred = true;
+    }),
     showModal,
     isButton: () => kind === "button",
     isStringSelectMenu: () => kind === "string",
@@ -153,23 +178,53 @@ function mockInteraction(
     isModalSubmit: () => kind === "modal",
     isFromMessage: () => kind === "modal",
     ...extra,
-  } as unknown as Interaction;
-  return { interaction, reply, followUp, update, showModal };
+  };
+  const interaction = interactionState as unknown as Interaction;
+  return {
+    interaction,
+    reply,
+    followUp,
+    update,
+    editReply,
+    deferUpdate: interactionState.deferUpdate as ReturnType<typeof vi.fn>,
+    showModal,
+  };
 }
 
-function mockCommand(): {
+function mockCommand(
+  initial: {
+    deferred?: boolean;
+    replied?: boolean;
+    ephemeral?: boolean | null;
+  } = {},
+): {
   interaction: RepliableInteraction;
   reply: ReturnType<typeof vi.fn>;
+  deferReply: ReturnType<typeof vi.fn>;
+  editReply: ReturnType<typeof vi.fn>;
+  followUp: ReturnType<typeof vi.fn>;
 } {
   const reply = vi.fn(async () => undefined);
-  return {
-    interaction: {
-      replied: false,
-      deferred: false,
-      reply,
-      followUp: vi.fn(async () => undefined),
-    } as unknown as RepliableInteraction,
+  const editReply = vi.fn(async () => undefined);
+  const interactionState: Record<string, unknown> = {
+    replied: initial.replied ?? false,
+    deferred: initial.deferred ?? false,
+    ephemeral:
+      initial.ephemeral ?? (initial.deferred === true ? true : null),
     reply,
+    editReply,
+    deferReply: vi.fn(async () => {
+      interactionState.deferred = true;
+      interactionState.ephemeral = true;
+    }),
+    followUp: vi.fn(async () => undefined),
+  };
+  return {
+    interaction: interactionState as unknown as RepliableInteraction,
+    reply,
+    deferReply: interactionState.deferReply as ReturnType<typeof vi.fn>,
+    editReply,
+    followUp: interactionState.followUp as ReturnType<typeof vi.fn>,
   };
 }
 
@@ -181,6 +236,11 @@ describe("Discord settings runtime", () => {
     state.mentionables = [];
     state.channels = [];
     state.name = "Prod";
+    state.identityDisabled = false;
+    state.mentionableMaximum = 10;
+    state.allowedChannelTypes = [ChannelType.GuildText];
+    state.incrementGate = undefined;
+    state.incrementStarted = false;
     authorize.mockClear();
     mutateMentionables.mockClear();
     mutateChannels.mockClear();
@@ -195,13 +255,82 @@ describe("Discord settings runtime", () => {
     ).resolves.toEqual({ matched: true, status: "opened" });
 
     expect(authorize).toHaveBeenCalledOnce();
-    expect(command.reply).toHaveBeenCalledWith(
+    expect(command.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(command.editReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        flags: [MessageFlags.Ephemeral, MessageFlags.IsComponentsV2],
+        flags: MessageFlags.IsComponentsV2,
         components: expect.any(Array),
         allowedMentions: { parse: [], repliedUser: false },
       }),
     );
+  });
+
+  it("edits a command response that was already deferred", async () => {
+    const command = mockCommand({ deferred: true });
+
+    await expect(
+      runtime.open(command.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "opened" });
+
+    expect(command.deferReply).not.toHaveBeenCalled();
+    expect(command.reply).not.toHaveBeenCalled();
+    expect(command.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ flags: MessageFlags.IsComponentsV2 }),
+    );
+  });
+
+  it("keeps settings private when a caller deferred publicly", async () => {
+    const command = mockCommand({ deferred: true, ephemeral: false });
+
+    await runtime.open(command.interaction, { userId: "admin" });
+
+    expect(command.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "Settings opened in a private response.",
+      }),
+    );
+    expect(command.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flags: [MessageFlags.Ephemeral, MessageFlags.IsComponentsV2],
+      }),
+    );
+  });
+
+  it("bounds modal preparation to Discord's response window", async () => {
+    vi.useFakeTimers();
+    let release: (() => void) | undefined;
+    const authorization = new Promise<boolean>((resolve) => {
+      release = () => resolve(true);
+    });
+    const category = definition.categories[0]!;
+    const slowRuntime = createSettingsRuntime({
+      definition: {
+        ...definition,
+        categories: [{ ...category, authorize: () => authorization }],
+      },
+    });
+    const modal = mockInteraction("button", route("modal", "identity"));
+
+    try {
+      const handling = slowRuntime.handle(modal.interaction, {
+        userId: "admin",
+      });
+      await vi.advanceTimersByTimeAsync(2_500);
+
+      await expect(handling).resolves.toEqual({
+        matched: true,
+        status: "failed",
+      });
+      expect(modal.showModal).not.toHaveBeenCalled();
+      expect(modal.reply).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining("too long") }),
+      );
+    } finally {
+      release?.();
+      vi.useRealTimers();
+    }
   });
 
   it("rechecks authorization, mutates a button, and rerenders", async () => {
@@ -214,10 +343,26 @@ describe("Discord settings runtime", () => {
 
     expect(state.count).toBe(1);
     expect(authorize).toHaveBeenCalledTimes(2);
-    expect(button.update).toHaveBeenCalledOnce();
-    expect(JSON.stringify(button.update.mock.calls[0]?.[0])).toContain(
+    expect(button.editReply).toHaveBeenCalledOnce();
+    expect(JSON.stringify(button.editReply.mock.calls[0]?.[0])).toContain(
       "Increment updated.",
     );
+  });
+
+  it("acknowledges a mutation before awaiting consumer callbacks", async () => {
+    let release: (() => void) | undefined;
+    state.incrementGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const button = mockInteraction("button", route("button", "increment"));
+
+    const handling = runtime.handle(button.interaction, { userId: "admin" });
+    await vi.waitFor(() => expect(state.incrementStarted).toBe(true));
+    const acknowledgementsBeforeRelease = button.deferUpdate.mock.calls.length;
+    release?.();
+    await handling;
+
+    expect(acknowledgementsBeforeRelease).toBe(1);
   });
 
   it("validates selected options and rerenders their new values", async () => {
@@ -230,7 +375,9 @@ describe("Discord settings runtime", () => {
     ).resolves.toEqual({ matched: true, status: "mutated" });
 
     expect(state.mode).toBe("direct");
-    expect(JSON.stringify(select.update.mock.calls[0]?.[0])).toContain("direct");
+    expect(JSON.stringify(select.editReply.mock.calls[0]?.[0])).toContain(
+      "direct",
+    );
   });
 
   it("resolves mixed mentionables into explicit user and role variants", async () => {
@@ -323,7 +470,7 @@ describe("Discord settings runtime", () => {
       runtime.handle(invalid.interaction, { userId: "admin" }),
     ).resolves.toEqual({ matched: true, status: "validation-failed" });
     expect(mutateName).not.toHaveBeenCalled();
-    expect(JSON.stringify(invalid.update.mock.calls[0]?.[0])).toContain(
+    expect(JSON.stringify(invalid.editReply.mock.calls[0]?.[0])).toContain(
       "Use at least two characters.",
     );
 
@@ -344,6 +491,61 @@ describe("Discord settings runtime", () => {
       runtime.handle(valid.interaction, { userId: "admin" }),
     ).resolves.toEqual({ matched: true, status: "mutated" });
     expect(state.name).toBe("Prod Support");
+  });
+
+  it("isolates modal drafts to their originating settings message", async () => {
+    const invalid = mockInteraction(
+      "modal",
+      route("modal-submit", "identity"),
+      {
+        message: { id: "message-a" },
+        fields: { getTextInputValue: () => "x" },
+      },
+    );
+    await runtime.handle(invalid.interaction, { userId: "admin" });
+
+    const otherMessage = mockInteraction(
+      "button",
+      route("modal", "identity"),
+      { message: { id: "message-b" } },
+    );
+    await runtime.handle(otherMessage.interaction, { userId: "admin" });
+    expect(JSON.stringify(otherMessage.showModal.mock.calls[0]?.[0])).toContain(
+      '"value":"Prod"',
+    );
+
+    const sameMessage = mockInteraction(
+      "button",
+      route("modal", "identity"),
+      { message: { id: "message-a" } },
+    );
+    await runtime.handle(sameMessage.interaction, { userId: "admin" });
+    expect(JSON.stringify(sameMessage.showModal.mock.calls[0]?.[0])).toContain(
+      '"value":"x"',
+    );
+  });
+
+  it("expires abandoned modal drafts", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    try {
+      const invalid = mockInteraction(
+        "modal",
+        route("modal-submit", "identity"),
+        { fields: { getTextInputValue: () => "x" } },
+      );
+      await runtime.handle(invalid.interaction, { userId: "admin" });
+      vi.setSystemTime(new Date("2026-01-01T00:16:00Z"));
+
+      const retry = mockInteraction("button", route("modal", "identity"));
+      await runtime.handle(retry.interaction, { userId: "admin" });
+
+      expect(JSON.stringify(retry.showModal.mock.calls[0]?.[0])).toContain(
+        '"value":"Prod"',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fails stale versions, missing fields, and mismatched component kinds safely", async () => {
@@ -381,9 +583,71 @@ describe("Discord settings runtime", () => {
     expect(state.count).toBe(0);
     expect(authorize).toHaveBeenCalledOnce();
     expect(button.update).not.toHaveBeenCalled();
-    expect(button.reply).toHaveBeenCalledWith(
+    expect(button.followUp).toHaveBeenCalledWith(
       expect.objectContaining({ flags: MessageFlags.Ephemeral }),
     );
+  });
+
+  it("rejects stale selections against freshly loaded field constraints", async () => {
+    state.mentionableMaximum = 1;
+    const users = new Collection<string, never>();
+    users.set(
+      "user-1",
+      { id: "user-1", username: "mia", globalName: "Mia" } as never,
+    );
+    users.set(
+      "user-2",
+      { id: "user-2", username: "sam", globalName: "Sam" } as never,
+    );
+    const mentionable = mockInteraction(
+      "mentionable",
+      route("mentionable-select", "staff"),
+      { values: ["user-1", "user-2"], users, roles: new Collection() },
+    );
+
+    await expect(
+      runtime.handle(mentionable.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "stale" });
+    expect(mutateMentionables).not.toHaveBeenCalled();
+
+    const channels = new Collection<string, never>();
+    channels.set(
+      "voice-1",
+      { id: "voice-1", name: "voice", type: ChannelType.GuildVoice } as never,
+    );
+    const channel = mockInteraction(
+      "channel",
+      route("channel-select", "hub"),
+      { values: ["voice-1"], channels },
+    );
+
+    await expect(
+      runtime.handle(channel.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "stale" });
+    expect(mutateChannels).not.toHaveBeenCalled();
+  });
+
+  it("rejects a modal that becomes disabled before submission", async () => {
+    state.identityDisabled = true;
+    const submit = mockInteraction(
+      "modal",
+      route("modal-submit", "identity"),
+      { fields: { getTextInputValue: () => "Changed" } },
+    );
+
+    await expect(
+      runtime.handle(submit.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "stale" });
+    expect(mutateName).not.toHaveBeenCalled();
+  });
+
+  it("treats modal routes targeting another field kind as stale", async () => {
+    const modal = mockInteraction("button", route("modal", "increment"));
+
+    await expect(
+      runtime.handle(modal.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "stale" });
+    expect(modal.showModal).not.toHaveBeenCalled();
   });
 
   it("ignores interactions outside the settings namespace", async () => {

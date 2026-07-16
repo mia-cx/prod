@@ -8,6 +8,7 @@ import {
   type ButtonInteraction,
   type ChannelSelectMenuInteraction,
   type Interaction,
+  type InteractionEditReplyOptions,
   type InteractionReplyOptions,
   type InteractionUpdateOptions,
   type MentionableSelectMenuInteraction,
@@ -24,7 +25,6 @@ import type {
   SettingsDefinition,
   SettingsField,
   SettingsMentionable,
-  SettingsModalField,
   SettingsMutationCallbackResult,
   SettingsMutationResult,
   SettingsSubcategory,
@@ -43,11 +43,31 @@ import {
   isSettingsCustomId,
   type SettingsRoute,
 } from "./routes.js";
+import {
+  assertSelectionCount,
+  resolveSelectBounds,
+  SettingsSelectConstraintError,
+} from "./select-constraints.js";
 
 const NO_MENTIONS: NonNullable<InteractionReplyOptions["allowedMentions"]> = {
   parse: [],
   repliedUser: false,
 };
+const MODAL_DRAFT_TTL_MS = 15 * 60 * 1_000;
+const MODAL_DRAFT_LIMIT = 1_000;
+const MODAL_RESPONSE_TIMEOUT_MS = 2_500;
+
+type ModalDraft = Readonly<{
+  values: Readonly<Record<string, string>>;
+  expiresAt: number;
+}>;
+
+class SettingsModalTimeoutError extends Error {
+  public constructor() {
+    super("settings modal preparation exceeded Discord's response window");
+    this.name = "SettingsModalTimeoutError";
+  }
+}
 
 export type SettingsDispatchStatus =
   | "opened"
@@ -103,7 +123,7 @@ export function createSettingsRuntime<Context>(
   options: SettingsRuntimeOptions<Context>,
 ): SettingsRuntime<Context> {
   const renderer = createSettingsRenderer(options.definition);
-  const drafts = new Map<string, Readonly<Record<string, string>>>();
+  const drafts = new Map<string, ModalDraft>();
 
   return Object.freeze({
     open: (interaction, context, request = {}) =>
@@ -132,22 +152,38 @@ async function openSettings<Context>(
   onError: SettingsRuntimeOptions<Context>["onError"],
 ): Promise<SettingsDispatchResult> {
   try {
+    const alreadyReplied = interaction.replied;
+    let deferredByRuntime = false;
+    if (!interaction.deferred && !alreadyReplied) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      deferredByRuntime = true;
+    }
     const view = await renderer.render(request, context);
-    await interaction.reply(replyView(view.components));
+    if (alreadyReplied) {
+      await interaction.followUp(replyView(view.components));
+    } else if (deferredByRuntime || interaction.ephemeral === true) {
+      await interaction.editReply(editView(view.components));
+    } else {
+      await interaction.editReply({
+        content: "Settings opened in a private response.",
+        allowedMentions: NO_MENTIONS,
+      });
+      await interaction.followUp(replyView(view.components));
+    }
     return { matched: true, status: "opened" };
   } catch (error) {
     if (error instanceof SettingsViewError) {
       if (error.reason === "unauthorized") {
-        await respondEphemeral(interaction, error.message);
+        await respondOpenError(interaction, error.message);
         return { matched: true, status: "unauthorized" };
       }
       if (error.reason === "stale") {
-        await respondEphemeral(interaction, staleMessage());
+        await respondOpenError(interaction, staleMessage());
         return { matched: true, status: "stale" };
       }
     }
+    await respondOpenError(interaction, failureMessage());
     await reportError(onError, error, interaction, context);
-    await respondEphemeral(interaction, failureMessage());
     return { matched: true, status: "failed" };
   }
 }
@@ -155,7 +191,7 @@ async function openSettings<Context>(
 async function handleSettingsInteraction<Context>(
   definition: SettingsDefinition<Context>,
   renderer: SettingsRenderer<Context>,
-  drafts: Map<string, Readonly<Record<string, string>>>,
+  drafts: Map<string, ModalDraft>,
   interaction: Interaction,
   context: Context,
   onError: SettingsRuntimeOptions<Context>["onError"],
@@ -174,8 +210,14 @@ async function handleSettingsInteraction<Context>(
     await respondEphemeral(component, staleMessage());
     return { matched: true, status: "stale" };
   }
+  if (!routeMatchesInteraction(resolved.route, component)) {
+    return staleInteraction(component);
+  }
 
   try {
+    if (resolved.route.action !== "modal") {
+      await acknowledgeComponent(component);
+    }
     switch (resolved.route.action) {
       case "category":
         if (!component.isStringSelectMenu()) {
@@ -241,6 +283,13 @@ async function handleSettingsInteraction<Context>(
         );
     }
   } catch (error) {
+    if (error instanceof SettingsModalTimeoutError) {
+      await respondEphemeral(
+        component,
+        "Settings took too long to load. Try again.",
+      );
+      return { matched: true, status: "failed" };
+    }
     if (error instanceof SettingsViewError) {
       if (error.reason === "unauthorized") {
         await respondEphemeral(component, error.message);
@@ -251,8 +300,8 @@ async function handleSettingsInteraction<Context>(
         return { matched: true, status: "stale" };
       }
     }
-    await reportError(onError, error, component, context);
     await respondEphemeral(component, failureMessage());
+    await reportError(onError, error, component, context);
     return { matched: true, status: "failed" };
   }
 }
@@ -292,17 +341,28 @@ async function navigateSubcategory<Context>(
 async function showSettingsModal<Context>(
   resolved: ResolvedRoute<Context>,
   interaction: ButtonInteraction,
-  drafts: Map<string, Readonly<Record<string, string>>>,
+  drafts: Map<string, ModalDraft>,
   context: Context,
 ): Promise<SettingsDispatchResult> {
-  await requireAuthorization(resolved.category, context);
-  const field = resolved.field as SettingsModalField<Context>;
-  const view = await field.load(context);
+  const deadline = Date.now() + MODAL_RESPONSE_TIMEOUT_MS;
+  await beforeModalDeadline(
+    () => requireAuthorization(resolved.category, context),
+    deadline,
+  );
+  const field = resolved.field;
+  if (field?.kind !== "modal") {
+    throw new SettingsViewError("stale", "settings modal is stale");
+  }
+  const view = await beforeModalDeadline(() => field.load(context), deadline);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings modal is disabled");
   }
-  const draft = drafts.get(draftKey(interaction.user.id, resolved.route));
-  const values = draft ?? view.values ?? {};
+  const draft = readDraft(
+    drafts,
+    draftKey(interaction.user.id, interaction.message.id, resolved.route),
+  );
+  const values = draft?.values ?? view.values ?? {};
+  validateModalValues(field, values);
   await interaction.showModal({
     custom_id: encodeSettingsCustomId({
       ...resolved.route,
@@ -334,6 +394,46 @@ async function showSettingsModal<Context>(
     })),
   } satisfies APIModalInteractionResponseCallbackData);
   return { matched: true, status: "modal-shown" };
+}
+
+async function beforeModalDeadline<Value>(
+  operation: () => Awaitable<Value>,
+  deadline: number,
+): Promise<Value> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    throw new SettingsModalTimeoutError();
+  }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new SettingsModalTimeoutError()),
+          remaining,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function validateModalValues<Context>(
+  field: Extract<SettingsField<Context>, { kind: "modal" }>,
+  values: Readonly<Record<string, string>>,
+): void {
+  for (const input of field.inputs) {
+    const value = values[input.id];
+    const maximum = Math.min(input.maxLength ?? 4_000, 4_000);
+    if (value !== undefined && value.length > maximum) {
+      throw new SettingsViewError(
+        "invalid-view",
+        `settings modal ${field.id} value for ${input.id} exceeds ${String(maximum)} characters`,
+      );
+    }
+  }
 }
 
 async function mutateButton<Context>(
@@ -370,6 +470,12 @@ async function mutateStringSelect<Context>(
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings select is disabled");
   }
+  assertCurrentSelection(
+    field.id,
+    interaction.values.length,
+    view,
+    view.options.length,
+  );
   const allowedValues = new Set(view.options.map(({ value }) => value));
   if (interaction.values.some((value) => !allowedValues.has(value))) {
     throw new SettingsViewError("stale", "settings option is stale");
@@ -401,6 +507,7 @@ async function mutateMentionables<Context>(
       "settings mentionable select is disabled",
     );
   }
+  assertCurrentSelection(field.id, interaction.values.length, view);
   const values = interaction.values.map((id): SettingsMentionable => {
     const user = interaction.users.get(id);
     if (user !== undefined) {
@@ -454,6 +561,7 @@ async function mutateChannels<Context>(
       "settings channel select is disabled",
     );
   }
+  assertCurrentSelection(field.id, interaction.values.length, view);
   const values = interaction.values.map((id): SettingsChannel => {
     const channel = interaction.channels.get(id);
     if (channel === undefined || !("name" in channel)) {
@@ -471,6 +579,16 @@ async function mutateChannels<Context>(
       },
     };
   });
+  const allowedChannelTypes = view.channelTypes;
+  if (
+    allowedChannelTypes !== undefined &&
+    values.some(({ channel }) => !allowedChannelTypes.includes(channel.type))
+  ) {
+    throw new SettingsViewError(
+      "stale",
+      "settings channel type is no longer allowed",
+    );
+  }
   const result = await validateAndMutate(
     values,
     context,
@@ -484,13 +602,23 @@ async function submitModal<Context>(
   renderer: SettingsRenderer<Context>,
   resolved: ResolvedRoute<Context>,
   interaction: ModalSubmitInteraction,
-  drafts: Map<string, Readonly<Record<string, string>>>,
+  drafts: Map<string, ModalDraft>,
   context: Context,
 ): Promise<SettingsDispatchResult> {
+  if (!interaction.isFromMessage()) {
+    throw new SettingsViewError(
+      "stale",
+      "settings modal is not attached to a settings message",
+    );
+  }
   await requireAuthorization(resolved.category, context);
   const field = resolved.field;
   if (field?.kind !== "modal") {
     throw new SettingsViewError("stale", "settings modal is stale");
+  }
+  const view = await field.load(context);
+  if (view.disabled === true) {
+    throw new SettingsViewError("stale", "settings modal is disabled");
   }
   const values = Object.fromEntries(
     field.inputs.map((input) => [
@@ -504,7 +632,11 @@ async function submitModal<Context>(
     field.validate,
     field.mutate,
   );
-  const key = draftKey(interaction.user.id, resolved.route);
+  const key = draftKey(
+    interaction.user.id,
+    interaction.message.id,
+    resolved.route,
+  );
   if (result.status === "invalid") {
     rememberDraft(drafts, key, values);
   } else {
@@ -566,15 +698,7 @@ async function updateView<Context>(
   status: "viewed" | "mutated" | "validation-failed",
 ): Promise<SettingsDispatchResult> {
   const view = await renderer.render(request, context);
-  if (interaction.isModalSubmit()) {
-    if (!interaction.isFromMessage()) {
-      await respondEphemeral(interaction, "Reopen settings and try again.");
-      return { matched: true, status: "stale" };
-    }
-    await interaction.update(updateViewPayload(view.components));
-  } else {
-    await interaction.update(updateViewPayload(view.components));
-  }
+  await interaction.editReply(updateViewPayload(view.components));
   return { matched: true, status };
 }
 
@@ -633,10 +757,68 @@ function asSettingsComponent(
     : undefined;
 }
 
+function routeMatchesInteraction(
+  route: SettingsRoute,
+  interaction: SettingsComponentInteraction,
+): boolean {
+  switch (route.action) {
+    case "category":
+    case "subcategory":
+    case "string-select":
+      return interaction.isStringSelectMenu();
+    case "page":
+    case "button":
+    case "modal":
+      return interaction.isButton();
+    case "mentionable-select":
+      return interaction.isMentionableSelectMenu();
+    case "channel-select":
+      return interaction.isChannelSelectMenu();
+    case "modal-submit":
+      return interaction.isModalSubmit();
+  }
+}
+
+async function acknowledgeComponent(
+  interaction: SettingsComponentInteraction,
+): Promise<void> {
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferUpdate();
+  }
+}
+
 function normalizeMutationResult(
   result: SettingsMutationCallbackResult,
 ): SettingsMutationResult {
   return result ?? { status: "success" };
+}
+
+function assertCurrentSelection(
+  fieldId: string,
+  count: number,
+  view: Readonly<{ minValues?: number; maxValues?: number }>,
+  optionCount?: number,
+): void {
+  try {
+    const bounds = resolveSelectBounds({
+      fieldId,
+      ...(optionCount === undefined ? {} : { optionCount }),
+      ...(view.minValues === undefined ? {} : { minimum: view.minValues }),
+      ...(view.maxValues === undefined ? {} : { maximum: view.maxValues }),
+    });
+    assertSelectionCount(
+      fieldId,
+      count,
+      bounds,
+      "current selection",
+      false,
+    );
+  } catch (error) {
+    if (error instanceof SettingsSelectConstraintError) {
+      throw new SettingsViewError("stale", error.message);
+    }
+    throw error;
+  }
 }
 
 function singleSelectedValue(interaction: StringSelectMenuInteraction): string {
@@ -655,8 +837,13 @@ function routeRequest(route: SettingsRoute): SettingsViewRequest {
   };
 }
 
-function draftKey(userId: string, route: SettingsRoute): string {
+function draftKey(
+  userId: string,
+  messageId: string,
+  route: SettingsRoute,
+): string {
   return [
+    messageId,
     userId,
     route.categoryId,
     route.subcategoryId,
@@ -665,18 +852,36 @@ function draftKey(userId: string, route: SettingsRoute): string {
 }
 
 function rememberDraft(
-  drafts: Map<string, Readonly<Record<string, string>>>,
+  drafts: Map<string, ModalDraft>,
   key: string,
   values: Readonly<Record<string, string>>,
 ): void {
   drafts.delete(key);
-  drafts.set(key, values);
-  if (drafts.size > 1_000) {
+  drafts.set(key, {
+    values,
+    expiresAt: Date.now() + MODAL_DRAFT_TTL_MS,
+  });
+  if (drafts.size > MODAL_DRAFT_LIMIT) {
     const oldest = drafts.keys().next().value as string | undefined;
     if (oldest !== undefined) {
       drafts.delete(oldest);
     }
   }
+}
+
+function readDraft(
+  drafts: Map<string, ModalDraft>,
+  key: string,
+): ModalDraft | undefined {
+  const draft = drafts.get(key);
+  if (draft === undefined) {
+    return undefined;
+  }
+  if (draft.expiresAt <= Date.now()) {
+    drafts.delete(key);
+    return undefined;
+  }
+  return draft;
 }
 
 function formatIssues(issues: readonly SettingsValidationIssue[]): string {
@@ -699,6 +904,16 @@ function replyView(
   return {
     components,
     flags: [MessageFlags.Ephemeral, MessageFlags.IsComponentsV2],
+    allowedMentions: NO_MENTIONS,
+  };
+}
+
+function editView(
+  components: readonly APIMessageTopLevelComponent[],
+): InteractionEditReplyOptions {
+  return {
+    components,
+    flags: MessageFlags.IsComponentsV2,
     allowedMentions: NO_MENTIONS,
   };
 }
@@ -737,6 +952,21 @@ async function respondEphemeral(
   } catch {
     // The interaction may already have been acknowledged by a failed transport.
   }
+}
+
+async function respondOpenError(
+  interaction: RepliableInteraction,
+  content: string,
+): Promise<void> {
+  try {
+    if (interaction.deferred && !interaction.replied) {
+      await interaction.editReply({ content, allowedMentions: NO_MENTIONS });
+      return;
+    }
+  } catch {
+    // Fall through to the normal safe response path.
+  }
+  await respondEphemeral(interaction, content);
 }
 
 async function reportError<Context>(

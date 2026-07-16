@@ -251,7 +251,6 @@ export function createSyntheticSettingsConsumer(
       slashCommand({
         name: "settings",
         description: "Open the development settings validation surface",
-        acknowledgement: "none",
         parse: () => ({}),
         present: async () => undefined,
       }),

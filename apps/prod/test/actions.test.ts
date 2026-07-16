@@ -45,6 +45,7 @@ const pingInteraction = (
     isUserContextMenuCommand: () => kind === "user",
     deferReply: vi.fn().mockImplementation(async () => {
       interaction.deferred = true;
+      interaction.ephemeral = true;
     }),
     editReply: vi.fn().mockResolvedValue(undefined),
     followUp: vi.fn().mockResolvedValue(undefined),
@@ -132,14 +133,16 @@ describe("Prod action runtime", () => {
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
-    expect(interaction.reply).toHaveBeenCalledOnce();
-    expect(interaction.reply).toHaveBeenCalledWith(
+    expect(interaction.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(interaction.editReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        flags: [MessageFlags.Ephemeral, MessageFlags.IsComponentsV2],
+        flags: MessageFlags.IsComponentsV2,
         components: expect.any(Array),
       }),
     );
-    expect(JSON.stringify(interaction.reply.mock.calls[0]?.[0])).toContain(
+    expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
       "Prod development settings",
     );
   });
@@ -153,8 +156,8 @@ describe("Prod action runtime", () => {
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
-    expect(interaction.update).toHaveBeenCalledOnce();
-    expect(JSON.stringify(interaction.update.mock.calls[0]?.[0])).toContain(
+    expect(interaction.editReply).toHaveBeenCalledOnce();
+    expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
       "Information refreshed.",
     );
     expect(interaction.reply).not.toHaveBeenCalled();
@@ -170,7 +173,7 @@ describe("Prod action runtime", () => {
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
     expect(interaction.update).not.toHaveBeenCalled();
-    expect(interaction.reply).toHaveBeenCalledWith(
+    expect(interaction.followUp).toHaveBeenCalledWith(
       expect.objectContaining({
         content: "Manage Server permission is required for settings.",
         flags: MessageFlags.Ephemeral,
@@ -295,7 +298,7 @@ describe("Prod action runtime", () => {
 
 const settingsCommand = (canManageGuild: boolean) => {
   const reply = vi.fn().mockResolvedValue(undefined);
-  return {
+  const interaction: Record<string, unknown> = {
     commandName: "settings",
     channelId: "channel-1",
     guildId: "guild-1",
@@ -314,15 +317,24 @@ const settingsCommand = (canManageGuild: boolean) => {
     isModalSubmit: () => false,
     reply,
     followUp: vi.fn().mockResolvedValue(undefined),
-    deferReply: vi.fn().mockResolvedValue(undefined),
+    deferReply: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+      interaction.ephemeral = true;
+    }),
     editReply: vi.fn().mockResolvedValue(undefined),
+  };
+  return interaction as typeof interaction & {
+    reply: ReturnType<typeof vi.fn>;
+    followUp: ReturnType<typeof vi.fn>;
+    deferReply: ReturnType<typeof vi.fn>;
+    editReply: ReturnType<typeof vi.fn>;
   };
 };
 
 const settingsButton = (canManageGuild: boolean) => {
   const reply = vi.fn().mockResolvedValue(undefined);
   const update = vi.fn().mockResolvedValue(undefined);
-  return {
+  const interaction: Record<string, unknown> = {
     customId: encodeSettingsCustomId({
       action: "button",
       categoryId: "controls",
@@ -343,6 +355,16 @@ const settingsButton = (canManageGuild: boolean) => {
     reply,
     followUp: vi.fn().mockResolvedValue(undefined),
     update,
+    editReply: vi.fn().mockResolvedValue(undefined),
+    deferUpdate: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+    }),
     showModal: vi.fn().mockResolvedValue(undefined),
+  };
+  return interaction as typeof interaction & {
+    reply: ReturnType<typeof vi.fn>;
+    followUp: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    editReply: ReturnType<typeof vi.fn>;
   };
 };
