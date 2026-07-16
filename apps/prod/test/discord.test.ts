@@ -234,6 +234,36 @@ describe("createDiscordGateway", () => {
     });
   });
 
+  it("starts with configured operators when application owner lookup fails", async () => {
+    const error = new Error("Discord application unavailable");
+    discordMock.applicationFetch.mockRejectedValue(error);
+    const setApplicationOperatorUserIds = vi.fn();
+    const refreshCommands = vi.fn(async () => undefined);
+    const handleError = vi.fn();
+    const gateway = createDiscordGateway({
+      configuredApplicationOperatorUserIds: ["123456789012345678"],
+      actions: {
+        setApplicationOperatorUserIds,
+        refreshCommands,
+        handleInteraction: vi.fn(async () => undefined),
+        handleError,
+      },
+    });
+
+    await expect(
+      gateway.connect("development-token", new AbortController().signal),
+    ).resolves.toMatchObject({
+      applicationOperatorUserIds: ["123456789012345678"],
+    });
+    expect(setApplicationOperatorUserIds).toHaveBeenCalledWith([
+      "123456789012345678",
+    ]);
+    expect(refreshCommands).toHaveBeenCalledOnce();
+    expect(handleError).toHaveBeenCalledWith(error);
+
+    await gateway.close();
+  });
+
   it("grants accepted Team operators but fails closed for read-only and invited members", async () => {
     discordMock.applicationOwner = {
       ownerId: "223456789012345678",

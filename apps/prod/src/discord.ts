@@ -255,11 +255,19 @@ const prepareReadyClient = async (
   options: DiscordGatewayOptions,
   onApplicationOperatorsInstalled?: () => void,
 ): Promise<DiscordIdentity> => {
-  const application = await client.application.fetch();
-  const applicationOperatorUserIds = resolveApplicationOperatorUserIds(
-    application.owner,
+  let applicationOperatorUserIds = resolveApplicationOperatorUserIds(
+    null,
     options.configuredApplicationOperatorUserIds,
   );
+  try {
+    const application = await client.application.fetch();
+    applicationOperatorUserIds = resolveApplicationOperatorUserIds(
+      application.owner,
+      options.configuredApplicationOperatorUserIds,
+    );
+  } catch (error: unknown) {
+    options.actions?.handleError(error);
+  }
   if (options.actions) {
     options.actions.setApplicationOperatorUserIds?.(applicationOperatorUserIds);
     onApplicationOperatorsInstalled?.();
