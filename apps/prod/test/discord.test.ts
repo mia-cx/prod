@@ -169,6 +169,47 @@ describe("createDiscordGateway", () => {
     expect(discordMock.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("does not resume ready side effects after aborting an owner lookup", async () => {
+    let finishLookup: (() => void) | undefined;
+    discordMock.applicationFetch.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishLookup = resolve;
+        }),
+    );
+    const setApplicationOperatorUserIds = vi.fn();
+    const refreshCommands = vi.fn(async () => undefined);
+    const gateway = createDiscordGateway({
+      configuredApplicationOperatorUserIds: ["123456789012345678"],
+      applicationOperatorRefreshIntervalMs: 10,
+      applicationOperatorMaxStalenessMs: 20,
+      actions: {
+        setApplicationOperatorUserIds,
+        refreshCommands,
+        handleInteraction: vi.fn(async () => undefined),
+        handleError: vi.fn(),
+      },
+    });
+    const controller = new AbortController();
+    const reason = new DOMException("shutdown", "AbortError");
+
+    const connection = gateway.connect("development-token", controller.signal);
+    await vi.waitFor(() =>
+      expect(setApplicationOperatorUserIds).toHaveBeenCalledWith([
+        "123456789012345678",
+      ]),
+    );
+    controller.abort(reason);
+    await expect(connection).rejects.toBe(reason);
+
+    finishLookup?.();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(setApplicationOperatorUserIds).toHaveBeenCalledTimes(1);
+    expect(refreshCommands).not.toHaveBeenCalled();
+    expect(discordMock.applicationFetch).toHaveBeenCalledTimes(1);
+    expect(discordMock.destroy).toHaveBeenCalledOnce();
+  });
+
   it("refreshes global commands and dispatches interactions", async () => {
     const refreshCommands = vi.fn(async () => undefined);
     const handleInteraction = vi.fn(async () => undefined);
@@ -232,6 +273,48 @@ describe("createDiscordGateway", () => {
     ).resolves.toMatchObject({
       applicationOperatorUserIds: ["123456789012345678", "223456789012345678"],
     });
+  });
+
+  it("installs configured operators before application owner lookup completes", async () => {
+    let finishLookup: (() => void) | undefined;
+    discordMock.applicationOwner = { id: "223456789012345678" };
+    discordMock.applicationFetch.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishLookup = resolve;
+        }),
+    );
+    const setApplicationOperatorUserIds = vi.fn();
+    const gateway = createDiscordGateway({
+      configuredApplicationOperatorUserIds: ["123456789012345678"],
+      actions: {
+        setApplicationOperatorUserIds,
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleError: vi.fn(),
+      },
+    });
+
+    const connection = gateway.connect(
+      "development-token",
+      new AbortController().signal,
+    );
+    await vi.waitFor(() =>
+      expect(setApplicationOperatorUserIds).toHaveBeenCalledWith([
+        "123456789012345678",
+      ]),
+    );
+
+    finishLookup?.();
+    await expect(connection).resolves.toMatchObject({
+      applicationOperatorUserIds: ["123456789012345678", "223456789012345678"],
+    });
+    expect(setApplicationOperatorUserIds).toHaveBeenLastCalledWith([
+      "123456789012345678",
+      "223456789012345678",
+    ]);
+
+    await gateway.close();
   });
 
   it("starts with configured operators when application owner lookup fails", async () => {
