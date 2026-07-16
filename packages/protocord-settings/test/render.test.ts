@@ -173,6 +173,51 @@ describe("Components v2 settings rendering", () => {
     expect(withNotice.location.page).toBe(ordinary.location.page);
   });
 
+  it("keeps page routes stable when unrelated category access changes", async () => {
+    let canViewOtherCategory = true;
+    const value: SettingsDefinition<Context> = {
+      title: "Stable authorized pages",
+      categories: [
+        {
+          id: "main",
+          label: "Main",
+          authorize: () => true,
+          subcategories: [
+            {
+              id: "page",
+              label: "Page",
+              fields: Array.from({ length: 13 }, (_, index) =>
+                displayField(index),
+              ),
+            },
+          ],
+        },
+        {
+          id: "other",
+          label: "Other",
+          authorize: () => canViewOtherCategory,
+          subcategories: [
+            { id: "other-page", label: "Other page", fields: [] },
+          ],
+        },
+      ],
+    };
+    const renderer = createSettingsRenderer(value);
+    const before = await renderer.render(
+      { categoryId: "main", subcategoryId: "page", page: 2 },
+      { userId: "admin" },
+    );
+
+    canViewOtherCategory = false;
+    const after = await renderer.render(
+      { categoryId: "main", subcategoryId: "page", page: 2 },
+      { userId: "admin" },
+    );
+
+    expect(after.location).toEqual(before.location);
+    expect(JSON.stringify(after.components)).toContain("Field 12");
+  });
+
   it("rejects unauthorized, stale, and out-of-range views", async () => {
     const renderer = createSettingsRenderer(definition());
 

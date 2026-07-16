@@ -121,10 +121,7 @@ async function renderSettingsView<Context>(
   const subcategory = selectSubcategory(category, request.subcategoryId);
   const fieldPages = paginateFields(
     subcategory.fields,
-    fixedComponentCount(
-      authorizedCategories.length,
-      category.subcategories.length,
-    ),
+    fixedComponentCount(category.subcategories.length),
   );
   const requestedPage = request.page ?? 0;
   const fields = fieldPages[requestedPage];
@@ -209,15 +206,8 @@ function selectSubcategory<Context>(
   return subcategory;
 }
 
-function fixedComponentCount(
-  categoryCount: number,
-  subcategoryCount: number,
-): number {
-  return (
-    2 +
-    (categoryCount > 1 ? 1 : 0) +
-    (subcategoryCount > 1 ? 1 : 0)
-  );
+function fixedComponentCount(subcategoryCount: number): number {
+  return 3 + (subcategoryCount > 1 ? 1 : 0);
 }
 
 function paginateFields<Context>(
