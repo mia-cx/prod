@@ -106,6 +106,13 @@ const isDiscordErrorCode = (error: unknown, code: number): boolean =>
   "code" in error &&
   error.code === code;
 
+const isIrrecoverableFormerResourceError = (error: unknown): boolean =>
+  [
+    RESTJSONErrorCodes.UnknownChannel,
+    RESTJSONErrorCodes.MissingAccess,
+    RESTJSONErrorCodes.MissingPermissions,
+  ].some((code) => isDiscordErrorCode(error, code));
+
 const fetchTextChannel = async (
   guild: Guild,
   channelId: string,
@@ -341,18 +348,12 @@ const reconcileInformationMessages = async (
 };
 
 export const createSupportHubDiscord = (): SupportHubDiscord => {
-  const releaseHub = async (
+  const releaseHubWithAccess = async (
     guild: Guild,
     ownership: HubPermissionOwnership,
   ): Promise<void> => {
     const botMember = await assertOwnershipIdentity(guild, ownership);
-    let channel: TextChannel | undefined;
-    try {
-      channel = await fetchTextChannel(guild, ownership.channelId, true);
-    } catch (error) {
-      if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) return;
-      throw error;
-    }
+    const channel = await fetchTextChannel(guild, ownership.channelId, true);
     if (channel === undefined) return;
 
     const everyonePatch = restorationPatch(
@@ -383,6 +384,17 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
       await refreshed.permissionOverwrites.edit(botMember, botPatch, {
         reason: "Release Prod's former support hub capabilities",
       });
+    }
+  };
+
+  const releaseHub = async (
+    guild: Guild,
+    ownership: HubPermissionOwnership,
+  ): Promise<void> => {
+    try {
+      await releaseHubWithAccess(guild, ownership);
+    } catch (error) {
+      if (!isIrrecoverableFormerResourceError(error)) throw error;
     }
   };
 
@@ -471,23 +483,19 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
       channelId: string,
       messageId?: string,
     ) => {
-      let channel: TextChannel | undefined;
       try {
-        channel = await fetchTextChannel(guild, channelId);
+        const channel = await fetchTextChannel(guild, channelId);
+        if (channel === undefined) return;
+        const botMember = guild.members.me ?? (await guild.members.fetchMe());
+        const managed = await managedInformationMessages(
+          channel,
+          botMember,
+          messageId,
+        );
+        await Promise.all(managed.map((message) => message.delete()));
       } catch (error) {
-        if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) {
-          return;
-        }
-        throw error;
+        if (!isIrrecoverableFormerResourceError(error)) throw error;
       }
-      if (channel === undefined) return;
-      const botMember = guild.members.me ?? (await guild.members.fetchMe());
-      const managed = await managedInformationMessages(
-        channel,
-        botMember,
-        messageId,
-      );
-      await Promise.all(managed.map((message) => message.delete()));
     },
   });
 };

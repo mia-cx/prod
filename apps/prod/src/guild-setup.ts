@@ -153,10 +153,23 @@ export const createGuildSetupService = (
         if (!prepared.valid) return prepared;
 
         if (sameHub) {
-          const applied = await discord.applyHub(
-            guild,
-            prepared.permissionOwnership,
-          );
+          let applied;
+          try {
+            applied = await discord.applyHub(
+              guild,
+              prepared.permissionOwnership,
+            );
+          } catch (error) {
+            try {
+              await discord.restoreHub(guild, prepared.permissionOwnership);
+            } catch (restoreError) {
+              throw new AggregateError(
+                [error, restoreError],
+                "Support hub reapplication failed and the locked state could not be reasserted",
+              );
+            }
+            throw error;
+          }
           if (!applied.valid) {
             if (previous.hubPermissionOwnership !== undefined) {
               await discord.restoreHub(guild, previous.hubPermissionOwnership);

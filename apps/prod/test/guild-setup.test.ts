@@ -196,6 +196,20 @@ describe("guild setup lifecycle", () => {
     );
   });
 
+  it("reasserts a configured hub after a partial reapplication failure", async () => {
+    const { discord, service, guild } = await setup();
+    await service.configureHub(guild, "hub-a");
+    vi.mocked(discord.applyHub).mockRejectedValueOnce(
+      new Error("bot overwrite failed"),
+    );
+
+    await expect(service.configureHub(guild, "hub-a")).rejects.toThrow(
+      "bot overwrite failed",
+    );
+
+    expect(discord.restoreHub).toHaveBeenCalledWith(guild, ownership("hub-a"));
+  });
+
   it("serializes concurrent information refreshes and reuses the persisted message", async () => {
     const { discord, service, guild } = await setup();
     await service.configureHub(guild, "hub-a");

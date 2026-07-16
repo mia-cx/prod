@@ -310,18 +310,37 @@ describe("Discord support hub", () => {
     );
   });
 
-  it("treats a deleted former channel as already released", async () => {
+  it("finishes cleanup when a former channel is gone or inaccessible", async () => {
     const hub = createSupportHubDiscord();
-    const state = fixture();
-    const prepared = await hub.prepareHub(state.guild, "hub-1");
+    for (const code of [
+      RESTJSONErrorCodes.UnknownChannel,
+      RESTJSONErrorCodes.MissingAccess,
+    ]) {
+      const state = fixture();
+      const prepared = await hub.prepareHub(state.guild, "hub-1");
+      expect(prepared.valid).toBe(true);
+      if (!prepared.valid) continue;
+      vi.mocked(state.guild.channels.fetch).mockRejectedValue({ code });
+
+      await expect(
+        hub.releaseHub(state.guild, prepared.permissionOwnership),
+      ).resolves.toBeUndefined();
+      await expect(
+        hub.deleteInformationMessage(state.guild, "hub-1"),
+      ).resolves.toBeUndefined();
+    }
+
+    const forbidden = fixture();
+    const prepared = await hub.prepareHub(forbidden.guild, "hub-1");
     expect(prepared.valid).toBe(true);
     if (!prepared.valid) return;
-    vi.mocked(state.guild.channels.fetch).mockRejectedValue({
-      code: RESTJSONErrorCodes.UnknownChannel,
+    await hub.applyHub(forbidden.guild, prepared.permissionOwnership);
+    forbidden.editOverwrite.mockRejectedValueOnce({
+      code: RESTJSONErrorCodes.MissingPermissions,
     });
 
     await expect(
-      hub.releaseHub(state.guild, prepared.permissionOwnership),
+      hub.releaseHub(forbidden.guild, prepared.permissionOwnership),
     ).resolves.toBeUndefined();
   });
 
