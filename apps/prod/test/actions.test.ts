@@ -52,10 +52,15 @@ const guildSettingsStore: GuildSettingsStore = {
   setHubInformationMessage: async () => undefined,
   setAssistantIdentity: async () => undefined,
   setTone: async () => undefined,
+  getHubTransition: async () => undefined,
+  beginHubTransition: async () => undefined,
+  completeHubTransition: async () => undefined,
+  abortHubTransition: async () => undefined,
 };
 const supportHubDiscord: SupportHubDiscord = {
   validateHub: async () => ({ valid: true }),
-  configureHub: async () => ({ valid: true, permissionOwnership }),
+  prepareHub: async () => ({ valid: true, permissionOwnership }),
+  applyHub: async () => ({ valid: true, permissionOwnership }),
   restoreHub: async () => undefined,
   releaseHub: async () => undefined,
   upsertInformationMessage: async () => "message-1",

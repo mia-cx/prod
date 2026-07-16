@@ -57,9 +57,13 @@ const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
   const store = createSqliteGuildSettingsStore(connection.database);
   const supportHub: SupportHubDiscord = {
     validateHub: vi.fn(async () => ({ valid: true as const })),
-    configureHub: vi.fn(async (_guild, channelId, existingOwnership) => ({
+    prepareHub: vi.fn(async (_guild, channelId, existingOwnership) => ({
       valid: true as const,
       permissionOwnership: existingOwnership ?? ownership(channelId),
+    })),
+    applyHub: vi.fn(async (_guild, permissionOwnership) => ({
+      valid: true as const,
+      permissionOwnership,
     })),
     restoreHub: vi.fn(async () => undefined),
     releaseHub: vi.fn(async () => undefined),
@@ -250,17 +254,17 @@ describe("guild setup settings integration", () => {
       valid: false as const,
       issues: ["Prod is missing required permissions in this channel."],
     }));
-    const configureHub = vi.fn(async () => ({
+    const prepareHub = vi.fn(async () => ({
       valid: true as const,
       permissionOwnership: ownership(),
     }));
-    const { runtime, store } = await setup({ validateHub, configureHub });
+    const { runtime, store } = await setup({ validateHub, prepareHub });
     const select = component("channel", hubRoute);
 
     await runtime.handleInteraction(select as unknown as Interaction);
 
     expect(validateHub).toHaveBeenCalledWith(guild, hubChannelId);
-    expect(configureHub).not.toHaveBeenCalled();
+    expect(prepareHub).not.toHaveBeenCalled();
     expect((await store.get(guildId)).hubChannelId).toBeUndefined();
     expect(JSON.stringify(select.editReply.mock.calls[0]?.[0])).toContain(
       "Prod is missing required permissions",

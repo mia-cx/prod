@@ -65,6 +65,10 @@ const fixture = (
   );
   const everyone = { id: "guild-1" };
   const botMember = { id: "bot-1" };
+  const roleCache = new Collection<
+    string,
+    { id: string; tags?: { botId?: string } }
+  >([[everyone.id, everyone]]);
   type TestMessage = {
     id: string;
     author: { id: string };
@@ -146,7 +150,7 @@ const fixture = (
     id: "guild-1",
     channels: { fetch: vi.fn().mockResolvedValue(channel) },
     members: { me: botMember, fetchMe: vi.fn() },
-    roles: { everyone },
+    roles: { everyone, cache: roleCache },
   } as unknown as Guild;
   const addOverwrite = (
     id: string,
@@ -170,6 +174,7 @@ const fixture = (
     send,
     messageCache,
     addMessage,
+    roleCache,
     effectiveFor,
     addOverwrite,
   };
@@ -206,11 +211,14 @@ describe("Discord support hub", () => {
     const { guild, everyone, botMember, editOverwrite, effectiveFor } =
       fixture();
 
-    const configured = await hub.configureHub(guild, "hub-1");
+    const configured = await hub.prepareHub(guild, "hub-1");
     expect(configured.valid).toBe(true);
     if (!configured.valid) return;
     await expect(
-      hub.configureHub(guild, "hub-1", configured.permissionOwnership),
+      hub.applyHub(guild, configured.permissionOwnership),
+    ).resolves.toEqual(configured);
+    await expect(
+      hub.applyHub(guild, configured.permissionOwnership),
     ).resolves.toEqual(configured);
 
     expect(editOverwrite).toHaveBeenCalledTimes(4);
@@ -256,6 +264,20 @@ describe("Discord support hub", () => {
     }
   });
 
+  it("accepts the bot's managed integration role overwrite", async () => {
+    const hub = createSupportHubDiscord();
+    const state = fixture();
+    state.roleCache.set("bot-role", {
+      id: "bot-role",
+      tags: { botId: state.botMember.id },
+    });
+    state.addOverwrite("bot-role", [PermissionFlagsBits.SendMessages]);
+
+    await expect(hub.validateHub(state.guild, "hub-1")).resolves.toEqual({
+      valid: true,
+    });
+  });
+
   it("releases only still-owned permission bits on a former hub", async () => {
     const hub = createSupportHubDiscord();
     const state = fixture();
@@ -264,9 +286,10 @@ describe("Discord support hub", () => {
       [PermissionFlagsBits.SendMessages],
       [PermissionFlagsBits.AddReactions],
     );
-    const configured = await hub.configureHub(state.guild, "hub-1");
+    const configured = await hub.prepareHub(state.guild, "hub-1");
     expect(configured.valid).toBe(true);
     if (!configured.valid) return;
+    await hub.applyHub(state.guild, configured.permissionOwnership);
 
     // An administrator deliberately changes this bit after Prod's setup.
     await state.channel.permissionOverwrites.edit(state.everyone, {
@@ -285,6 +308,21 @@ describe("Discord support hub", () => {
     expect(bot.allow.has(PermissionFlagsBits.SendMessagesInThreads)).toBe(
       false,
     );
+  });
+
+  it("treats a deleted former channel as already released", async () => {
+    const hub = createSupportHubDiscord();
+    const state = fixture();
+    const prepared = await hub.prepareHub(state.guild, "hub-1");
+    expect(prepared.valid).toBe(true);
+    if (!prepared.valid) return;
+    vi.mocked(state.guild.channels.fetch).mockRejectedValue({
+      code: RESTJSONErrorCodes.UnknownChannel,
+    });
+
+    await expect(
+      hub.releaseHub(state.guild, prepared.permissionOwnership),
+    ).resolves.toBeUndefined();
   });
 
   it("creates one information message and edits that message on refresh", async () => {

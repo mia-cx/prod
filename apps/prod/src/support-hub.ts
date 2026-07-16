@@ -77,10 +77,14 @@ export type UpsertHubInformationInput = Readonly<{
 
 export interface SupportHubDiscord {
   validateHub(guild: Guild, channelId: string): Promise<SupportHubValidation>;
-  configureHub(
+  prepareHub(
     guild: Guild,
     channelId: string,
     existingOwnership?: HubPermissionOwnership,
+  ): Promise<ConfigureSupportHubResult>;
+  applyHub(
+    guild: Guild,
+    ownership: HubPermissionOwnership,
   ): Promise<ConfigureSupportHubResult>;
   restoreHub(guild: Guild, ownership: HubPermissionOwnership): Promise<void>;
   releaseHub(guild: Guild, ownership: HubPermissionOwnership): Promise<void>;
@@ -120,6 +124,7 @@ const conflictingOverwriteIssue = (
     (overwrite) =>
       overwrite.id !== guild.roles.everyone.id &&
       overwrite.id !== botMember.id &&
+      guild.roles.cache.get(overwrite.id)?.tags?.botId !== botMember.id &&
       HUB_PROTECTED_PERMISSION_NAMES.some((name) =>
         overwrite.allow.has(protectedPermissionBits[name]),
       ),
@@ -341,7 +346,13 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
     ownership: HubPermissionOwnership,
   ): Promise<void> => {
     const botMember = await assertOwnershipIdentity(guild, ownership);
-    const channel = await fetchTextChannel(guild, ownership.channelId, true);
+    let channel: TextChannel | undefined;
+    try {
+      channel = await fetchTextChannel(guild, ownership.channelId, true);
+    } catch (error) {
+      if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) return;
+      throw error;
+    }
     if (channel === undefined) return;
 
     const everyonePatch = restorationPatch(
@@ -398,7 +409,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
         ? { valid: true as const }
         : { valid: false as const, issues: resolution.issues };
     },
-    configureHub: async (
+    prepareHub: async (
       guild: Guild,
       channelId: string,
       existingOwnership?: HubPermissionOwnership,
@@ -417,29 +428,25 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
       const ownership =
         existingOwnership ??
         captureOwnership(resolution.channel, guild, resolution.botMember);
-      try {
-        await applyOwnedPermissions(
-          guild,
-          resolution.channel,
-          resolution.botMember,
+      return { valid: true as const, permissionOwnership: ownership };
+    },
+    applyHub: async (guild: Guild, ownership: HubPermissionOwnership) => {
+      const resolution = await resolveHub(guild, ownership.channelId);
+      if (!resolution.valid) return resolution;
+      if (resolution.botMember.id !== ownership.botMemberId) {
+        throw new Error(
+          "Support hub permission ownership belongs to a different bot member",
         );
-        const postcondition = await resolveHub(guild, channelId, true);
-        if (!postcondition.valid) {
-          await releaseHub(guild, ownership);
-          return postcondition;
-        }
-        return { valid: true as const, permissionOwnership: ownership };
-      } catch (error) {
-        try {
-          await releaseHub(guild, ownership);
-        } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            "Support hub configuration failed and its permission changes could not be fully rolled back",
-          );
-        }
-        throw error;
       }
+      await applyOwnedPermissions(
+        guild,
+        resolution.channel,
+        resolution.botMember,
+      );
+      const postcondition = await resolveHub(guild, ownership.channelId, true);
+      return postcondition.valid
+        ? { valid: true as const, permissionOwnership: ownership }
+        : postcondition;
     },
     restoreHub,
     releaseHub,

@@ -5,6 +5,7 @@ import {
   parseHubPermissionOwnership,
   type HubPermissionOwnership,
 } from "./hub-permission-ownership.js";
+import { parseHubTransition, type HubTransition } from "./hub-transition.js";
 import { guildSettings } from "./schema.js";
 
 export const DEFAULT_ASSISTANT_IDENTITY = "Prod";
@@ -31,10 +32,21 @@ export interface GuildSettingsStore {
   setHubInformationMessage(guildId: string, messageId: string): Promise<void>;
   setAssistantIdentity(guildId: string, identity: string): Promise<void>;
   setTone(guildId: string, tone: string): Promise<void>;
+  getHubTransition(guildId: string): Promise<HubTransition | undefined>;
+  beginHubTransition(guildId: string, transition: HubTransition): Promise<void>;
+  completeHubTransition(
+    guildId: string,
+    transition: HubTransition,
+  ): Promise<void>;
+  abortHubTransition(guildId: string, transitionId: string): Promise<void>;
 }
 
 export class GuildNotConfiguredError extends Error {
   override readonly name = "GuildNotConfiguredError";
+}
+
+export class GuildTransitionConflictError extends Error {
+  override readonly name = "GuildTransitionConflictError";
 }
 
 export type CreateSqliteGuildSettingsStoreOptions = Readonly<{
@@ -91,6 +103,33 @@ const upsert = (
       set: { value, updatedAt },
     })
     .run();
+};
+
+const settingValue = (
+  writer: Pick<ProdDatabase, "select">,
+  guildId: string,
+  key: GuildSettingKey,
+): string | undefined =>
+  writer
+    .select({ value: guildSettings.value })
+    .from(guildSettings)
+    .where(and(eq(guildSettings.guildId, guildId), eq(guildSettings.key, key)))
+    .get()?.value;
+
+const assertTransition = (
+  writer: Pick<ProdDatabase, "select">,
+  guildId: string,
+  transitionId: string,
+): void => {
+  const serialized = settingValue(writer, guildId, "hub_transition");
+  if (
+    serialized === undefined ||
+    parseHubTransition(serialized).id !== transitionId
+  ) {
+    throw new GuildTransitionConflictError(
+      "The support hub transition is no longer current",
+    );
+  }
 };
 
 export const createSqliteGuildSettingsStore = (
@@ -252,6 +291,101 @@ export const createSqliteGuildSettingsStore = (
         const timestamp = now();
         insertDefaultRows(transaction, guildId, timestamp);
         upsert(transaction, guildId, "tone", normalized, timestamp);
+      });
+    },
+    getHubTransition: async (
+      guildId: string,
+    ): Promise<HubTransition | undefined> => {
+      assertId("guildId", guildId);
+      const serialized = settingValue(database, guildId, "hub_transition");
+      return serialized === undefined
+        ? undefined
+        : parseHubTransition(serialized);
+    },
+    beginHubTransition: async (
+      guildId: string,
+      transition: HubTransition,
+    ): Promise<void> => {
+      assertId("guildId", guildId);
+      database.transaction((transaction) => {
+        const existing = settingValue(transaction, guildId, "hub_transition");
+        if (existing !== undefined) {
+          const current = parseHubTransition(existing);
+          if (current.id === transition.id) return;
+          throw new GuildTransitionConflictError(
+            "Another support hub transition is already in progress",
+          );
+        }
+        const timestamp = now();
+        insertDefaultRows(transaction, guildId, timestamp);
+        upsert(
+          transaction,
+          guildId,
+          "hub_transition",
+          JSON.stringify(transition),
+          timestamp,
+        );
+      });
+    },
+    completeHubTransition: async (
+      guildId: string,
+      transition: HubTransition,
+    ): Promise<void> => {
+      assertId("guildId", guildId);
+      database.transaction((transaction) => {
+        assertTransition(transaction, guildId, transition.id);
+        const timestamp = now();
+        upsert(
+          transaction,
+          guildId,
+          "hub_channel_id",
+          transition.next.channelId,
+          timestamp,
+        );
+        upsert(
+          transaction,
+          guildId,
+          "hub_permission_ownership",
+          JSON.stringify(transition.next),
+          timestamp,
+        );
+        transaction
+          .delete(guildSettings)
+          .where(
+            and(
+              eq(guildSettings.guildId, guildId),
+              eq(guildSettings.key, "hub_information_message_id"),
+            ),
+          )
+          .run();
+        transaction
+          .delete(guildSettings)
+          .where(
+            and(
+              eq(guildSettings.guildId, guildId),
+              eq(guildSettings.key, "hub_transition"),
+            ),
+          )
+          .run();
+      });
+    },
+    abortHubTransition: async (
+      guildId: string,
+      transitionId: string,
+    ): Promise<void> => {
+      assertId("guildId", guildId);
+      assertId("transitionId", transitionId);
+      database.transaction((transaction) => {
+        assertTransition(transaction, guildId, transitionId);
+        transaction
+          .delete(guildSettings)
+          .where(
+            and(
+              eq(guildSettings.guildId, guildId),
+              eq(guildSettings.key, "hub_transition"),
+            ),
+          )
+          .run();
       });
     },
   });

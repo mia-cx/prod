@@ -68,7 +68,7 @@ export function createGuildSetupSettingsConsumer(
         reason: "Settings are available only inside a server.",
       };
     }
-    const state = await setup.get(context.guild.id);
+    const state = await setup.get(context.guild);
     const isBootstrapAdministrator =
       context.isGuildOwner || context.isAdministrator;
     if (state.hubChannelId === undefined && !isBootstrapAdministrator) {
@@ -113,7 +113,7 @@ export function createGuildSetupSettingsConsumer(
                 description:
                   "Prod validates its effective permissions before applying the empty-hub privacy boundary.",
                 load: async (context) => {
-                  const state = await setup.get(requireGuild(context).id);
+                  const state = await setup.get(requireGuild(context));
                   return {
                     value:
                       state.hubChannelId === undefined
@@ -158,7 +158,7 @@ export function createGuildSetupSettingsConsumer(
                 description:
                   "Post the support instructions once, or refresh the existing bot-managed message.",
                 load: async (context) => {
-                  const state = await setup.get(requireGuild(context).id);
+                  const state = await setup.get(requireGuild(context));
                   return {
                     value:
                       state.hubInformationMessageId === undefined
@@ -213,7 +213,7 @@ export function createGuildSetupSettingsConsumer(
                   },
                 ],
                 load: async (context) => {
-                  const value = (await setup.get(requireGuild(context).id))
+                  const value = (await setup.get(requireGuild(context)))
                     .assistantIdentity;
                   return {
                     value,
@@ -232,7 +232,7 @@ export function createGuildSetupSettingsConsumer(
                     : [],
                 mutate: async (values, context) => {
                   await setup.setAssistantIdentity(
-                    requireGuild(context).id,
+                    requireGuild(context),
                     values.identity!,
                   );
                 },
@@ -252,8 +252,7 @@ export function createGuildSetupSettingsConsumer(
                   },
                 ],
                 load: async (context) => {
-                  const value = (await setup.get(requireGuild(context).id))
-                    .tone;
+                  const value = (await setup.get(requireGuild(context))).tone;
                   return {
                     value,
                     values: { tone: value },
@@ -270,7 +269,7 @@ export function createGuildSetupSettingsConsumer(
                       ]
                     : [],
                 mutate: async (values, context) => {
-                  await setup.setTone(requireGuild(context).id, values.tone!);
+                  await setup.setTone(requireGuild(context), values.tone!);
                 },
               },
             ],

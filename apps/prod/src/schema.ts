@@ -17,6 +17,7 @@ export const guildSettings = sqliteTable(
         "hub_channel_id",
         "hub_information_message_id",
         "hub_permission_ownership",
+        "hub_transition",
         "assistant_identity",
         "tone",
       ],
