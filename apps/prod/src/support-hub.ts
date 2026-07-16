@@ -402,6 +402,19 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
     }
   };
 
+  const releaseHub = async (
+    guild: Guild,
+    ownership: HubPermissionOwnership,
+  ): Promise<void> => {
+    try {
+      await releaseHubWithAccess(guild, ownership);
+    } catch (error) {
+      if (!isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) {
+        throw error;
+      }
+    }
+  };
+
   const restoreHub = async (
     guild: Guild,
     ownership: HubPermissionOwnership,
@@ -465,7 +478,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
         : postcondition;
     },
     restoreHub,
-    releaseHub: releaseHubWithAccess,
+    releaseHub,
     releaseFormerHub,
     upsertInformationMessage: async (input: UpsertHubInformationInput) => {
       const resolution = await resolveHub(input.guild, input.channelId);

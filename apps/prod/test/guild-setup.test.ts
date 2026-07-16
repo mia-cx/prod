@@ -237,6 +237,22 @@ describe("guild setup lifecycle", () => {
     });
   });
 
+  it("abandons a deleted candidate and permits a replacement selection", async () => {
+    const { store, discord, service, guild } = await setup();
+    vi.mocked(discord.applyHub).mockRejectedValueOnce({
+      code: RESTJSONErrorCodes.UnknownChannel,
+    });
+
+    await expect(service.configureHub(guild, "hub-a")).rejects.toEqual({
+      code: RESTJSONErrorCodes.UnknownChannel,
+    });
+    await expect(store.getHubTransition(guild.id)).resolves.toBeUndefined();
+
+    await expect(service.configureHub(guild, "hub-b")).resolves.toEqual({
+      valid: true,
+    });
+  });
+
   it("serializes concurrent information refreshes and reuses the persisted message", async () => {
     const { discord, service, guild } = await setup();
     await service.configureHub(guild, "hub-a");

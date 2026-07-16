@@ -325,6 +325,11 @@ describe("Discord support hub", () => {
       await expect(
         hub.releaseFormerHub(state.guild, prepared.permissionOwnership),
       ).resolves.toBeUndefined();
+      if (code === RESTJSONErrorCodes.UnknownChannel) {
+        await expect(
+          hub.releaseHub(state.guild, prepared.permissionOwnership),
+        ).resolves.toBeUndefined();
+      }
       await expect(
         hub.deleteInformationMessage(state.guild, "hub-1"),
       ).resolves.toBeUndefined();
