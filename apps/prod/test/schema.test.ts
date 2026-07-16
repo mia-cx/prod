@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getTableName } from "drizzle-orm";
 
 import {
+  guildSettings,
   permissionRuleEvents,
   permissionRules,
   schemaContributors,
@@ -21,5 +22,9 @@ describe("Drizzle schema composition", () => {
     expect(getTableName(permissionRuleEvents)).toBe(
       "protocord_permission_rule_events",
     );
+  });
+
+  it("includes the app-owned guild settings table", () => {
+    expect(getTableName(guildSettings)).toBe("guild_settings");
   });
 });

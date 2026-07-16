@@ -26,6 +26,7 @@ describe("application-owned migration history", () => {
         expect.arrayContaining([
           "protocord_permission_rule_events",
           "protocord_permission_rules",
+          "guild_settings",
         ]),
       );
       const duplicateRule = {
