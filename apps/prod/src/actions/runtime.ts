@@ -19,8 +19,10 @@ import {
 } from "protocord";
 
 import type { DiscordActionSurface } from "../discord.js";
+import type { GuildSettingsStore } from "../guild-settings.js";
+import type { SupportHubDiscord } from "../support-hub.js";
 import { pingAction } from "./ping.js";
-import { createSyntheticSettingsConsumer } from "./settings.js";
+import { createGuildSetupSettingsConsumer } from "./settings.js";
 
 export type ProdActionContext = Readonly<{
   logger: Logger;
@@ -43,6 +45,8 @@ export type ProdActionRuntime = DiscordActionSurface &
 
 export type ProdActionRuntimeOptions = Readonly<{
   textCommandPrefix: string;
+  guildSettingsStore: GuildSettingsStore;
+  supportHubDiscord: SupportHubDiscord;
 }>;
 
 export const createProdActionRuntime = (
@@ -60,9 +64,11 @@ export const createProdActionRuntime = (
     isApplicationOperator,
     createUserAuthorizationSubject,
   };
-  const settings = createSyntheticSettingsConsumer(
+  const settings = createGuildSetupSettingsConsumer(
     logger,
     isApplicationOperator,
+    options.guildSettingsStore,
+    options.supportHubDiscord,
   );
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,

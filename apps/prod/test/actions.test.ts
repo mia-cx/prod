@@ -11,15 +11,39 @@ import type { DiscordInteractionHandleResult } from "protocord";
 import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
 
+import type { GuildSettingsStore } from "../src/guild-settings.js";
 import {
   createProdActionRuntime,
   logProdActionResult,
 } from "../src/actions/runtime.js";
 import { createLogger } from "../src/logger.js";
+import type { SupportHubDiscord } from "../src/support-hub.js";
 
 const noMentions = { parse: [], repliedUser: false };
+const guildSettingsStore: GuildSettingsStore = {
+  get: async (guildId) => ({
+    guildId,
+    initialized: true,
+    hubChannelId: "123456789012345678",
+    assistantIdentity: "Prod",
+    tone: "friendly, patient, and concise",
+  }),
+  initialize: async () => undefined,
+  configureHub: async () => undefined,
+  setHubInformationMessage: async () => undefined,
+  setAssistantIdentity: async () => undefined,
+  setTone: async () => undefined,
+};
+const supportHubDiscord: SupportHubDiscord = {
+  validateHub: async () => ({ valid: true }),
+  configureHub: async () => ({ valid: true }),
+  upsertInformationMessage: async () => "message-1",
+  deleteInformationMessage: async () => undefined,
+};
 const runtimeOptions = {
   textCommandPrefix: "!",
+  guildSettingsStore,
+  supportHubDiscord,
 };
 
 function componentWithCustomId(
@@ -90,7 +114,7 @@ describe("Prod action runtime", () => {
       {
         type: ApplicationCommandType.ChatInput,
         name: "settings",
-        description: "Open the development settings validation surface",
+        description: "Configure Prod for this server",
         options: [],
       },
       {
@@ -159,7 +183,7 @@ describe("Prod action runtime", () => {
     },
   );
 
-  it("opens the app-owned synthetic settings consumer through /settings", async () => {
+  it("opens the app-owned guild setup settings through /settings", async () => {
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),
       runtimeOptions,
@@ -178,23 +202,23 @@ describe("Prod action runtime", () => {
       }),
     );
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
-      "Prod development settings",
+      "Prod settings",
     );
     expect(
       componentWithCustomId(
         interaction.editReply.mock.calls[0]?.[0],
         encodeSettingsCustomId({
           action: "channel-select",
-          categoryId: "controls",
-          subcategoryId: "general",
-          fieldId: "hub",
+          categoryId: "setup",
+          subcategoryId: "hub",
+          fieldId: "hub-channel",
           page: 0,
         }),
       ),
-    ).toMatchObject({ min_values: 0 });
+    ).toMatchObject({ min_values: 1, max_values: 1 });
   });
 
-  it("routes synthetic component mutations before ordinary actions", async () => {
+  it("routes setup component mutations before ordinary actions", async () => {
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),
       runtimeOptions,
@@ -205,10 +229,7 @@ describe("Prod action runtime", () => {
 
     expect(interaction.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
-      "1 refreshes",
-    );
-    expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).not.toContain(
-      "Information refreshed.",
+      "Hub information message",
     );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
@@ -224,14 +245,14 @@ describe("Prod action runtime", () => {
     await runtime.handleInteraction(open as unknown as Interaction);
     expect(open.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(open.editReply.mock.calls[0]?.[0])).toContain(
-      "Prod development settings",
+      "Prod settings",
     );
 
     const mutation = settingsButton(false);
     await runtime.handleInteraction(mutation as unknown as Interaction);
     expect(mutation.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(mutation.editReply.mock.calls[0]?.[0])).toContain(
-      "1 refreshes",
+      "Hub information message",
     );
 
     runtime.setApplicationOperatorUserIds([]);
@@ -262,7 +283,7 @@ describe("Prod action runtime", () => {
     });
   });
 
-  it("rechecks synthetic settings authorization for component mutations", async () => {
+  it("rechecks guild setup authorization for component mutations", async () => {
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),
       runtimeOptions,
@@ -402,6 +423,7 @@ const settingsCommand = (canManageGuild: boolean) => {
     commandName: "settings",
     channelId: "channel-1",
     guildId: "guild-1",
+    guild: { id: "guild-1", ownerId: "owner-1" },
     user: { id: "user-1", username: "staff", globalName: "Staff" },
     memberPermissions: { has: () => canManageGuild },
     deferred: false,
@@ -437,12 +459,13 @@ const settingsButton = (canManageGuild: boolean) => {
   const interaction: Record<string, unknown> = {
     customId: encodeSettingsCustomId({
       action: "button",
-      categoryId: "controls",
-      subcategoryId: "general",
-      fieldId: "refresh",
+      categoryId: "setup",
+      subcategoryId: "hub",
+      fieldId: "hub-information",
       page: 0,
     }),
     guildId: "guild-1",
+    guild: { id: "guild-1", ownerId: "owner-1" },
     user: { id: "user-1", username: "staff", globalName: "Staff" },
     memberPermissions: { has: () => canManageGuild },
     deferred: false,

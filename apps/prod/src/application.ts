@@ -8,7 +8,9 @@ import {
   type ProdDatabase,
 } from "./database.js";
 import { createDiscordGateway, type DiscordGateway } from "./discord.js";
+import { createSqliteGuildSettingsStore } from "./guild-settings.js";
 import { applyMigrations } from "./migrations.js";
+import { createSupportHubDiscord } from "./support-hub.js";
 
 export type RunningProd = Readonly<{
   stop: (reason?: string) => Promise<void>;
@@ -49,8 +51,13 @@ export const startProd = async (
   signal.throwIfAborted();
 
   const logger = dependencies.logger;
+  const connection = (dependencies.openDatabase ?? openDatabase)(
+    config.databaseUrl,
+  );
   const actions = createProdActionRuntime(logger, {
     textCommandPrefix: config.textCommandPrefix,
+    guildSettingsStore: createSqliteGuildSettingsStore(connection.database),
+    supportHubDiscord: createSupportHubDiscord(),
   });
   const gateway =
     dependencies.gateway ??
@@ -58,9 +65,6 @@ export const startProd = async (
       actions,
       configuredApplicationOperatorUserIds: config.botOperatorUserIds,
     });
-  const connection = (dependencies.openDatabase ?? openDatabase)(
-    config.databaseUrl,
-  );
   const migrate = dependencies.migrate ?? defaultMigrate;
 
   try {
