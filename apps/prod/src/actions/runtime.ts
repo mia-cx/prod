@@ -14,6 +14,7 @@ import {
 
 import type { DiscordActionSurface } from "../discord.js";
 import { pingAction } from "./ping.js";
+import { createSyntheticSettingsConsumer } from "./settings.js";
 
 export type ProdActionContext = Readonly<{
   logger: Logger;
@@ -35,6 +36,7 @@ export const createProdActionRuntime = (
   options: ProdActionRuntimeOptions,
 ): ProdActionRuntime => {
   const context: ProdActionContext = { logger };
+  const settings = createSyntheticSettingsConsumer(logger);
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,
     present: async (_trigger, _message, outcome, presentationContext) => {
@@ -50,6 +52,7 @@ export const createProdActionRuntime = (
     ],
   });
   registry.registerAction(pingAction);
+  registry.registerAction(settings.action);
 
   const handleMessage = textProvider.prefix
     ? async (message: Message): Promise<boolean> => {
@@ -90,6 +93,10 @@ export const createProdActionRuntime = (
     commands: getDiscordCommandRegistration(registry),
     refreshCommands: (client) => registerDiscordCommands(client, registry),
     handleInteraction: async (interaction: Interaction) => {
+      const settingsResult = await settings.handle(interaction);
+      if (settingsResult.matched) {
+        return;
+      }
       const handled = await handleDiscordInteraction(
         registry,
         interaction,
