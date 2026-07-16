@@ -372,6 +372,63 @@ describe("Discord settings runtime", () => {
     );
   });
 
+  it("reports a committed mutation when its refreshed view fails", async () => {
+    const refreshError = new Error("refresh failed");
+    const onError = vi.fn();
+    let committed = false;
+    const committedRuntime = createSettingsRuntime({
+      definition: {
+        title: "Committed settings",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "button",
+                    id: "increment",
+                    label: "Increment",
+                    load: () => {
+                      if (committed) throw refreshError;
+                      return { value: "Ready" };
+                    },
+                    mutate: () => {
+                      committed = true;
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      onError,
+    });
+    const button = mockInteraction("button", route("button", "increment"));
+
+    await expect(
+      committedRuntime.handle(button.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "mutated" });
+
+    expect(committed).toBe(true);
+    expect(button.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("was updated"),
+        flags: MessageFlags.Ephemeral,
+      }),
+    );
+    expect(onError).toHaveBeenCalledWith(
+      refreshError,
+      button.interaction,
+      { userId: "admin" },
+    );
+  });
+
   it("acknowledges a mutation before awaiting consumer callbacks", async () => {
     let release: (() => void) | undefined;
     state.incrementGate = new Promise<void>((resolve) => {
@@ -609,6 +666,34 @@ describe("Discord settings runtime", () => {
     expect(button.followUp).toHaveBeenCalledWith(
       expect.objectContaining({ flags: MessageFlags.Ephemeral }),
     );
+  });
+
+  it("bounds consumer authorization reasons to Discord's content limit", async () => {
+    const category = definition.categories[0]!;
+    const deniedRuntime = createSettingsRuntime({
+      definition: {
+        ...definition,
+        categories: [
+          {
+            ...category,
+            authorize: () => ({
+              authorized: false,
+              reason: "x".repeat(2_100),
+            }),
+          },
+        ],
+      },
+    });
+    const button = mockInteraction("button", route("button", "increment"));
+
+    await expect(
+      deniedRuntime.handle(button.interaction, { userId: "visitor" }),
+    ).resolves.toEqual({ matched: true, status: "unauthorized" });
+
+    const response = button.followUp.mock.calls[0]?.[0] as
+      | { content?: string }
+      | undefined;
+    expect(response?.content).toHaveLength(2_000);
   });
 
   it("rejects stale selections against freshly loaded field constraints", async () => {

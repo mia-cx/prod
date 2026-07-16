@@ -69,6 +69,13 @@ class SettingsModalTimeoutError extends Error {
   }
 }
 
+class SettingsCommittedMutationError extends Error {
+  public constructor(public readonly refreshError: unknown) {
+    super("settings mutation committed but its view could not refresh");
+    this.name = "SettingsCommittedMutationError";
+  }
+}
+
 export type SettingsDispatchStatus =
   | "opened"
   | "viewed"
@@ -289,6 +296,11 @@ async function handleSettingsInteraction<Context>(
         "Settings took too long to load. Try again.",
       );
       return { matched: true, status: "failed" };
+    }
+    if (error instanceof SettingsCommittedMutationError) {
+      await respondEphemeral(component, committedRefreshFailureMessage());
+      await reportError(onError, error.refreshError, component, context);
+      return { matched: true, status: "mutated" };
     }
     if (error instanceof SettingsViewError) {
       if (error.reason === "unauthorized") {
@@ -681,13 +693,20 @@ async function finishMutation<Context>(
           message: result.message ?? `${field?.label ?? "Setting"} updated.`,
         }
       : { kind: "error", message: formatIssues(result.issues) };
-  return updateView(
-    renderer,
-    interaction,
-    context,
-    { ...routeRequest(resolved.route), notice },
-    result.status === "success" ? "mutated" : "validation-failed",
-  );
+  try {
+    return await updateView(
+      renderer,
+      interaction,
+      context,
+      { ...routeRequest(resolved.route), notice },
+      result.status === "success" ? "mutated" : "validation-failed",
+    );
+  } catch (error) {
+    if (result.status === "success") {
+      throw new SettingsCommittedMutationError(error);
+    }
+    throw error;
+  }
 }
 
 async function updateView<Context>(
@@ -935,16 +954,17 @@ async function respondEphemeral(
   interaction: RepliableInteraction,
   content: string,
 ): Promise<void> {
+  const boundedContent = truncateResponseContent(content);
   try {
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp({
-        content,
+        content: boundedContent,
         flags: MessageFlags.Ephemeral,
         allowedMentions: NO_MENTIONS,
       });
     } else {
       await interaction.reply({
-        content,
+        content: boundedContent,
         flags: MessageFlags.Ephemeral,
         allowedMentions: NO_MENTIONS,
       });
@@ -972,7 +992,10 @@ async function respondOpenError(
       return;
     }
     try {
-      await interaction.editReply({ content, allowedMentions: NO_MENTIONS });
+      await interaction.editReply({
+        content: truncateResponseContent(content),
+        allowedMentions: NO_MENTIONS,
+      });
       return;
     } catch {
       // Fall through to the normal safe response path.
@@ -1000,4 +1023,12 @@ function staleMessage(): string {
 
 function failureMessage(): string {
   return "Settings could not be updated right now. Try again shortly.";
+}
+
+function committedRefreshFailureMessage(): string {
+  return "The setting was updated, but the view could not refresh. Reopen settings to see the latest value.";
+}
+
+function truncateResponseContent(content: string): string {
+  return Array.from(content).slice(0, 2_000).join("");
 }
