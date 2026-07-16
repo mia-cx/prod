@@ -481,14 +481,13 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
         throw error;
       }
       if (channel === undefined) return;
-      try {
-        const message = await channel.messages.fetch(messageId);
-        await message.delete();
-      } catch (error) {
-        if (!isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMessage)) {
-          throw error;
-        }
-      }
+      const botMember = guild.members.me ?? (await guild.members.fetchMe());
+      const managed = await managedInformationMessages(
+        channel,
+        botMember,
+        messageId,
+      );
+      await Promise.all(managed.map((message) => message.delete()));
     },
   });
 };

@@ -428,11 +428,15 @@ describe("Discord support hub", () => {
   it("deletes an old managed message even after required bot permissions change", async () => {
     const hub = createSupportHubDiscord();
     const stale = fixture([]);
-    const message = stale.addMessage("message-1", "managed");
+    const message = stale.addMessage(
+      "message-1",
+      `Managed\n\n${SUPPORT_HUB_INFORMATION_MARKER}`,
+    );
+    const unrelated = stale.addMessage("unrelated", "Other bot message");
 
     await hub.deleteInformationMessage(stale.guild, "hub-1", "message-1");
 
-    expect(stale.fetchMessage).toHaveBeenCalledWith("message-1");
     expect(message.delete).toHaveBeenCalledOnce();
+    expect(unrelated.delete).not.toHaveBeenCalled();
   });
 });
