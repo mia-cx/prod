@@ -166,7 +166,7 @@ describe("Discord user subject adapter", () => {
   it("derives application operator status from trusted application IDs", () => {
     const context = createDiscordAuthorizationContext({ guild });
     const subject = createDiscordUserSubject(member(), context, {
-      applicationOperatorUserIds: ["other-user", "user-1"],
+      isApplicationOperator: (userId) => userId === "user-1",
     });
 
     expect(subject.attributes.isApplicationOperator).toBe(true);

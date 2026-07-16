@@ -10,7 +10,11 @@ const discordMock = vi.hoisted(() => ({
     | null
     | { id: string }
     | {
-        members: Map<string, { id: string; membershipState: number }>;
+        ownerId: string | null;
+        members: Map<
+          string,
+          { id: string; membershipState: number; role: string }
+        >;
       },
   applicationFetch: vi.fn(),
   login: vi.fn(async (token: string) => token),
@@ -25,11 +29,16 @@ vi.mock("discord.js", () => ({
   },
   GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4 },
   TeamMemberMembershipState: { Invited: 1, Accepted: 2 },
+  TeamMemberRole: {
+    Admin: "admin",
+    Developer: "developer",
+    ReadOnly: "read_only",
+  },
   Client: class {
     user = { id: "345678901234567890", tag: "Prod#0001" };
     application = {
       fetch: async () => {
-        discordMock.applicationFetch();
+        await discordMock.applicationFetch();
         return this.application;
       },
       get owner() {
@@ -86,7 +95,7 @@ describe("createDiscordGateway", () => {
     discordMock.messageHandler = undefined;
     discordMock.intents = [];
     discordMock.applicationOwner = null;
-    discordMock.applicationFetch.mockClear();
+    discordMock.applicationFetch.mockReset().mockResolvedValue(undefined);
     discordMock.login.mockClear();
     discordMock.destroy.mockClear();
   });
@@ -225,11 +234,58 @@ describe("createDiscordGateway", () => {
     });
   });
 
-  it("grants accepted Team members but excludes pending invitees", async () => {
+  it("grants accepted Team operators but fails closed for read-only and invited members", async () => {
     discordMock.applicationOwner = {
+      ownerId: "223456789012345678",
       members: new Map([
-        ["accepted", { id: "223456789012345678", membershipState: 2 }],
-        ["invited", { id: "323456789012345678", membershipState: 1 }],
+        [
+          "owner",
+          {
+            id: "223456789012345678",
+            membershipState: 2,
+            role: "read_only",
+          },
+        ],
+        [
+          "admin",
+          {
+            id: "323456789012345678",
+            membershipState: 2,
+            role: "admin",
+          },
+        ],
+        [
+          "developer",
+          {
+            id: "423456789012345678",
+            membershipState: 2,
+            role: "developer",
+          },
+        ],
+        [
+          "read-only",
+          {
+            id: "523456789012345678",
+            membershipState: 2,
+            role: "read_only",
+          },
+        ],
+        [
+          "invited",
+          {
+            id: "623456789012345678",
+            membershipState: 1,
+            role: "admin",
+          },
+        ],
+        [
+          "unknown",
+          {
+            id: "723456789012345678",
+            membershipState: 2,
+            role: "future_role",
+          },
+        ],
       ]),
     };
     const gateway = createDiscordGateway({
@@ -239,7 +295,106 @@ describe("createDiscordGateway", () => {
     await expect(
       gateway.connect("development-token", new AbortController().signal),
     ).resolves.toMatchObject({
-      applicationOperatorUserIds: ["123456789012345678", "223456789012345678"],
+      applicationOperatorUserIds: [
+        "123456789012345678",
+        "223456789012345678",
+        "323456789012345678",
+        "423456789012345678",
+      ],
     });
+  });
+
+  it("refreshes Team authority and expires it after bounded staleness", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const setApplicationOperatorUserIds = vi.fn();
+    const handleError = vi.fn();
+    discordMock.applicationOwner = {
+      ownerId: "223456789012345678",
+      members: new Map([
+        [
+          "admin",
+          {
+            id: "223456789012345678",
+            membershipState: 2,
+            role: "admin",
+          },
+        ],
+      ]),
+    };
+    const gateway = createDiscordGateway({
+      configuredApplicationOperatorUserIds: ["123456789012345678"],
+      applicationOperatorRefreshIntervalMs: 100,
+      applicationOperatorMaxStalenessMs: 250,
+      actions: {
+        setApplicationOperatorUserIds,
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleError,
+      },
+    });
+
+    try {
+      await gateway.connect("development-token", new AbortController().signal);
+      expect(setApplicationOperatorUserIds).toHaveBeenLastCalledWith([
+        "123456789012345678",
+        "223456789012345678",
+      ]);
+
+      discordMock.applicationOwner = {
+        ownerId: "323456789012345678",
+        members: new Map([
+          [
+            "former-admin",
+            {
+              id: "223456789012345678",
+              membershipState: 2,
+              role: "read_only",
+            },
+          ],
+        ]),
+      };
+      await vi.advanceTimersByTimeAsync(100);
+      expect(setApplicationOperatorUserIds).toHaveBeenLastCalledWith([
+        "123456789012345678",
+      ]);
+
+      discordMock.applicationOwner = {
+        ownerId: "223456789012345678",
+        members: new Map([
+          [
+            "admin",
+            {
+              id: "223456789012345678",
+              membershipState: 2,
+              role: "admin",
+            },
+          ],
+        ]),
+      };
+      await vi.advanceTimersByTimeAsync(100);
+      expect(setApplicationOperatorUserIds).toHaveBeenLastCalledWith([
+        "123456789012345678",
+        "223456789012345678",
+      ]);
+
+      discordMock.applicationFetch.mockRejectedValue(
+        new Error("Discord unavailable"),
+      );
+      await vi.advanceTimersByTimeAsync(250);
+      expect(handleError).toHaveBeenCalled();
+      expect(setApplicationOperatorUserIds).toHaveBeenLastCalledWith([
+        "123456789012345678",
+      ]);
+
+      await gateway.close();
+      const callsAfterClose = setApplicationOperatorUserIds.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(setApplicationOperatorUserIds).toHaveBeenCalledTimes(
+        callsAfterClose,
+      );
+    } finally {
+      await gateway.close();
+      vi.useRealTimers();
+    }
   });
 });

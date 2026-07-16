@@ -77,6 +77,18 @@ describe("Prod action runtime", () => {
     runtime.setApplicationOperatorUserIds(["operator-2"]);
     expect(runtime.isApplicationOperator("operator-1")).toBe(false);
     expect(runtime.isApplicationOperator("operator-2")).toBe(true);
+    const member = {
+      id: "operator-2",
+      guild: { id: "guild-1", ownerId: "owner-1" },
+      roles: { cache: new Map([["guild-1", { id: "guild-1" }]]) },
+      permissions: { has: () => false },
+    };
+    expect(
+      runtime.createUserAuthorizationSubject(member, { guildId: "guild-1" }),
+    ).toMatchObject({
+      subjectId: "operator-2",
+      attributes: { isApplicationOperator: true },
+    });
 
     const globalSet = vi.fn().mockResolvedValue(undefined);
     const guildSet = vi.fn().mockResolvedValue(undefined);

@@ -23,7 +23,7 @@ export type DiscordMemberLike = Readonly<{
 }>;
 
 export type CreateDiscordUserSubjectOptions = Readonly<{
-  applicationOperatorUserIds?: readonly string[];
+  isApplicationOperator?: (userId: string) => boolean;
 }>;
 
 export type DiscordCategoryLike = Readonly<{
@@ -133,7 +133,7 @@ export const createDiscordUserSubject = (
       isGuildOwner: member.id === member.guild.ownerId,
       isAdministrator: member.permissions.has("Administrator"),
       isApplicationOperator:
-        options.applicationOperatorUserIds?.includes(member.id) ?? false,
+        options.isApplicationOperator?.(member.id) ?? false,
     }),
   });
 };
