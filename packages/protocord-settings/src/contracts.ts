@@ -1,10 +1,7 @@
 import type {
   ButtonStyle,
   ChannelType,
-  GuildBasedChannel,
-  Role,
   TextInputStyle,
-  User,
 } from "discord.js";
 
 export type Awaitable<Value> = Value | Promise<Value>;
@@ -93,8 +90,20 @@ export type SettingsMentionableReference =
   | Readonly<{ kind: "role"; id: string }>;
 
 export type SettingsMentionable =
-  | Readonly<{ kind: "user"; id: string; user: User }>
-  | Readonly<{ kind: "role"; id: string; role: Role }>;
+  | Readonly<{
+      kind: "user";
+      id: string;
+      user: Readonly<{
+        id: string;
+        username: string;
+        globalName: string | null;
+      }>;
+    }>
+  | Readonly<{
+      kind: "role";
+      id: string;
+      role: Readonly<{ id: string; name: string }>;
+    }>;
 
 export type SettingsMentionableSelectView = SettingsFieldView &
   Readonly<{
@@ -120,7 +129,11 @@ export type SettingsMentionableSelectField<Context> =
 
 export type SettingsChannel = Readonly<{
   id: string;
-  channel: GuildBasedChannel;
+  channel: Readonly<{
+    id: string;
+    name: string;
+    type: ChannelType;
+  }>;
 }>;
 
 export type SettingsChannelSelectView = SettingsFieldView &
@@ -224,4 +237,3 @@ export function defineSettingsCategory<Context>(
 ): SettingsCategory<Context> {
   return category;
 }
-

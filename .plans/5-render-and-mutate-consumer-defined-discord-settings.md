@@ -18,7 +18,7 @@ Implement `@protocord/settings` as a deep, reusable Discord Components v2 runtim
 
 - [x] Define the public consumer contracts, definition validation, and versioned custom-ID codec.
 - [x] Render authorized category/subcategory navigation and bounded Components v2 field pages with pagination.
-- [ ] Dispatch Discord buttons, selects, mentionables, channels, and modal lifecycles through validation, mutation, and rerendering.
+- [x] Dispatch Discord buttons, selects, mentionables, channels, and modal lifecycles through validation, mutation, and rerendering.
 - [ ] Prove the complete package boundary with a synthetic consumer and run package/repository validation.
 
 ## Human validation
@@ -35,3 +35,4 @@ Implement `@protocord/settings` as a deep, reusable Discord Components v2 runtim
 - `@protocord/settings` may depend on Discord's public API types/runtime but must not import application code, package internals, ticketing concepts, permission verbs, models, or persistence.
 - Public-contract validation: package lint, typecheck, build, and 9 focused tests pass. Stable IDs are bounded for Discord custom IDs; category, subcategory, field, select, modal, and layout limits are exposed through `SETTINGS_LIMITS`; route decoding distinguishes unrelated, unknown-version, and malformed IDs.
 - Components v2 rendering validation: 13 focused tests pass. The renderer filters category navigation by fresh authorization decisions, renders consumer fields into a Components v2 container, partitions fields by their actual component cost, reserves pagination controls, caps containers at 10 components, and rejects stale locations or dynamic selects above 25 options.
+- Interaction-runtime validation: 22 focused tests pass. Opening replies ephemerally with the Components v2 flag; navigation and mutations update the original view; buttons, strings, mixed user/role mentionables, channels, and modal submissions recheck authorization; modal validation retains per-user drafts for retry; successful mutations rerender freshly loaded state; unrelated interactions are ignored and unknown, stale, mismatched, or unauthorized routes receive safe ephemeral responses.
