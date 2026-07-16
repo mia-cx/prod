@@ -1,6 +1,7 @@
 import {
   ApplicationCommandType,
   MessageFlags,
+  PermissionFlagsBits,
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
@@ -75,6 +76,7 @@ describe("Prod action runtime", () => {
         name: "settings",
         description: "Open the development settings validation surface",
         options: [],
+        defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
       },
       {
         type: ApplicationCommandType.Message,

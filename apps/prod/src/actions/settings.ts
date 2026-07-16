@@ -251,6 +251,9 @@ export function createSyntheticSettingsConsumer(
       slashCommand({
         name: "settings",
         description: "Open the development settings validation surface",
+        registration: {
+          defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
+        },
         parse: () => ({}),
         present: async () => undefined,
       }),
