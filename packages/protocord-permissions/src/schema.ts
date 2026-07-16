@@ -1,5 +1,11 @@
 import { sql } from "drizzle-orm";
-import { index, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const permissionsSchemaOwner = "@protocord/permissions" as const;
 
@@ -46,6 +52,7 @@ export const permissionRules = sqliteTable(
     createdByUserId: text("created_by_user_id").notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
+    active: integer({ mode: "boolean" }).notNull().default(true),
   },
   (table) => [
     uniqueIndex("protocord_permission_rules_identity").on(
@@ -62,6 +69,7 @@ export const permissionRules = sqliteTable(
       table.guildId,
       table.categoryId,
       table.channelId,
+      table.active,
     ),
   ],
 );
@@ -75,7 +83,7 @@ export const permissionRuleEvents = sqliteTable(
     channelId: text("channel_id"),
     ruleId: text("rule_id").notNull(),
     eventType: text("event_type", {
-      enum: ["created", "updated", "removed"],
+      enum: ["created", "updated", "removed", "restored"],
     }).notNull(),
     actorUserId: text("actor_user_id").notNull(),
     beforeJson: text("before_json"),

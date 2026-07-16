@@ -28,7 +28,7 @@ export type PermissionRuleEvent = Readonly<{
   id: string;
   context: AuthorizationContext;
   ruleId: string;
-  eventType: "created" | "updated" | "removed";
+  eventType: "created" | "updated" | "removed" | "restored";
   actorUserId: string;
   before: PermissionRule | null;
   after: PermissionRule | null;
@@ -109,6 +109,7 @@ const toRow = (rule: PermissionRule): typeof permissionRules.$inferInsert => ({
   createdByUserId: rule.createdByUserId,
   createdAt: rule.createdAt,
   updatedAt: rule.updatedAt,
+  active: true,
 });
 
 const serializeRule = (rule: PermissionRule | null): string | null =>
@@ -158,7 +159,9 @@ export const createSqlitePermissionRuleStore = (
     return database
       .select()
       .from(permissionRules)
-      .where(and(...contextConditions(context)))
+      .where(
+        and(...contextConditions(context), eq(permissionRules.active, true)),
+      )
       .all()
       .map(toRule);
   };
@@ -226,9 +229,9 @@ export const createSqlitePermissionRuleStore = (
           .run();
         writeEvent(
           transaction,
-          "updated",
+          matchingIdentity.active ? "updated" : "restored",
           input.actor.actorId,
-          before,
+          matchingIdentity.active ? before : null,
           after,
         );
       });
@@ -241,11 +244,13 @@ export const createSqlitePermissionRuleStore = (
       validatePermissionRuleActor(input.actor);
       database.transaction((transaction) => {
         const existing = transaction
-          .delete(permissionRules)
+          .update(permissionRules)
+          .set({ active: false })
           .where(
             and(
               eq(permissionRules.id, input.ruleId),
               ...contextConditions(input.context),
+              eq(permissionRules.active, true),
             ),
           )
           .returning()

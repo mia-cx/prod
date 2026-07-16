@@ -28,8 +28,9 @@ CREATE TABLE `protocord_permission_rules` (
 	`permit` text NOT NULL,
 	`created_by_user_id` text NOT NULL,
 	`created_at` text NOT NULL,
-	`updated_at` text NOT NULL
+	`updated_at` text NOT NULL,
+	`active` integer DEFAULT true NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `protocord_permission_rules_identity` ON `protocord_permission_rules` (`guild_id`,`category_scope`,`channel_scope`,`subject_type`,`subject_id`,`object_type`,`object_id`,`verb`);--> statement-breakpoint
-CREATE INDEX `protocord_permission_rules_context` ON `protocord_permission_rules` (`guild_id`,`category_id`,`channel_id`);
+CREATE INDEX `protocord_permission_rules_context` ON `protocord_permission_rules` (`guild_id`,`category_id`,`channel_id`,`active`);

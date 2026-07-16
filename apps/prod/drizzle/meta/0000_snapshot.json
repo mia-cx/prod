@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5c91014e-041b-4578-9e9c-1d161b217a84",
+  "id": "f1b48be5-3853-4626-b575-195adc728cd5",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "protocord_permission_rule_events": {
@@ -217,6 +217,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "active": {
+          "name": "active",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
         }
       },
       "indexes": {
@@ -239,7 +247,8 @@
           "columns": [
             "guild_id",
             "category_id",
-            "channel_id"
+            "channel_id",
+            "active"
           ],
           "isUnique": false
         }

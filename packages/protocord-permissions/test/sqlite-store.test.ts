@@ -66,7 +66,8 @@ describe("SQLite permission rule store", () => {
         permit text NOT NULL,
         created_by_user_id text NOT NULL,
         created_at text NOT NULL,
-        updated_at text NOT NULL
+        updated_at text NOT NULL,
+        active integer DEFAULT 1 NOT NULL
       );
       CREATE UNIQUE INDEX protocord_permission_rules_identity ON protocord_permission_rules (
         guild_id,
@@ -337,5 +338,74 @@ describe("SQLite permission rule store", () => {
       persistedRule(rule),
     ]);
     await expect(store.listEvents(rule.id)).resolves.toHaveLength(1);
+  });
+
+  it("retains removed ID ownership across guilds", async () => {
+    const original = fixtureRule();
+    await store.upsert({
+      context: original.context,
+      rule: original,
+      actor: actor("admin-1"),
+    });
+    await store.remove({
+      ruleId: original.id,
+      context: original.context,
+      actor: actor("admin-2"),
+    });
+    const unrelated = fixtureRule({
+      context: { guildId: "guild-2" },
+      subject: { subjectType: "role", subjectId: "role-2" },
+    });
+
+    await expect(
+      store.upsert({
+        context: unrelated.context,
+        rule: unrelated,
+        actor: actor("admin-3"),
+      }),
+    ).rejects.toBeInstanceOf(PermissionRuleConflictError);
+
+    await expect(store.listForContext(original.context)).resolves.toEqual([]);
+    await expect(store.listForContext(unrelated.context)).resolves.toEqual([]);
+    await expect(store.listEvents(original.id)).resolves.toHaveLength(2);
+  });
+
+  it("restores the same immutable identity with one coherent history", async () => {
+    const original = fixtureRule();
+    await store.upsert({
+      context: original.context,
+      rule: original,
+      actor: actor("admin-1"),
+    });
+    await store.remove({
+      ruleId: original.id,
+      context: original.context,
+      actor: actor("admin-2"),
+    });
+    currentTimestamp = updatedTimestamp;
+    const restoration: PermissionRuleInput = {
+      ...original,
+      id: "replacement-id",
+      permit: "deny",
+    };
+    await store.upsert({
+      context: restoration.context,
+      rule: restoration,
+      actor: actor("admin-3"),
+    });
+
+    await expect(store.listForContext(original.context)).resolves.toEqual([
+      persistedRule({ ...original, permit: "deny" }, "admin-1", updatedTimestamp),
+    ]);
+    await expect(store.listEvents(original.id)).resolves.toMatchObject([
+      { eventType: "created", actorUserId: "admin-1" },
+      { eventType: "removed", actorUserId: "admin-2" },
+      {
+        eventType: "restored",
+        actorUserId: "admin-3",
+        before: null,
+        after: { id: original.id, permit: "deny" },
+      },
+    ]);
   });
 });
