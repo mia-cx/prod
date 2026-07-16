@@ -1,0 +1,199 @@
+import { ButtonStyle, ComponentType } from "discord.js";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  createSettingsRenderer,
+  type SettingsDefinition,
+  type SettingsField,
+  type SettingsViewError,
+} from "../src/index.js";
+
+type Context = Readonly<{ userId: string }>;
+
+const displayField = (index: number): SettingsField<Context> => ({
+  kind: "display",
+  id: `field-${String(index)}`,
+  label: `Field ${String(index)}`,
+  load: () => ({ value: `Value ${String(index)}` }),
+});
+
+const definition = (
+  authorize = vi.fn((context: Context) => context.userId === "admin"),
+): SettingsDefinition<Context> => ({
+  title: "Synthetic settings",
+  accentColor: 0x5865f2,
+  categories: [
+    {
+      id: "setup",
+      label: "Setup",
+      description: "Configure the synthetic consumer.",
+      authorize,
+      subcategories: [
+        {
+          id: "general",
+          label: "General",
+          fields: [
+            {
+              kind: "button",
+              id: "refresh",
+              label: "Refresh",
+              style: ButtonStyle.Primary,
+              load: () => ({ value: "Ready", buttonLabel: "Run" }),
+              mutate: () => undefined,
+            },
+            {
+              kind: "string-select",
+              id: "mode",
+              label: "Mode",
+              load: () => ({
+                value: "Friendly",
+                selectedValues: ["friendly"],
+                options: [
+                  { label: "Friendly", value: "friendly" },
+                  { label: "Direct", value: "direct" },
+                ],
+              }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+        {
+          id: "large-page",
+          label: "Large page",
+          fields: Array.from({ length: 12 }, (_, index) => displayField(index)),
+        },
+      ],
+    },
+    {
+      id: "private",
+      label: "Private",
+      authorize: () => false,
+      subcategories: [
+        { id: "hidden", label: "Hidden", fields: [displayField(99)] },
+      ],
+    },
+    {
+      id: "labels",
+      label: "Labels",
+      authorize: () => true,
+      subcategories: [
+        { id: "active", label: "Active", fields: [displayField(98)] },
+      ],
+    },
+  ],
+});
+
+describe("Components v2 settings rendering", () => {
+  it("renders only authorized category navigation and consumer fields", async () => {
+    const authorize = vi.fn(() => true);
+    const renderer = createSettingsRenderer(definition(authorize));
+
+    const view = await renderer.render({}, { userId: "admin" });
+    const container = view.components[0];
+
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(container).toMatchObject({
+      type: ComponentType.Container,
+      accent_color: 0x5865f2,
+    });
+    expect(JSON.stringify(container)).toContain("Synthetic settings");
+    expect(JSON.stringify(container)).toContain("Refresh");
+    expect(JSON.stringify(container)).toContain("Friendly");
+    expect(JSON.stringify(container)).not.toContain("Private");
+    expect(view.location).toEqual({
+      categoryId: "setup",
+      subcategoryId: "general",
+      page: 0,
+      pageCount: 1,
+    });
+  });
+
+  it("paginates fields without exceeding Discord container limits", async () => {
+    const renderer = createSettingsRenderer(definition());
+
+    const first = await renderer.render(
+      { categoryId: "setup", subcategoryId: "large-page", page: 0 },
+      { userId: "admin" },
+    );
+    const second = await renderer.render(
+      { categoryId: "setup", subcategoryId: "large-page", page: 1 },
+      { userId: "admin" },
+    );
+    const firstContainer = first.components[0];
+    const secondContainer = second.components[0];
+
+    expect(first.location.pageCount).toBe(2);
+    expect(firstContainer?.type).toBe(ComponentType.Container);
+    expect(
+      firstContainer?.type === ComponentType.Container
+        ? firstContainer.components.length
+        : 0,
+    ).toBeLessThanOrEqual(10);
+    expect(JSON.stringify(firstContainer)).toContain("Page 1 of 2");
+    expect(JSON.stringify(secondContainer)).toContain("Page 2 of 2");
+    expect(JSON.stringify(firstContainer)).toContain("Field 0");
+    expect(JSON.stringify(secondContainer)).toContain("Field 11");
+  });
+
+  it("rejects unauthorized, stale, and out-of-range views", async () => {
+    const renderer = createSettingsRenderer(definition());
+
+    await expect(
+      renderer.render({ categoryId: "private" }, { userId: "admin" }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<SettingsViewError>>({
+        reason: "unauthorized",
+      }),
+    );
+    await expect(
+      renderer.render({ categoryId: "missing" }, { userId: "admin" }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<SettingsViewError>>({ reason: "stale" }),
+    );
+    await expect(
+      renderer.render(
+        { categoryId: "setup", subcategoryId: "large-page", page: 99 },
+        { userId: "admin" },
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<SettingsViewError>>({ reason: "stale" }),
+    );
+  });
+
+  it("enforces dynamic select-option limits", async () => {
+    const value = definition();
+    const setup = value.categories[0]!;
+    const general = setup.subcategories[0]!;
+    const oversized: SettingsDefinition<Context> = {
+      ...value,
+      categories: [
+        {
+          ...setup,
+          subcategories: [
+            {
+              ...general,
+              fields: [
+                {
+                  kind: "string-select",
+                  id: "too-many",
+                  label: "Too many",
+                  load: () => ({
+                    options: Array.from({ length: 26 }, (_, index) => ({
+                      label: String(index),
+                      value: String(index),
+                    })),
+                  }),
+                  mutate: () => undefined,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    await expect(
+      createSettingsRenderer(oversized).render({}, { userId: "admin" }),
+    ).rejects.toThrow(/at most 25 options/);
+  });
+});
