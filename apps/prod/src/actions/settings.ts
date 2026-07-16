@@ -16,6 +16,7 @@ import {
 import { slashCommand, type Action } from "protocord";
 
 import type { GuildSettingsStore } from "../guild-settings.js";
+import { createGuildSetupService } from "../guild-setup.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { ProdActionContext } from "./runtime.js";
 
@@ -59,6 +60,7 @@ export function createGuildSetupSettingsConsumer(
   store: GuildSettingsStore,
   supportHub: SupportHubDiscord,
 ): GuildSetupSettingsConsumer {
+  const setup = createGuildSetupService(store, supportHub);
   const authorize = async (context: GuildSetupSettingsContext) => {
     if (context.guild === undefined) {
       return {
@@ -66,7 +68,7 @@ export function createGuildSetupSettingsConsumer(
         reason: "Settings are available only inside a server.",
       };
     }
-    const state = await store.get(context.guild.id);
+    const state = await setup.get(context.guild.id);
     const isBootstrapAdministrator =
       context.isGuildOwner || context.isAdministrator;
     if (state.hubChannelId === undefined && !isBootstrapAdministrator) {
@@ -111,7 +113,7 @@ export function createGuildSetupSettingsConsumer(
                 description:
                   "Prod validates its effective permissions before applying the empty-hub privacy boundary.",
                 load: async (context) => {
-                  const state = await store.get(requireGuild(context).id);
+                  const state = await setup.get(requireGuild(context).id);
                   return {
                     value:
                       state.hubChannelId === undefined
@@ -130,7 +132,7 @@ export function createGuildSetupSettingsConsumer(
                   if (selected === undefined) {
                     return [issue("Select one support hub text channel.")];
                   }
-                  const result = await supportHub.validateHub(
+                  const result = await setup.validateHub(
                     requireGuild(context),
                     selected.id,
                   );
@@ -144,25 +146,8 @@ export function createGuildSetupSettingsConsumer(
                     ]);
                   }
                   const guild = requireGuild(context);
-                  const result = await supportHub.configureHub(
-                    guild,
-                    selected.id,
-                  );
+                  const result = await setup.configureHub(guild, selected.id);
                   if (!result.valid) return invalid(result.issues.map(issue));
-
-                  const previous = await store.get(guild.id);
-                  if (
-                    previous.hubChannelId !== undefined &&
-                    previous.hubChannelId !== selected.id &&
-                    previous.hubInformationMessageId !== undefined
-                  ) {
-                    await supportHub.deleteInformationMessage(
-                      guild,
-                      previous.hubChannelId,
-                      previous.hubInformationMessageId,
-                    );
-                  }
-                  await store.configureHub(guild.id, selected.id);
                   return { status: "success" as const };
                 },
               },
@@ -173,7 +158,7 @@ export function createGuildSetupSettingsConsumer(
                 description:
                   "Post the support instructions once, or refresh the existing bot-managed message.",
                 load: async (context) => {
-                  const state = await store.get(requireGuild(context).id);
+                  const state = await setup.get(requireGuild(context).id);
                   return {
                     value:
                       state.hubInformationMessageId === undefined
@@ -188,30 +173,11 @@ export function createGuildSetupSettingsConsumer(
                 },
                 mutate: async (context) => {
                   const guild = requireGuild(context);
-                  const state = await store.get(guild.id);
-                  if (state.hubChannelId === undefined) {
-                    return invalid([
-                      issue(
-                        "Configure a support hub before posting information.",
-                      ),
-                    ]);
-                  }
-                  const configured = await supportHub.configureHub(
-                    guild,
-                    state.hubChannelId,
-                  );
+                  const configured =
+                    await setup.refreshInformationMessage(guild);
                   if (!configured.valid) {
                     return invalid(configured.issues.map(issue));
                   }
-                  const messageId = await supportHub.upsertInformationMessage({
-                    guild,
-                    channelId: state.hubChannelId,
-                    assistantIdentity: state.assistantIdentity,
-                    ...(state.hubInformationMessageId === undefined
-                      ? {}
-                      : { messageId: state.hubInformationMessageId }),
-                  });
-                  await store.setHubInformationMessage(guild.id, messageId);
                   return { status: "success" as const };
                 },
               },
@@ -247,7 +213,7 @@ export function createGuildSetupSettingsConsumer(
                   },
                 ],
                 load: async (context) => {
-                  const value = (await store.get(requireGuild(context).id))
+                  const value = (await setup.get(requireGuild(context).id))
                     .assistantIdentity;
                   return {
                     value,
@@ -265,7 +231,7 @@ export function createGuildSetupSettingsConsumer(
                       ]
                     : [],
                 mutate: async (values, context) => {
-                  await store.setAssistantIdentity(
+                  await setup.setAssistantIdentity(
                     requireGuild(context).id,
                     values.identity!,
                   );
@@ -286,7 +252,7 @@ export function createGuildSetupSettingsConsumer(
                   },
                 ],
                 load: async (context) => {
-                  const value = (await store.get(requireGuild(context).id))
+                  const value = (await setup.get(requireGuild(context).id))
                     .tone;
                   return {
                     value,
@@ -304,7 +270,7 @@ export function createGuildSetupSettingsConsumer(
                       ]
                     : [],
                 mutate: async (values, context) => {
-                  await store.setTone(requireGuild(context).id, values.tone!);
+                  await setup.setTone(requireGuild(context).id, values.tone!);
                 },
               },
             ],

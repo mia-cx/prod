@@ -7,6 +7,7 @@ import {
   DEFAULT_ASSISTANT_TONE,
   GuildNotConfiguredError,
 } from "../src/guild-settings.js";
+import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import { applyMigrations } from "../src/migrations.js";
 
 const createStore = async () => {
@@ -20,6 +21,24 @@ const createStore = async () => {
     }),
   };
 };
+
+const ownership = (channelId: string): HubPermissionOwnership => ({
+  version: 1,
+  channelId,
+  botMemberId: "bot-1",
+  everyone: {
+    SendMessages: "unset",
+    SendMessagesInThreads: "unset",
+    CreatePublicThreads: "unset",
+    CreatePrivateThreads: "unset",
+  },
+  bot: {
+    SendMessages: "unset",
+    SendMessagesInThreads: "unset",
+    CreatePublicThreads: "unset",
+    CreatePrivateThreads: "unset",
+  },
+});
 
 describe("SQLite guild settings", () => {
   it("loads defaults without configuring or writing a guild", async () => {
@@ -57,7 +76,7 @@ describe("SQLite guild settings", () => {
   it("persists the hub, message, identity, and tone across store instances", async () => {
     const { connection, store } = await createStore();
     try {
-      await store.configureHub("guild-1", "channel-1");
+      await store.configureHub("guild-1", "channel-1", ownership("channel-1"));
       await store.setHubInformationMessage("guild-1", "message-1");
       await store.setAssistantIdentity("guild-1", "Support Guide");
       await store.setTone("guild-1", "Warm, direct, and brief");
@@ -70,6 +89,7 @@ describe("SQLite guild settings", () => {
         initialized: true,
         hubChannelId: "channel-1",
         hubInformationMessageId: "message-1",
+        hubPermissionOwnership: ownership("channel-1"),
         assistantIdentity: "Support Guide",
         tone: "Warm, direct, and brief",
       });
@@ -81,14 +101,14 @@ describe("SQLite guild settings", () => {
   it("keeps a message on idempotent hub writes and clears it on hub changes", async () => {
     const { connection, store } = await createStore();
     try {
-      await store.configureHub("guild-1", "channel-1");
+      await store.configureHub("guild-1", "channel-1", ownership("channel-1"));
       await store.setHubInformationMessage("guild-1", "message-1");
-      await store.configureHub("guild-1", "channel-1");
+      await store.configureHub("guild-1", "channel-1", ownership("channel-1"));
       expect((await store.get("guild-1")).hubInformationMessageId).toBe(
         "message-1",
       );
 
-      await store.configureHub("guild-1", "channel-2");
+      await store.configureHub("guild-1", "channel-2", ownership("channel-2"));
       expect(await store.get("guild-1")).toMatchObject({
         hubChannelId: "channel-2",
       });

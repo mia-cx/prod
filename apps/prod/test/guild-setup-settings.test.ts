@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createProdActionRuntime } from "../src/actions/runtime.js";
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
+import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import { createLogger } from "../src/logger.js";
 import { applyMigrations } from "../src/migrations.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
@@ -27,6 +28,24 @@ const operatorId = "123456789012345676";
 
 const connections: DatabaseConnection[] = [];
 
+const ownership = (channelId = hubChannelId): HubPermissionOwnership => ({
+  version: 1,
+  channelId,
+  botMemberId: "bot-1",
+  everyone: {
+    SendMessages: "unset",
+    SendMessagesInThreads: "unset",
+    CreatePublicThreads: "unset",
+    CreatePrivateThreads: "unset",
+  },
+  bot: {
+    SendMessages: "unset",
+    SendMessagesInThreads: "unset",
+    CreatePublicThreads: "unset",
+    CreatePrivateThreads: "unset",
+  },
+});
+
 afterEach(() => {
   for (const connection of connections.splice(0)) connection.close();
 });
@@ -38,7 +57,12 @@ const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
   const store = createSqliteGuildSettingsStore(connection.database);
   const supportHub: SupportHubDiscord = {
     validateHub: vi.fn(async () => ({ valid: true as const })),
-    configureHub: vi.fn(async () => ({ valid: true as const })),
+    configureHub: vi.fn(async (_guild, channelId, existingOwnership) => ({
+      valid: true as const,
+      permissionOwnership: existingOwnership ?? ownership(channelId),
+    })),
+    restoreHub: vi.fn(async () => undefined),
+    releaseHub: vi.fn(async () => undefined),
     upsertInformationMessage: vi.fn(async () => informationMessageId),
     deleteInformationMessage: vi.fn(async () => undefined),
     ...overrides,
@@ -226,7 +250,10 @@ describe("guild setup settings integration", () => {
       valid: false as const,
       issues: ["Prod is missing required permissions in this channel."],
     }));
-    const configureHub = vi.fn(async () => ({ valid: true as const }));
+    const configureHub = vi.fn(async () => ({
+      valid: true as const,
+      permissionOwnership: ownership(),
+    }));
     const { runtime, store } = await setup({ validateHub, configureHub });
     const select = component("channel", hubRoute);
 
@@ -243,7 +270,7 @@ describe("guild setup settings integration", () => {
   it("persists one information message ID across repeated refreshes", async () => {
     const upsertInformationMessage = vi.fn(async () => informationMessageId);
     const { runtime, store } = await setup({ upsertInformationMessage });
-    await store.configureHub(guildId, hubChannelId);
+    await store.configureHub(guildId, hubChannelId, ownership());
 
     const first = component("button", informationRoute);
     await runtime.handleInteraction(first as unknown as Interaction);
@@ -268,7 +295,7 @@ describe("guild setup settings integration", () => {
 
   it("persists and rerenders assistant identity and tone", async () => {
     const { connection, runtime, store } = await setup();
-    await store.configureHub(guildId, hubChannelId);
+    await store.configureHub(guildId, hubChannelId, ownership());
 
     const identity = component("modal", modalRoute("assistant-identity"), {
       modalValue: "  Support Guide  ",

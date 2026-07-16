@@ -12,6 +12,7 @@ import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
 
 import type { GuildSettingsStore } from "../src/guild-settings.js";
+import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import {
   createProdActionRuntime,
   logProdActionResult,
@@ -20,11 +21,29 @@ import { createLogger } from "../src/logger.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
 
 const noMentions = { parse: [], repliedUser: false };
+const permissionOwnership: HubPermissionOwnership = {
+  version: 1,
+  channelId: "123456789012345678",
+  botMemberId: "bot-1",
+  everyone: {
+    SendMessages: "unset",
+    SendMessagesInThreads: "unset",
+    CreatePublicThreads: "unset",
+    CreatePrivateThreads: "unset",
+  },
+  bot: {
+    SendMessages: "unset",
+    SendMessagesInThreads: "unset",
+    CreatePublicThreads: "unset",
+    CreatePrivateThreads: "unset",
+  },
+};
 const guildSettingsStore: GuildSettingsStore = {
   get: async (guildId) => ({
     guildId,
     initialized: true,
     hubChannelId: "123456789012345678",
+    hubPermissionOwnership: permissionOwnership,
     assistantIdentity: "Prod",
     tone: "friendly, patient, and concise",
   }),
@@ -36,7 +55,9 @@ const guildSettingsStore: GuildSettingsStore = {
 };
 const supportHubDiscord: SupportHubDiscord = {
   validateHub: async () => ({ valid: true }),
-  configureHub: async () => ({ valid: true }),
+  configureHub: async () => ({ valid: true, permissionOwnership }),
+  restoreHub: async () => undefined,
+  releaseHub: async () => undefined,
   upsertInformationMessage: async () => "message-1",
   deleteInformationMessage: async () => undefined,
 };

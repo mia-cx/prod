@@ -1,6 +1,10 @@
 import { and, eq } from "drizzle-orm";
 
 import type { ProdDatabase } from "./database.js";
+import {
+  parseHubPermissionOwnership,
+  type HubPermissionOwnership,
+} from "./hub-permission-ownership.js";
 import { guildSettings } from "./schema.js";
 
 export const DEFAULT_ASSISTANT_IDENTITY = "Prod";
@@ -13,12 +17,17 @@ export type GuildSetupSettings = Readonly<{
   tone: string;
   hubChannelId?: string;
   hubInformationMessageId?: string;
+  hubPermissionOwnership?: HubPermissionOwnership;
 }>;
 
 export interface GuildSettingsStore {
   get(guildId: string): Promise<GuildSetupSettings>;
   initialize(guildId: string): Promise<void>;
-  configureHub(guildId: string, channelId: string): Promise<void>;
+  configureHub(
+    guildId: string,
+    channelId: string,
+    permissionOwnership: HubPermissionOwnership,
+  ): Promise<void>;
   setHubInformationMessage(guildId: string, messageId: string): Promise<void>;
   setAssistantIdentity(guildId: string, identity: string): Promise<void>;
   setTone(guildId: string, tone: string): Promise<void>;
@@ -103,6 +112,21 @@ export const createSqliteGuildSettingsStore = (
       );
       const hubChannelId = values.get("hub_channel_id");
       const hubInformationMessageId = values.get("hub_information_message_id");
+      const serializedOwnership = values.get("hub_permission_ownership");
+      const hubPermissionOwnership =
+        serializedOwnership === undefined
+          ? undefined
+          : parseHubPermissionOwnership(serializedOwnership);
+      if (
+        (hubChannelId === undefined) !==
+          (hubPermissionOwnership === undefined) ||
+        (hubChannelId !== undefined &&
+          hubPermissionOwnership?.channelId !== hubChannelId)
+      ) {
+        throw new TypeError(
+          "Stored support hub channel and permission ownership disagree",
+        );
+      }
       return Object.freeze({
         guildId,
         initialized: values.get("initialized") === "1",
@@ -113,6 +137,9 @@ export const createSqliteGuildSettingsStore = (
         ...(hubInformationMessageId === undefined
           ? {}
           : { hubInformationMessageId }),
+        ...(hubPermissionOwnership === undefined
+          ? {}
+          : { hubPermissionOwnership }),
       });
     },
     initialize: async (guildId: string): Promise<void> => {
@@ -121,9 +148,18 @@ export const createSqliteGuildSettingsStore = (
         insertDefaultRows(transaction, guildId, now());
       });
     },
-    configureHub: async (guildId: string, channelId: string): Promise<void> => {
+    configureHub: async (
+      guildId: string,
+      channelId: string,
+      permissionOwnership: HubPermissionOwnership,
+    ): Promise<void> => {
       assertId("guildId", guildId);
       assertId("channelId", channelId);
+      if (permissionOwnership.channelId !== channelId) {
+        throw new TypeError(
+          "Hub permission ownership must belong to the configured channel",
+        );
+      }
       database.transaction((transaction) => {
         const timestamp = now();
         insertDefaultRows(transaction, guildId, timestamp);
@@ -138,6 +174,13 @@ export const createSqliteGuildSettingsStore = (
           )
           .get();
         upsert(transaction, guildId, "hub_channel_id", channelId, timestamp);
+        upsert(
+          transaction,
+          guildId,
+          "hub_permission_ownership",
+          JSON.stringify(permissionOwnership),
+          timestamp,
+        );
         if (previous !== undefined && previous.value !== channelId) {
           transaction
             .delete(guildSettings)
