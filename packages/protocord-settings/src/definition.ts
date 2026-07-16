@@ -13,6 +13,8 @@ export const SETTINGS_LIMITS = Object.freeze({
   customIdLength: 100,
   containerComponents: 10,
   actionRowButtons: 5,
+  textDisplayCharacters: 4_000,
+  textDisplayCharactersPerMessage: 4_000,
 });
 
 const STABLE_ID = /^[a-z0-9][a-z0-9_-]{0,23}$/;
@@ -217,4 +219,3 @@ function assertOptionalText(
 function fail(message: string): never {
   throw new SettingsDefinitionError(message);
 }
-

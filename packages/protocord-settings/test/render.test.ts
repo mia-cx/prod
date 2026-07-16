@@ -27,6 +27,19 @@ function customIds(value: unknown): readonly string[] {
   ];
 }
 
+function textDisplayContents(value: unknown): readonly string[] {
+  if (Array.isArray(value)) return value.flatMap(textDisplayContents);
+  if (value === null || typeof value !== "object") return [];
+  const record = value as Readonly<Record<string, unknown>>;
+  return [
+    ...(record.type === ComponentType.TextDisplay &&
+    typeof record.content === "string"
+      ? [record.content]
+      : []),
+    ...Object.values(record).flatMap(textDisplayContents),
+  ];
+}
+
 const definition = (
   authorize = vi.fn((context: Context) => context.userId === "admin"),
 ): SettingsDefinition<Context> => ({
@@ -426,5 +439,50 @@ describe("Components v2 settings rendering", () => {
     const rendered = await renderer.render({}, { userId: "admin" });
 
     expect(JSON.stringify(rendered.components)).not.toContain("default_values");
+  });
+
+  it("fits composed text displays within Discord's shared message budget", async () => {
+    const renderer = createSettingsRenderer({
+      title: "Text budgets",
+      categories: [
+        {
+          id: "category",
+          label: "Category heading",
+          description: "c".repeat(4_000),
+          authorize: () => true,
+          subcategories: [
+            {
+              id: "subcategory",
+              label: "Subcategory heading",
+              description: "s".repeat(4_000),
+              fields: [
+                {
+                  kind: "display",
+                  id: "field",
+                  label: "Field heading",
+                  description: "d".repeat(4_000),
+                  load: () => ({ value: "v".repeat(4_000) }),
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render({}, { userId: "admin" });
+    const contents = textDisplayContents(rendered.components);
+
+    expect(contents).toHaveLength(4);
+    expect(contents.every((content) => content.length <= 4_000)).toBe(true);
+    expect(contents.reduce((total, content) => total + content.length, 0)).toBe(
+      4_000,
+    );
+    expect(contents).toEqual([
+      expect.stringContaining("Text budgets"),
+      expect.stringContaining("Category heading"),
+      expect.stringContaining("Subcategory heading"),
+      expect.stringContaining("Field heading"),
+    ]);
   });
 });

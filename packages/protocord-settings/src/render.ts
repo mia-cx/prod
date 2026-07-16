@@ -159,16 +159,14 @@ async function renderSettingsView<Context>(
   if (fieldPages.length > 1) {
     subcategoryChildren.push(pageNavigation(location));
   }
+  const components: APIMessageTopLevelComponent[] = [
+    container("home", homeChildren, definition.accentColor),
+    container("category", categoryChildren, definition.accentColor),
+    container("subcategory", subcategoryChildren, definition.accentColor),
+  ];
+  constrainTextDisplays(components);
   return {
-    components: [
-      container("home", homeChildren, definition.accentColor),
-      container("category", categoryChildren, definition.accentColor),
-      container(
-        "subcategory",
-        subcategoryChildren,
-        definition.accentColor,
-      ),
-    ],
+    components,
     location,
   };
 }
@@ -605,13 +603,40 @@ function container(
 }
 
 function textDisplay(content: string): APITextDisplayComponent {
-  if (content.length > 4_000) {
-    throw new SettingsViewError(
-      "invalid-view",
-      "settings text display exceeds 4000 characters",
+  return {
+    type: ComponentType.TextDisplay,
+    content: truncate(content, SETTINGS_LIMITS.textDisplayCharacters),
+  };
+}
+
+function constrainTextDisplays(
+  components: readonly APIMessageTopLevelComponent[],
+): void {
+  const displays = findTextDisplays(components);
+  let remaining = SETTINGS_LIMITS.textDisplayCharactersPerMessage;
+
+  for (const [index, display] of displays.entries()) {
+    const displaysRemaining = displays.length - index;
+    const fairShare = Math.floor(remaining / displaysRemaining);
+    display.content = truncate(
+      display.content,
+      Math.min(SETTINGS_LIMITS.textDisplayCharacters, fairShare),
     );
+    remaining -= display.content.length;
   }
-  return { type: ComponentType.TextDisplay, content };
+}
+
+function findTextDisplays(value: unknown): APITextDisplayComponent[] {
+  if (Array.isArray(value)) return value.flatMap(findTextDisplays);
+  if (value === null || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  if (
+    record.type === ComponentType.TextDisplay &&
+    typeof record.content === "string"
+  ) {
+    return [record as unknown as APITextDisplayComponent];
+  }
+  return Object.values(record).flatMap(findTextDisplays);
 }
 
 function nodeHeading(label: string, description: string | undefined): string {
@@ -626,8 +651,8 @@ function fieldText<Context>(
 ): string {
   return [
     `### ${field.label}`,
-    field.description,
     value === undefined ? undefined : `**Current:** ${value}`,
+    field.description,
   ]
     .filter((part) => part !== undefined)
     .join("\n");
