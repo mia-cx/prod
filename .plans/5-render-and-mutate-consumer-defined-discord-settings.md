@@ -16,7 +16,7 @@ Implement `@protocord/settings` as a deep, reusable Discord Components v2 runtim
 
 ## TODOs
 
-- [ ] Define the public consumer contracts, definition validation, and versioned custom-ID codec.
+- [x] Define the public consumer contracts, definition validation, and versioned custom-ID codec.
 - [ ] Render authorized category/subcategory navigation and bounded Components v2 field pages with pagination.
 - [ ] Dispatch Discord buttons, selects, mentionables, channels, and modal lifecycles through validation, mutation, and rerendering.
 - [ ] Prove the complete package boundary with a synthetic consumer and run package/repository validation.
@@ -33,3 +33,4 @@ Implement `@protocord/settings` as a deep, reusable Discord Components v2 runtim
 - This session already runs in the clean T3-managed `t3code/slice-four-issue-five` worktree at `origin/main`, so no nested worktree is needed.
 - The mandatory real-Discord validation remains HITL. The implementation and PR must leave issue #5 open until that checklist is completed and recorded.
 - `@protocord/settings` may depend on Discord's public API types/runtime but must not import application code, package internals, ticketing concepts, permission verbs, models, or persistence.
+- Public-contract validation: package lint, typecheck, build, and 9 focused tests pass. Stable IDs are bounded for Discord custom IDs; category, subcategory, field, select, modal, and layout limits are exposed through `SETTINGS_LIMITS`; route decoding distinguishes unrelated, unknown-version, and malformed IDs.
