@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, isNull, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 
 import type {
@@ -23,6 +23,10 @@ import {
 } from "./validation.js";
 
 type PermissionRuleRow = typeof permissionRules.$inferSelect;
+const eventOrder = [
+  asc(permissionRuleEvents.createdAt),
+  asc(permissionRuleEvents.id),
+] as const;
 
 export type PermissionRuleEvent = Readonly<{
   id: string;
@@ -281,11 +285,16 @@ export const createSqlitePermissionRuleStore = (
     ): Promise<readonly PermissionRuleEvent[]> => {
       const rows =
         ruleId === undefined
-          ? database.select().from(permissionRuleEvents).all()
+          ? database
+              .select()
+              .from(permissionRuleEvents)
+              .orderBy(...eventOrder)
+              .all()
           : database
               .select()
               .from(permissionRuleEvents)
               .where(eq(permissionRuleEvents.ruleId, ruleId))
+              .orderBy(...eventOrder)
               .all();
       return rows.map((row) => ({
         id: row.id,

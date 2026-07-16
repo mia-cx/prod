@@ -231,6 +231,44 @@ describe("SQLite permission rule store", () => {
     ]);
   });
 
+  it("orders complete and rule-specific audit histories deterministically", async () => {
+    const first = fixtureRule();
+    currentTimestamp = updatedTimestamp;
+    await store.upsert({
+      context: first.context,
+      rule: first,
+      actor: actor("admin-1"),
+    });
+
+    currentTimestamp = timestamp;
+    await store.upsert({
+      context: first.context,
+      rule: { ...first, permit: "deny" },
+      actor: actor("admin-2"),
+    });
+
+    currentTimestamp = "2026-07-16T09:00:00.000Z";
+    const second = fixtureRule({
+      id: "rule-2",
+      subject: { subjectType: "role", subjectId: "role-2" },
+    });
+    await store.upsert({
+      context: second.context,
+      rule: second,
+      actor: actor("admin-3"),
+    });
+
+    await expect(store.listEvents(first.id)).resolves.toMatchObject([
+      { id: "event-2", eventType: "updated", createdAt: timestamp },
+      { id: "event-1", eventType: "created", createdAt: updatedTimestamp },
+    ]);
+    await expect(store.listEvents()).resolves.toMatchObject([
+      { id: "event-3", ruleId: second.id },
+      { id: "event-2", ruleId: first.id },
+      { id: "event-1", ruleId: first.id },
+    ]);
+  });
+
   it("rejects an ID collision across identities without changing state or audit", async () => {
     const guildOneRule = fixtureRule();
     const guildTwoRule = fixtureRule({
