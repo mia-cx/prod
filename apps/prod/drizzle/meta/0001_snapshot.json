@@ -1,16 +1,23 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f1b48be5-3853-4626-b575-195adc728cd5",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "089e3e5c-6961-4951-8b2f-94c4ac9b5a36",
+  "prevId": "f1b48be5-3853-4626-b575-195adc728cd5",
   "tables": {
     "protocord_permission_rule_events": {
       "name": "protocord_permission_rule_events",
       "columns": {
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
         "id": {
           "name": "id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -79,11 +86,18 @@
         }
       },
       "indexes": {
+        "protocord_permission_rule_events_id": {
+          "name": "protocord_permission_rule_events_id",
+          "columns": [
+            "id"
+          ],
+          "isUnique": true
+        },
         "protocord_permission_rule_events_rule": {
           "name": "protocord_permission_rule_events_rule",
           "columns": [
             "rule_id",
-            "created_at"
+            "sequence"
           ],
           "isUnique": false
         },
