@@ -10,6 +10,7 @@ import { createLogger } from "../src/logger.js";
 const config: ProdConfig = {
   discordToken: "development-secret-token",
   discordClientId: "123456789012345678",
+  botOperatorUserIds: ["223456789012345678"],
   textCommandPrefix: "!",
   databaseUrl: ":memory:",
   logLevel: "debug",
@@ -39,7 +40,11 @@ describe("startProd", () => {
       connect: vi.fn(async (token) => {
         expect(token).toBe(config.discordToken);
         sequence.push("connect");
-        return { userId: "345678901234567890", tag: "Prod#0001" };
+        return {
+          userId: "345678901234567890",
+          tag: "Prod#0001",
+          applicationOperatorUserIds: ["223456789012345678"],
+        };
       }),
       close: vi.fn(async () => {
         sequence.push("gateway:close");
@@ -63,6 +68,7 @@ describe("startProd", () => {
     expect(sequence).toEqual(["migrate", "connect"]);
     expect(output.join("")).toContain("Prod ready");
     expect(output.join("")).toContain('"actionCount":2');
+    expect(output.join("")).toContain('"applicationOperatorCount":1');
     expect(output.join("")).not.toContain(config.discordToken);
 
     await application.stop("test");
@@ -103,6 +109,7 @@ describe("startProd", () => {
       connect: vi.fn(async () => ({
         userId: "345678901234567890",
         tag: "Prod#0001",
+        applicationOperatorUserIds: [],
       })),
       close: vi.fn(async () => undefined),
     };

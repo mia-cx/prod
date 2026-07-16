@@ -1,6 +1,12 @@
 import type { ApplicationCommandData, Interaction, Message } from "discord.js";
 import type { Logger } from "pino";
 import {
+  createDiscordUserSubject,
+  type AuthorizationContext,
+  type DiscordMemberLike,
+  type UserAuthorizationSubject,
+} from "@protocord/permissions";
+import {
   createActionRegistry,
   createDiscordInteractionProviders,
   createTextCommandProvider,
@@ -18,6 +24,11 @@ import { createSyntheticSettingsConsumer } from "./settings.js";
 
 export type ProdActionContext = Readonly<{
   logger: Logger;
+  isApplicationOperator: (userId: string) => boolean;
+  createUserAuthorizationSubject: (
+    member: DiscordMemberLike,
+    context: AuthorizationContext,
+  ) => UserAuthorizationSubject;
   replyToTextCommand?: (content: string) => Promise<void>;
 }>;
 
@@ -25,6 +36,9 @@ export type ProdActionRuntime = DiscordActionSurface &
   Readonly<{
     actionCount: number;
     commands: readonly ApplicationCommandData[];
+    isApplicationOperator: (userId: string) => boolean;
+    createUserAuthorizationSubject: ProdActionContext["createUserAuthorizationSubject"];
+    setApplicationOperatorUserIds: (userIds: readonly string[]) => void;
   }>;
 
 export type ProdActionRuntimeOptions = Readonly<{
@@ -35,8 +49,21 @@ export const createProdActionRuntime = (
   logger: Logger,
   options: ProdActionRuntimeOptions,
 ): ProdActionRuntime => {
-  const context: ProdActionContext = { logger };
-  const settings = createSyntheticSettingsConsumer(logger);
+  const applicationOperatorUserIds = new Set<string>();
+  const isApplicationOperator = (userId: string): boolean =>
+    applicationOperatorUserIds.has(userId);
+  const createUserAuthorizationSubject: ProdActionContext["createUserAuthorizationSubject"] =
+    (member, context) =>
+      createDiscordUserSubject(member, context, { isApplicationOperator });
+  const context: ProdActionContext = {
+    logger,
+    isApplicationOperator,
+    createUserAuthorizationSubject,
+  };
+  const settings = createSyntheticSettingsConsumer(
+    logger,
+    isApplicationOperator,
+  );
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,
     present: async (_trigger, _message, outcome, presentationContext) => {
@@ -73,6 +100,8 @@ export const createProdActionRuntime = (
           },
           context: {
             logger,
+            isApplicationOperator,
+            createUserAuthorizationSubject,
             replyToTextCommand: async (content) => {
               await message.reply({
                 content,
@@ -91,6 +120,12 @@ export const createProdActionRuntime = (
   return Object.freeze({
     actionCount: registry.actions.length,
     commands: getDiscordCommandRegistration(registry),
+    isApplicationOperator,
+    createUserAuthorizationSubject,
+    setApplicationOperatorUserIds: (userIds) => {
+      applicationOperatorUserIds.clear();
+      for (const userId of userIds) applicationOperatorUserIds.add(userId);
+    },
     refreshCommands: (client) => registerDiscordCommands(client, registry),
     handleInteraction: async (interaction: Interaction) => {
       const settingsResult = await settings.handle(interaction);

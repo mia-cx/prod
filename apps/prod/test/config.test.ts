@@ -12,6 +12,7 @@ describe("loadConfig", () => {
     expect(loadConfig(requiredEnvironment)).toEqual({
       discordToken: "development-secret-token",
       discordClientId: "123456789012345678",
+      botOperatorUserIds: [],
       textCommandPrefix: "",
       databaseUrl: "file:./data/prod.sqlite",
       logLevel: "info",
@@ -31,6 +32,16 @@ describe("loadConfig", () => {
       databaseUrl: ":memory:",
       logLevel: "debug",
     });
+  });
+
+  it("normalizes and deduplicates CSV bot operator user IDs", () => {
+    expect(
+      loadConfig({
+        ...requiredEnvironment,
+        BOT_OPERATOR_USER_IDS:
+          " 223456789012345678,123456789012345678,223456789012345678 ",
+      }).botOperatorUserIds,
+    ).toEqual(["123456789012345678", "223456789012345678"]);
   });
 
   it("reports the invalid key without echoing its secret value", () => {
@@ -53,5 +64,12 @@ describe("loadConfig", () => {
     } catch (error) {
       expect(String(error)).not.toContain(secret);
     }
+
+    expect(() =>
+      loadConfig({
+        ...requiredEnvironment,
+        BOT_OPERATOR_USER_IDS: "123456789012345678,not-a-snowflake",
+      }),
+    ).toThrow(new ConfigurationError("BOT_OPERATOR_USER_IDS is invalid"));
   });
 });

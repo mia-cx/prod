@@ -28,6 +28,7 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
+        "BOT_OPERATOR_USER_IDS",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",
@@ -48,6 +49,7 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
+        "BOT_OPERATOR_USER_IDS",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",
@@ -74,6 +76,7 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
+        "BOT_OPERATOR_USER_IDS",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",
@@ -92,6 +95,7 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
+        "BOT_OPERATOR_USER_IDS",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",
@@ -111,6 +115,7 @@
       "passThroughEnv": [
         "DISCORD_TOKEN",
         "DISCORD_CLIENT_ID",
+        "BOT_OPERATOR_USER_IDS",
         "TEXT_COMMAND_PREFIX",
         "DATABASE_URL",
         "LOG_LEVEL",

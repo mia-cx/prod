@@ -56,6 +56,7 @@ export const startProd = async (
     dependencies.gateway ??
     createDiscordGateway({
       actions,
+      configuredApplicationOperatorUserIds: config.botOperatorUserIds,
     });
   const connection = (dependencies.openDatabase ?? openDatabase)(
     config.databaseUrl,
@@ -78,6 +79,7 @@ export const startProd = async (
       {
         discordUserId: identity.userId,
         discordUserTag: identity.tag,
+        applicationOperatorCount: identity.applicationOperatorUserIds.length,
         actionCount: actions.actionCount,
       },
       "Prod ready",

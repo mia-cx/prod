@@ -390,6 +390,8 @@ type AuthorizationSubject =
         discordRoleIds: readonly string[];
         isGuildOwner: boolean;
         isAdministrator: boolean;
+        canManageGuild: boolean;
+        isApplicationOperator: boolean;
       };
     }
   | {
@@ -446,6 +448,8 @@ type AuthorizationDecision = {
   reason:
     | "guild_owner"
     | "administrator"
+    | "manage_guild"
+    | "application_operator"
     | "matched_rule"
     | "default_deny";
   matchedRuleIds: readonly string[];
@@ -512,6 +516,10 @@ Evaluate rules from most significant to least significant:
 At each subject layer, deny wins if both allow and deny matches are present; otherwise allow wins if present. This is especially relevant when a user has multiple matching Discord roles. A resolved higher layer always overrides every lower layer: for example, an exact user allow overrides a role deny in the same object/context layer, and a channel role deny overrides a guild user allow. A layer with no matching rule falls through to the next layer.
 
 Guild owners and Discord administrators are immutable break-glass administrators and bypass stored denies. Authorization and domain availability remain separate. For example, an administrator may be authorized to resume triage while the action still rejects resuming a closed ticket.
+
+Users with Discord's Manage Server permission may bypass stored denies only for `manage` checks on the guild-scoped `settings` and `permissions` objects. This native capability does not grant ticket or queue permissions.
+
+Configured bot operators and privileged members of the Discord Team that owns the application are application-level break-glass administrators. Discord-derived Team authority is refreshed and expires fail-closed; explicit environment configuration remains authoritative until restart.
 
 ### Rule storage boundary
 
@@ -757,22 +765,22 @@ Tool visibility is never treated as authorization. Every tool execution still ru
 
 Initial Prod actions, all implemented and composed in `apps/prod`:
 
-| Action | Slash trigger | Optional text trigger | AI tool | Required verb |
-|---|---|---|---|---|
-| `create_ticket` | `/issue`, `/report`, `/debugshare` | `issue`, `report`, `debugshare` | No | Guild membership |
-| `view_ticket_queue` | `/tickets` | None | No | `queue/*` + `view` |
-| `view_ticket_info` | `/ticket-info [ticket]` | None | No | `ticket/<id>` + `view_metadata` |
-| `claim_ticket` | `/claim [ticket]` | None | No | `ticket/<id>` + `claim_self` |
-| `unclaim_ticket` | `/unclaim [ticket]` | None | No | `ticket/<id>` + `unclaim_self` |
-| `assign_ticket` | `/assign user [ticket]` | None | No | `ticket/<id>` + `assign_other` |
-| `unassign_ticket` | `/unassign user [ticket]` | None | No | `ticket/<id>` + `unassign_other` |
-| `change_ticket_label` | `/label add\|remove <label> [ticket]` | None | Add/remove label | `ticket/<id>` + `label` |
-| `suggest_assignee` | None | None | Suggest assignees | `ticket/<id>` + `suggest_assignee` |
-| `complete_triage` | None | None | Complete triage | `ticket/<id>` + `complete_triage` |
-| `close_ticket` | `/close [ticket] [reason]` | None | No | `ticket/<id>` + `close` |
-| `reopen_ticket` | `/reopen <ticket>` | None | No | `ticket/<id>` + `reopen` |
-| `set_triage_mode` | `/triage pause\|resume [ticket]` | None | No | Corresponding triage verb |
-| `open_settings` | `/settings` | None | No | `settings/*` + `manage` |
+| Action                | Slash trigger                         | Optional text trigger           | AI tool           | Required verb                      |
+| --------------------- | ------------------------------------- | ------------------------------- | ----------------- | ---------------------------------- |
+| `create_ticket`       | `/issue`, `/report`, `/debugshare`    | `issue`, `report`, `debugshare` | No                | Guild membership                   |
+| `view_ticket_queue`   | `/tickets`                            | None                            | No                | `queue/*` + `view`                 |
+| `view_ticket_info`    | `/ticket-info [ticket]`               | None                            | No                | `ticket/<id>` + `view_metadata`    |
+| `claim_ticket`        | `/claim [ticket]`                     | None                            | No                | `ticket/<id>` + `claim_self`       |
+| `unclaim_ticket`      | `/unclaim [ticket]`                   | None                            | No                | `ticket/<id>` + `unclaim_self`     |
+| `assign_ticket`       | `/assign user [ticket]`               | None                            | No                | `ticket/<id>` + `assign_other`     |
+| `unassign_ticket`     | `/unassign user [ticket]`             | None                            | No                | `ticket/<id>` + `unassign_other`   |
+| `change_ticket_label` | `/label add\|remove <label> [ticket]` | None                            | Add/remove label  | `ticket/<id>` + `label`            |
+| `suggest_assignee`    | None                                  | None                            | Suggest assignees | `ticket/<id>` + `suggest_assignee` |
+| `complete_triage`     | None                                  | None                            | Complete triage   | `ticket/<id>` + `complete_triage`  |
+| `close_ticket`        | `/close [ticket] [reason]`            | None                            | No                | `ticket/<id>` + `close`            |
+| `reopen_ticket`       | `/reopen <ticket>`                    | None                            | No                | `ticket/<id>` + `reopen`           |
+| `set_triage_mode`     | `/triage pause\|resume [ticket]`      | None                            | No                | Corresponding triage verb          |
+| `open_settings`       | `/settings`                           | None                            | No                | `settings/*` + `manage`            |
 
 Text triggers are registered only when `TEXT_COMMAND_PREFIX` is enabled. Prod uses them for the three reporter ticket-opening aliases to exercise the package boundary without exposing staff-only or settings output through non-ephemeral messages. Slash commands remain the primary documented interface.
 
