@@ -21,6 +21,7 @@ export type LogLevel = typeof LogLevel.Type;
 export type ProdConfig = Readonly<{
   discordToken: string;
   discordClientId: string;
+  botOperatorUserIds: readonly string[];
   textCommandPrefix: string;
   databaseUrl: string;
   logLevel: LogLevel;
@@ -67,6 +68,25 @@ const decodeOptional = <A, I>(
   }
 };
 
+const decodeBotOperatorUserIds = (
+  environment: Environment,
+): readonly string[] => {
+  const value = environment.BOT_OPERATOR_USER_IDS;
+  if (value === undefined || value.trim().length === 0) {
+    return Object.freeze([]);
+  }
+
+  try {
+    const userIds = value
+      .split(",")
+      .map((userId) => userId.trim())
+      .map((userId) => Schema.decodeUnknownSync(DiscordSnowflake)(userId));
+    return Object.freeze([...new Set(userIds)].sort());
+  } catch {
+    throw new ConfigurationError("BOT_OPERATOR_USER_IDS is invalid");
+  }
+};
+
 export const loadConfig = (environment: Environment): ProdConfig =>
   Object.freeze({
     discordToken: decodeRequired(environment, "DISCORD_TOKEN", NonEmptyString),
@@ -75,6 +95,7 @@ export const loadConfig = (environment: Environment): ProdConfig =>
       "DISCORD_CLIENT_ID",
       DiscordSnowflake,
     ),
+    botOperatorUserIds: decodeBotOperatorUserIds(environment),
     textCommandPrefix: decodeOptional(
       environment,
       "TEXT_COMMAND_PREFIX",

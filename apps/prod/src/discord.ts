@@ -2,6 +2,7 @@ import {
   Client,
   Events,
   GatewayIntentBits,
+  TeamMemberMembershipState,
   type Interaction,
   type Message,
 } from "discord.js";
@@ -9,6 +10,7 @@ import {
 export type DiscordIdentity = Readonly<{
   userId: string;
   tag: string;
+  applicationOperatorUserIds: readonly string[];
 }>;
 
 export interface DiscordGateway {
@@ -17,6 +19,7 @@ export interface DiscordGateway {
 }
 
 export type DiscordActionSurface = Readonly<{
+  setApplicationOperatorUserIds?(userIds: readonly string[]): void;
   refreshCommands(client: Client<true>): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
   handleMessage?(message: Message): Promise<boolean>;
@@ -25,7 +28,45 @@ export type DiscordActionSurface = Readonly<{
 
 export type DiscordGatewayOptions = Readonly<{
   actions?: DiscordActionSurface;
+  configuredApplicationOperatorUserIds?: readonly string[];
 }>;
+
+type DiscordApplicationOwnerLike =
+  | Readonly<{ id: string }>
+  | Readonly<{
+      members: Readonly<{
+        values(): IterableIterator<
+          Readonly<{
+            id: string;
+            membershipState: TeamMemberMembershipState;
+          }>
+        >;
+      }>;
+    }>;
+
+const isTeamOwner = (
+  owner: DiscordApplicationOwnerLike,
+): owner is Extract<DiscordApplicationOwnerLike, { members: unknown }> =>
+  "members" in owner;
+
+export const resolveApplicationOperatorUserIds = (
+  owner: DiscordApplicationOwnerLike | null,
+  configuredUserIds: readonly string[] = [],
+): readonly string[] => {
+  const userIds = new Set(configuredUserIds);
+  if (owner !== null) {
+    if (isTeamOwner(owner)) {
+      for (const member of owner.members.values()) {
+        if (member.membershipState === TeamMemberMembershipState.Accepted) {
+          userIds.add(member.id);
+        }
+      }
+    } else {
+      userIds.add(owner.id);
+    }
+  }
+  return Object.freeze([...userIds].sort());
+};
 
 export const createDiscordGateway = (
   options: DiscordGatewayOptions = {},
@@ -118,12 +159,19 @@ const prepareReadyClient = async (
   client: Client<true>,
   options: DiscordGatewayOptions,
 ): Promise<DiscordIdentity> => {
+  const application = await client.application.fetch();
+  const applicationOperatorUserIds = resolveApplicationOperatorUserIds(
+    application.owner,
+    options.configuredApplicationOperatorUserIds,
+  );
   if (options.actions) {
+    options.actions.setApplicationOperatorUserIds?.(applicationOperatorUserIds);
     await options.actions.refreshCommands(client);
   }
 
-  return {
+  return Object.freeze({
     userId: client.user.id,
     tag: client.user.tag,
-  };
+    applicationOperatorUserIds,
+  });
 };

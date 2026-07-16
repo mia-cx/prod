@@ -95,6 +95,7 @@ const baseCheck = (overrides: Partial<AuthorizationCheck> = {}) =>
         discordRoleIds: ["role-1", "role-2"],
         isGuildOwner: false,
         isAdministrator: false,
+        isApplicationOperator: false,
       },
     },
     object: { objectType: "ticket", objectId: "ticket-1" },
@@ -102,10 +103,7 @@ const baseCheck = (overrides: Partial<AuthorizationCheck> = {}) =>
     ...overrides,
   }) satisfies AuthorizationCheck;
 
-const serviceFor = (
-  rules: PermissionRule[],
-  validateResource = () => true,
-) =>
+const serviceFor = (rules: PermissionRule[], validateResource = () => true) =>
   createAuthorizationService({
     store: new MemoryRuleStore(rules),
     validateResource,
@@ -270,8 +268,30 @@ describe("authorization safety", () => {
   });
 
   it.each([
-    ["guild_owner", { isGuildOwner: true, isAdministrator: false }],
-    ["administrator", { isGuildOwner: false, isAdministrator: true }],
+    [
+      "guild_owner",
+      {
+        isGuildOwner: true,
+        isAdministrator: false,
+        isApplicationOperator: false,
+      },
+    ],
+    [
+      "administrator",
+      {
+        isGuildOwner: false,
+        isAdministrator: true,
+        isApplicationOperator: false,
+      },
+    ],
+    [
+      "application_operator",
+      {
+        isGuildOwner: false,
+        isAdministrator: false,
+        isApplicationOperator: true,
+      },
+    ],
   ] as const)("keeps %s as break-glass", async (reason, attributes) => {
     const service = serviceFor([
       rule("explicit-deny", {
@@ -322,6 +342,7 @@ describe("authorization safety", () => {
               discordRoleIds: [],
               isGuildOwner: true,
               isAdministrator: true,
+              isApplicationOperator: true,
             },
           },
         }),

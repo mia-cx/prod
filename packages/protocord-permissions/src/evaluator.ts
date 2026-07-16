@@ -106,6 +106,13 @@ export const createAuthorizationService = (
           matchedRuleIds: [],
         };
       }
+      if (input.subject.attributes.isApplicationOperator) {
+        return {
+          allowed: true,
+          reason: "application_operator",
+          matchedRuleIds: [],
+        };
+      }
     }
 
     for (const context of authorizationContextLayers(input.context)) {
@@ -115,9 +122,7 @@ export const createAuthorizationService = (
           rule.object.objectType === input.object.objectType,
       );
       const objectIds =
-        input.object.objectId === "*"
-          ? ["*"]
-          : [input.object.objectId, "*"];
+        input.object.objectId === "*" ? ["*"] : [input.object.objectId, "*"];
 
       for (const objectId of objectIds) {
         const decision = resolveSubjectLayers(

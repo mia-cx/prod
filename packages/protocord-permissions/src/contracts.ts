@@ -11,6 +11,7 @@ export type UserAuthorizationSubject = Readonly<{
     discordRoleIds: readonly string[];
     isGuildOwner: boolean;
     isAdministrator: boolean;
+    isApplicationOperator: boolean;
   }>;
 }>;
 
@@ -20,8 +21,7 @@ export type ServiceAuthorizationSubject = Readonly<{
 }>;
 
 export type AuthorizationSubject =
-  | UserAuthorizationSubject
-  | ServiceAuthorizationSubject;
+  UserAuthorizationSubject | ServiceAuthorizationSubject;
 
 export type AuthorizationObject = Readonly<
   | { objectType: "ticket"; objectId: string }
@@ -109,6 +109,7 @@ export type AuthorizationDecision = Readonly<{
   reason:
     | "guild_owner"
     | "administrator"
+    | "application_operator"
     | "matched_rule"
     | "default_deny";
   matchedRuleIds: readonly string[];

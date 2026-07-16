@@ -17,6 +17,7 @@ import { pingAction } from "./ping.js";
 
 export type ProdActionContext = Readonly<{
   logger: Logger;
+  isApplicationOperator: (userId: string) => boolean;
   replyToTextCommand?: (content: string) => Promise<void>;
 }>;
 
@@ -24,6 +25,8 @@ export type ProdActionRuntime = DiscordActionSurface &
   Readonly<{
     actionCount: number;
     commands: readonly ApplicationCommandData[];
+    isApplicationOperator: (userId: string) => boolean;
+    setApplicationOperatorUserIds: (userIds: readonly string[]) => void;
   }>;
 
 export type ProdActionRuntimeOptions = Readonly<{
@@ -34,7 +37,10 @@ export const createProdActionRuntime = (
   logger: Logger,
   options: ProdActionRuntimeOptions,
 ): ProdActionRuntime => {
-  const context: ProdActionContext = { logger };
+  const applicationOperatorUserIds = new Set<string>();
+  const isApplicationOperator = (userId: string): boolean =>
+    applicationOperatorUserIds.has(userId);
+  const context: ProdActionContext = { logger, isApplicationOperator };
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,
     present: async (_trigger, _message, outcome, presentationContext) => {
@@ -70,6 +76,7 @@ export const createProdActionRuntime = (
           },
           context: {
             logger,
+            isApplicationOperator,
             replyToTextCommand: async (content) => {
               await message.reply({
                 content,
@@ -88,6 +95,11 @@ export const createProdActionRuntime = (
   return Object.freeze({
     actionCount: registry.actions.length,
     commands: getDiscordCommandRegistration(registry),
+    isApplicationOperator,
+    setApplicationOperatorUserIds: (userIds) => {
+      applicationOperatorUserIds.clear();
+      for (const userId of userIds) applicationOperatorUserIds.add(userId);
+    },
     refreshCommands: (client) => registerDiscordCommands(client, registry),
     handleInteraction: async (interaction: Interaction) => {
       const handled = await handleDiscordInteraction(

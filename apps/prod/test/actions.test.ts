@@ -71,6 +71,12 @@ describe("Prod action runtime", () => {
         name: "Ping Prod",
       },
     ]);
+    expect(runtime.isApplicationOperator("operator-1")).toBe(false);
+    runtime.setApplicationOperatorUserIds(["operator-1"]);
+    expect(runtime.isApplicationOperator("operator-1")).toBe(true);
+    runtime.setApplicationOperatorUserIds(["operator-2"]);
+    expect(runtime.isApplicationOperator("operator-1")).toBe(false);
+    expect(runtime.isApplicationOperator("operator-2")).toBe(true);
 
     const globalSet = vi.fn().mockResolvedValue(undefined);
     const guildSet = vi.fn().mockResolvedValue(undefined);

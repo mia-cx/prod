@@ -6,6 +6,13 @@ const discordMock = vi.hoisted(() => ({
   interactionHandler: undefined as undefined | ((interaction: unknown) => void),
   messageHandler: undefined as undefined | ((message: unknown) => void),
   intents: [] as number[],
+  applicationOwner: null as
+    | null
+    | { id: string }
+    | {
+        members: Map<string, { id: string; membershipState: number }>;
+      },
+  applicationFetch: vi.fn(),
   login: vi.fn(async (token: string) => token),
   destroy: vi.fn(),
 }));
@@ -17,8 +24,18 @@ vi.mock("discord.js", () => ({
     MessageCreate: "messageCreate",
   },
   GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4 },
+  TeamMemberMembershipState: { Invited: 1, Accepted: 2 },
   Client: class {
     user = { id: "345678901234567890", tag: "Prod#0001" };
+    application = {
+      fetch: async () => {
+        discordMock.applicationFetch();
+        return this.application;
+      },
+      get owner() {
+        return discordMock.applicationOwner;
+      },
+    };
 
     constructor(options: { intents: number[] }) {
       discordMock.intents = options.intents;
@@ -68,6 +85,8 @@ describe("createDiscordGateway", () => {
     discordMock.interactionHandler = undefined;
     discordMock.messageHandler = undefined;
     discordMock.intents = [];
+    discordMock.applicationOwner = null;
+    discordMock.applicationFetch.mockClear();
     discordMock.login.mockClear();
     discordMock.destroy.mockClear();
   });
@@ -80,8 +99,10 @@ describe("createDiscordGateway", () => {
       {
         userId: "345678901234567890",
         tag: "Prod#0001",
+        applicationOperatorUserIds: [],
       },
     );
+    expect(discordMock.applicationFetch).toHaveBeenCalledOnce();
     expect(discordMock.login).toHaveBeenCalledWith("development-token");
 
     await gateway.close();
@@ -144,8 +165,10 @@ describe("createDiscordGateway", () => {
     const handleInteraction = vi.fn(async () => undefined);
     const handleMessage = vi.fn(async () => true);
     const handleError = vi.fn();
+    const setApplicationOperatorUserIds = vi.fn();
     const gateway = createDiscordGateway({
       actions: {
+        setApplicationOperatorUserIds,
         refreshCommands,
         handleInteraction,
         handleMessage,
@@ -156,6 +179,7 @@ describe("createDiscordGateway", () => {
     await gateway.connect("development-token", new AbortController().signal);
 
     expect(refreshCommands).toHaveBeenCalledWith(expect.anything());
+    expect(setApplicationOperatorUserIds).toHaveBeenCalledWith([]);
     const interaction = { id: "interaction-1" };
     discordMock.interactionHandler?.(interaction);
     await vi.waitFor(() =>
@@ -183,5 +207,39 @@ describe("createDiscordGateway", () => {
 
     expect(discordMock.intents).toEqual([1]);
     expect(discordMock.messageHandler).toBeUndefined();
+  });
+
+  it("unions configured IDs with an individual application owner", async () => {
+    discordMock.applicationOwner = { id: "223456789012345678" };
+    const gateway = createDiscordGateway({
+      configuredApplicationOperatorUserIds: [
+        "123456789012345678",
+        "223456789012345678",
+      ],
+    });
+
+    await expect(
+      gateway.connect("development-token", new AbortController().signal),
+    ).resolves.toMatchObject({
+      applicationOperatorUserIds: ["123456789012345678", "223456789012345678"],
+    });
+  });
+
+  it("grants accepted Team members but excludes pending invitees", async () => {
+    discordMock.applicationOwner = {
+      members: new Map([
+        ["accepted", { id: "223456789012345678", membershipState: 2 }],
+        ["invited", { id: "323456789012345678", membershipState: 1 }],
+      ]),
+    };
+    const gateway = createDiscordGateway({
+      configuredApplicationOperatorUserIds: ["123456789012345678"],
+    });
+
+    await expect(
+      gateway.connect("development-token", new AbortController().signal),
+    ).resolves.toMatchObject({
+      applicationOperatorUserIds: ["123456789012345678", "223456789012345678"],
+    });
   });
 });

@@ -139,6 +139,7 @@ describe("Discord user subject adapter", () => {
         discordRoleIds: ["role-1", "role-2"],
         isGuildOwner: false,
         isAdministrator: false,
+        isApplicationOperator: false,
       },
     });
     expect(subject).not.toHaveProperty("guildId");
@@ -160,6 +161,15 @@ describe("Discord user subject adapter", () => {
       isAdministrator: true,
     });
     expect(Object.isFrozen(subject.attributes.discordRoleIds)).toBe(true);
+  });
+
+  it("derives application operator status from trusted application IDs", () => {
+    const context = createDiscordAuthorizationContext({ guild });
+    const subject = createDiscordUserSubject(member(), context, {
+      applicationOperatorUserIds: ["other-user", "user-1"],
+    });
+
+    expect(subject.attributes.isApplicationOperator).toBe(true);
   });
 
   it("rejects a member from another guild", () => {

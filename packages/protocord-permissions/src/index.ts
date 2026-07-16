@@ -49,6 +49,7 @@ export {
 export {
   createDiscordAuthorizationContext,
   createDiscordUserSubject,
+  type CreateDiscordUserSubjectOptions,
   InvalidDiscordAuthorizationContextError,
   type DiscordAuthorizationLocation,
   type DiscordCategoryLike,

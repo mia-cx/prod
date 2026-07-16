@@ -22,6 +22,10 @@ export type DiscordMemberLike = Readonly<{
   }>;
 }>;
 
+export type CreateDiscordUserSubjectOptions = Readonly<{
+  applicationOperatorUserIds?: readonly string[];
+}>;
+
 export type DiscordCategoryLike = Readonly<{
   id: string;
   guildId: string;
@@ -62,14 +66,18 @@ const categoryIdForChannel = (
 export const createDiscordAuthorizationContext = (
   location: DiscordAuthorizationLocation,
 ): AuthorizationContext => {
-  if (location.category?.guildId !== undefined &&
-      location.category.guildId !== location.guild.id) {
+  if (
+    location.category?.guildId !== undefined &&
+    location.category.guildId !== location.guild.id
+  ) {
     throw new InvalidDiscordAuthorizationContextError(
       "The category does not belong to the supplied guild",
     );
   }
-  if (location.channel?.guildId !== undefined &&
-      location.channel.guildId !== location.guild.id) {
+  if (
+    location.channel?.guildId !== undefined &&
+    location.channel.guildId !== location.guild.id
+  ) {
     throw new InvalidDiscordAuthorizationContextError(
       "The channel does not belong to the supplied guild",
     );
@@ -104,6 +112,7 @@ export const createDiscordAuthorizationContext = (
 export const createDiscordUserSubject = (
   member: DiscordMemberLike,
   context: AuthorizationContext,
+  options: CreateDiscordUserSubjectOptions = {},
 ): UserAuthorizationSubject => {
   validateAuthorizationContext(context);
   if (member.guild.id !== context.guildId) {
@@ -123,6 +132,8 @@ export const createDiscordUserSubject = (
       discordRoleIds: Object.freeze(discordRoleIds),
       isGuildOwner: member.id === member.guild.ownerId,
       isAdministrator: member.permissions.has("Administrator"),
+      isApplicationOperator:
+        options.applicationOperatorUserIds?.includes(member.id) ?? false,
     }),
   });
 };
