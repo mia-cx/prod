@@ -11,6 +11,7 @@ import {
   type RemovePermissionRuleInput,
   type RuleObject,
   type UpsertPermissionRuleInput,
+  InvalidAuthorizationInputError,
   validateAuthorizationCheck,
   validateRuleSubject,
 } from "../src/index.js";
@@ -257,6 +258,55 @@ describe("authorization precedence", () => {
 });
 
 describe("authorization safety", () => {
+  it("rejects forged runtime subjects before they participate in evaluation", async () => {
+    const service = serviceFor([
+      rule("role-allow", {
+        context: {
+          guildId: "guild-1",
+          categoryId: "category-1",
+          channelId: "channel-1",
+        },
+        subject: { subjectType: "role", subjectId: "role-1" },
+        object: { objectType: "ticket", objectId: "ticket-1" },
+        permit: "allow",
+      }),
+    ]);
+
+    await expect(
+      service.check(
+        baseCheck({
+          subject: {
+            subjectType: "role",
+            subjectId: "role-1",
+            attributes: { discordRoleIds: [] },
+          } as unknown as AuthorizationCheck["subject"],
+        }),
+      ),
+    ).rejects.toBeInstanceOf(InvalidAuthorizationInputError);
+
+    expect(() =>
+      validateAuthorizationCheck(
+        baseCheck({
+          subject: {
+            subjectType: "user",
+            subjectId: "user-1",
+            attributes: {
+              discordRoleIds: [],
+              isGuildOwner: "false",
+              isAdministrator: false,
+              canManageGuild: false,
+              isApplicationOperator: false,
+            },
+          } as unknown as AuthorizationCheck["subject"],
+        }),
+      ),
+    ).toThrow("subject.attributes.isGuildOwner must be a boolean");
+
+    expect(() =>
+      validateRuleSubject({ subjectType: "group", subjectId: "group-1" }),
+    ).toThrow("unsupported rule subject type: group");
+  });
+
   it("rejects wildcard IDs for exact runtime and stored selectors", () => {
     expect(() =>
       validateAuthorizationCheck(

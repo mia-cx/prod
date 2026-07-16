@@ -2,16 +2,22 @@ import type {
   AuthorizationCheck,
   AuthorizationContext,
   AuthorizationObject,
-  AuthorizationSubject,
   PermissionRule,
   PermissionRuleActor,
   PermissionRuleInput,
   PermissionVerb,
   RuleObject,
-  RuleSubject,
 } from "./contracts.js";
 
 const objectTypes = new Set(["ticket", "queue", "settings", "permissions"]);
+const authorizationSubjectTypes = new Set(["user", "service"]);
+const ruleSubjectTypes = new Set(["user", "role", "service", "everyone"]);
+const userBooleanAttributes = [
+  "isGuildOwner",
+  "isAdministrator",
+  "canManageGuild",
+  "isApplicationOperator",
+] as const;
 const permissionVerbs = new Set<PermissionVerb>([
   "view",
   "view_metadata",
@@ -33,11 +39,19 @@ export class InvalidAuthorizationInputError extends Error {
   override readonly name = "InvalidAuthorizationInputError";
 }
 
-const requireIdentifier = (value: string, field: string): void => {
+const requireIdentifier = (value: unknown, field: string): void => {
+  if (typeof value !== "string") {
+    throw new InvalidAuthorizationInputError(
+      `${field} must be a non-empty string`,
+    );
+  }
   if (value.length === 0) {
     throw new InvalidAuthorizationInputError(`${field} must not be empty`);
   }
 };
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null;
 
 export const validateAuthorizationContext = (
   context: AuthorizationContext,
@@ -60,8 +74,16 @@ export const authorizationContextsEqual = (
   left.channelId === right.channelId;
 
 export const validateAuthorizationSubject = (
-  subject: AuthorizationSubject,
+  subject: unknown,
 ): void => {
+  if (!isRecord(subject)) {
+    throw new InvalidAuthorizationInputError("subject must be an object");
+  }
+  if (!authorizationSubjectTypes.has(String(subject.subjectType))) {
+    throw new InvalidAuthorizationInputError(
+      `unsupported runtime subject type: ${String(subject.subjectType)}`,
+    );
+  }
   requireIdentifier(subject.subjectId, "subject.subjectId");
   if (subject.subjectId === "*") {
     throw new InvalidAuthorizationInputError(
@@ -69,13 +91,38 @@ export const validateAuthorizationSubject = (
     );
   }
   if (subject.subjectType === "user") {
+    if (!isRecord(subject.attributes)) {
+      throw new InvalidAuthorizationInputError(
+        "subject.attributes must be an object for user subjects",
+      );
+    }
+    if (!Array.isArray(subject.attributes.discordRoleIds)) {
+      throw new InvalidAuthorizationInputError(
+        "subject.attributes.discordRoleIds must be an array",
+      );
+    }
     for (const roleId of subject.attributes.discordRoleIds) {
       requireIdentifier(roleId, "subject.attributes.discordRoleIds[]");
+    }
+    for (const attribute of userBooleanAttributes) {
+      if (typeof subject.attributes[attribute] !== "boolean") {
+        throw new InvalidAuthorizationInputError(
+          `subject.attributes.${attribute} must be a boolean`,
+        );
+      }
     }
   }
 };
 
-export const validateRuleSubject = (subject: RuleSubject): void => {
+export const validateRuleSubject = (subject: unknown): void => {
+  if (!isRecord(subject)) {
+    throw new InvalidAuthorizationInputError("subject must be an object");
+  }
+  if (!ruleSubjectTypes.has(String(subject.subjectType))) {
+    throw new InvalidAuthorizationInputError(
+      `unsupported rule subject type: ${String(subject.subjectType)}`,
+    );
+  }
   requireIdentifier(subject.subjectId, "subject.subjectId");
   if (subject.subjectType === "everyone" && subject.subjectId !== "*") {
     throw new InvalidAuthorizationInputError(
