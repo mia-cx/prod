@@ -359,6 +359,79 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("suspends and resumes every persisted reporter access ownership", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const first = await store.create({
+      id: "ticket-access-one",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    const second = await store.create({
+      id: "ticket-access-two",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-2",
+      originatingAlias: "report",
+    });
+    const existingAccessSnapshot: ReporterHubAccessSnapshot = {
+      ...emptyAccessSnapshot,
+      overwriteExisted: true,
+      permissions: {
+        ...emptyAccessSnapshot.permissions,
+        ViewChannel: "allow",
+      },
+    };
+    await store.beginReporterAccess(first, emptyAccessSnapshot);
+    await store.beginReporterAccess(second, existingAccessSnapshot);
+    const reporters = new Map([
+      ["reporter-1", { id: "reporter-1" } as GuildMember],
+      ["reporter-2", { id: "reporter-2" } as GuildMember],
+    ]);
+    const discord = discordFixture({
+      validateReporter: vi.fn(async (_guild, reporterUserId) =>
+        Promise.resolve(reporters.get(reporterUserId)!),
+      ),
+    });
+    const service = createTicketProvisioningService(settings, store, discord);
+    try {
+      await expect(service.suspendHubAccess(guild, "hub-1")).resolves.toBe(2);
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        "reporter-1",
+        emptyAccessSnapshot,
+      );
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        "reporter-2",
+        existingAccessSnapshot,
+      );
+      expect(await store.getReporterAccess(first)).toEqual(emptyAccessSnapshot);
+      expect(await store.getReporterAccess(second)).toEqual(
+        existingAccessSnapshot,
+      );
+
+      await expect(service.resumeHubAccess(guild, "hub-1")).resolves.toBe(2);
+      expect(discord.grantReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        reporters.get("reporter-1"),
+      );
+      expect(discord.grantReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        reporters.get("reporter-2"),
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   it("recovers a known thread idempotently without creating another thread", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);

@@ -61,6 +61,15 @@ export interface TicketStore {
     ticket: Ticket,
   ): Promise<ReporterHubAccessSnapshot | undefined>;
   finishReporterAccess(ticket: Ticket): Promise<void>;
+  listReporterAccess(
+    guildId: string,
+    hubChannelId: string,
+  ): Promise<
+    readonly Readonly<{
+      reporterUserId: string;
+      snapshot: ReporterHubAccessSnapshot;
+    }>[]
+  >;
   recordProgress(
     ticketId: string,
     eventType: TicketEventType,
@@ -370,6 +379,26 @@ export const createSqliteTicketStore = (
         )
         .run();
     },
+    listReporterAccess: async (guildId: string, hubChannelId: string) =>
+      database
+        .select({
+          reporterUserId: reporterHubAccess.reporterUserId,
+          snapshotJson: reporterHubAccess.snapshotJson,
+        })
+        .from(reporterHubAccess)
+        .where(
+          and(
+            eq(reporterHubAccess.guildId, guildId),
+            eq(reporterHubAccess.hubChannelId, hubChannelId),
+          ),
+        )
+        .all()
+        .map((row) =>
+          Object.freeze({
+            reporterUserId: row.reporterUserId,
+            snapshot: parseReporterHubAccessSnapshot(row.snapshotJson),
+          }),
+        ),
     recordProgress: async (
       ticketId: string,
       eventType: TicketEventType,

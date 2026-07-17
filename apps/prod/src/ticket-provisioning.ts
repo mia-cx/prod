@@ -93,6 +93,8 @@ export interface TicketProvisioningService {
   recover(
     resolveGuild: (guildId: string) => Promise<Guild>,
   ): Promise<Readonly<{ recovered: number; failed: number }>>;
+  suspendHubAccess(guild: Guild, hubChannelId: string): Promise<number>;
+  resumeHubAccess(guild: Guild, hubChannelId: string): Promise<number>;
 }
 
 export type CreateTicketProvisioningServiceOptions = Readonly<{
@@ -626,29 +628,34 @@ export const createTicketProvisioningService = (
   };
 
   const service: TicketProvisioningService = {
-    open: async (input) =>
-      execute(`${input.guild.id}:${input.reporterUserId}`, async () => {
-        const state = await settings.get(input.guild.id);
-        if (state.hubChannelId === undefined) {
-          throw new TicketSetupRequiredError();
-        }
-        const summary = sanitizeTicketSummary(input.summary);
-        const ticket = await store.create({
-          id: createId(),
-          guildId: input.guild.id,
-          hubChannelId: state.hubChannelId,
-          reporterUserId: input.reporterUserId,
-          originatingAlias: input.originatingAlias,
-          ...(summary === undefined ? {} : { summary }),
-        });
-        return provision(input.guild, ticket, false);
-      }),
+    open: async (input) => {
+      const state = await settings.get(input.guild.id);
+      if (state.hubChannelId === undefined) {
+        throw new TicketSetupRequiredError();
+      }
+      const hubChannelId = state.hubChannelId;
+      return execute(
+        `hub:${input.guild.id}:${hubChannelId}`,
+        async () => {
+          const summary = sanitizeTicketSummary(input.summary);
+          const ticket = await store.create({
+            id: createId(),
+            guildId: input.guild.id,
+            hubChannelId,
+            reporterUserId: input.reporterUserId,
+            originatingAlias: input.originatingAlias,
+            ...(summary === undefined ? {} : { summary }),
+          });
+          return provision(input.guild, ticket, false);
+        },
+      );
+    },
     recover: async (resolveGuild) => {
       let recovered = 0;
       let failed = 0;
       for (const ticket of await store.listProvisioning()) {
         await execute(
-          `${ticket.guildId}:${ticket.reporterUserId}`,
+          `hub:${ticket.guildId}:${ticket.hubChannelId}`,
           async () => {
             try {
               await provision(await resolveGuild(ticket.guildId), ticket, true);
@@ -661,6 +668,46 @@ export const createTicketProvisioningService = (
       }
       return Object.freeze({ recovered, failed });
     },
+    suspendHubAccess: async (guild, hubChannelId) =>
+      execute(`hub:${guild.id}:${hubChannelId}`, async () => {
+        const ownerships = await store.listReporterAccess(
+          guild.id,
+          hubChannelId,
+        );
+        const failures: unknown[] = [];
+        for (const ownership of ownerships) {
+          await discord
+            .restoreReporterAccess(
+              guild,
+              hubChannelId,
+              ownership.reporterUserId,
+              ownership.snapshot,
+            )
+            .catch((error: unknown) => failures.push(error));
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(
+            failures,
+            "Failed to suspend all reporter access for unsafe support hub",
+          );
+        }
+        return ownerships.length;
+      }),
+    resumeHubAccess: async (guild, hubChannelId) =>
+      execute(`hub:${guild.id}:${hubChannelId}`, async () => {
+        const ownerships = await store.listReporterAccess(
+          guild.id,
+          hubChannelId,
+        );
+        for (const ownership of ownerships) {
+          const reporter = await discord.validateReporter(
+            guild,
+            ownership.reporterUserId,
+          );
+          await discord.grantReporterAccess(guild, hubChannelId, reporter);
+        }
+        return ownerships.length;
+      }),
   };
   return Object.freeze(service);
 };

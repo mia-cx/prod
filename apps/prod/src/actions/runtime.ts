@@ -26,7 +26,10 @@ import {
 
 import type { DiscordActionSurface } from "../discord.js";
 import type { GuildSettingsStore } from "../guild-settings.js";
-import type { SupportHubDiscord } from "../support-hub.js";
+import {
+  deletePublicSupportHubThread,
+  type SupportHubDiscord,
+} from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
 import { createTicketAction } from "./create-ticket.js";
 import { pingAction } from "./ping.js";
@@ -154,10 +157,29 @@ export const createProdActionRuntime = (
       for (const guild of client.guilds.cache.values()) {
         const state = await options.guildSettingsStore.get(guild.id);
         if (state.hubChannelId !== undefined) {
-          await options.supportHubDiscord.deletePublicThreads(
-            guild,
-            state.hubChannelId,
-          );
+          try {
+            await options.supportHubDiscord.deletePublicThreads(
+              guild,
+              state.hubChannelId,
+            );
+            await options.ticketProvisioningService.resumeHubAccess(
+              guild,
+              state.hubChannelId,
+            );
+          } catch (error) {
+            try {
+              await options.ticketProvisioningService.suspendHubAccess(
+                guild,
+                state.hubChannelId,
+              );
+            } catch (suspensionError) {
+              throw new AggregateError(
+                [error, suspensionError],
+                "Failed to remove public support-hub threads and suspend reporter access",
+              );
+            }
+            throw error;
+          }
         }
       }
       const result = await options.ticketProvisioningService.recover(
@@ -180,7 +202,26 @@ export const createProdActionRuntime = (
       if (thread.type !== ChannelType.PublicThread) return;
       const state = await options.guildSettingsStore.get(thread.guildId);
       if (state.hubChannelId !== thread.parentId) return;
-      await thread.delete("Public threads are not allowed in a Prod support hub");
+      try {
+        await deletePublicSupportHubThread(thread);
+        await options.ticketProvisioningService.resumeHubAccess(
+          thread.guild,
+          state.hubChannelId,
+        );
+      } catch (error) {
+        try {
+          await options.ticketProvisioningService.suspendHubAccess(
+            thread.guild,
+            state.hubChannelId,
+          );
+        } catch (suspensionError) {
+          throw new AggregateError(
+            [error, suspensionError],
+            "Failed to remove a public support-hub thread and suspend reporter access",
+          );
+        }
+        throw error;
+      }
     },
     handleInteraction: async (interaction: Interaction) => {
       const settingsResult = await settings.handle(interaction);

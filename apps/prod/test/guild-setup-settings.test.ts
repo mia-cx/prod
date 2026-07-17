@@ -31,6 +31,8 @@ const connections: DatabaseConnection[] = [];
 const ticketProvisioningService: TicketProvisioningService = {
   open: vi.fn(),
   recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
+  suspendHubAccess: vi.fn().mockResolvedValue(0),
+  resumeHubAccess: vi.fn().mockResolvedValue(0),
 };
 
 const ownership = (channelId = hubChannelId): HubPermissionOwnership => ({

@@ -91,6 +91,8 @@ const ticketProvisioningService: TicketProvisioningService = {
     updatedAt: "2026-07-17T10:00:00.000Z",
   }),
   recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
+  suspendHubAccess: vi.fn().mockResolvedValue(0),
+  resumeHubAccess: vi.fn().mockResolvedValue(0),
 };
 const runtimeOptions = {
   textCommandPrefix: "!",
@@ -548,6 +550,8 @@ describe("Prod action runtime", () => {
 
   it("resolves guilds through the ready client during startup reconciliation", async () => {
     vi.mocked(supportHubDiscord.deletePublicThreads).mockClear();
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
+    vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
     const fetchGuild = vi.fn().mockResolvedValue({ id: "guild-stale" });
     vi.mocked(ticketProvisioningService.recover).mockImplementationOnce(
       async (resolveGuild) => {
@@ -575,18 +579,57 @@ describe("Prod action runtime", () => {
       { id: "guild-1" },
       "123456789012345678",
     );
+    expect(ticketProvisioningService.resumeHubAccess).toHaveBeenCalledWith(
+      { id: "guild-1" },
+      "123456789012345678",
+    );
+    expect(ticketProvisioningService.suspendHubAccess).not.toHaveBeenCalled();
     expect(fetchGuild).toHaveBeenCalledWith("guild-stale");
   });
 
-  it("deletes public thread drift only inside the configured support hub", async () => {
+  it("suspends reporter access and stops startup when public drift cleanup fails", async () => {
+    const cleanupError = new Error("Discord unavailable");
+    vi.mocked(supportHubDiscord.deletePublicThreads).mockRejectedValueOnce(
+      cleanupError,
+    );
+    vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
+    vi.mocked(ticketProvisioningService.recover).mockClear();
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),
       runtimeOptions,
     );
-    const remove = vi.fn().mockResolvedValue(undefined);
+    const cachedGuild = { id: "guild-1" };
+    const client = {
+      guilds: { fetch: vi.fn(), cache: new Map([["guild-1", cachedGuild]]) },
+    } as unknown as Client<true>;
+
+    await expect(runtime.reconcile!(client)).rejects.toBe(cleanupError);
+
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledWith(
+      cachedGuild,
+      "123456789012345678",
+    );
+    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
+    expect(ticketProvisioningService.recover).not.toHaveBeenCalled();
+  });
+
+  it("deletes public thread drift only inside the configured support hub", async () => {
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
+    vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const remove = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("transient Discord failure"))
+      .mockResolvedValue(undefined);
+    const threadGuild = { id: "guild-1" };
     const publicThread = {
       type: ChannelType.PublicThread,
       guildId: "guild-1",
+      guild: threadGuild,
       parentId: "123456789012345678",
       delete: remove,
     };
@@ -601,7 +644,41 @@ describe("Prod action runtime", () => {
       parentId: "other-channel",
     } as never);
 
-    expect(remove).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(ticketProvisioningService.resumeHubAccess).toHaveBeenCalledWith(
+      threadGuild,
+      "123456789012345678",
+    );
+    expect(ticketProvisioningService.suspendHubAccess).not.toHaveBeenCalled();
+  });
+
+  it("suspends reporter access when live public drift cannot be deleted", async () => {
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
+    vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const cleanupError = new Error("Discord unavailable");
+    const threadGuild = { id: "guild-1" };
+    const publicThread = {
+      type: ChannelType.PublicThread,
+      guildId: "guild-1",
+      guild: threadGuild,
+      parentId: "123456789012345678",
+      delete: vi.fn().mockRejectedValue(cleanupError),
+    };
+
+    await expect(runtime.handleThread!(publicThread as never)).rejects.toBe(
+      cleanupError,
+    );
+
+    expect(publicThread.delete).toHaveBeenCalledTimes(3);
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledWith(
+      threadGuild,
+      "123456789012345678",
+    );
+    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
   });
 
   it.each([

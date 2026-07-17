@@ -141,6 +141,23 @@ export const findPublicSupportHubThreads = async (
   throw new Error("Public support-hub thread scan exceeded its safe limit");
 };
 
+const PUBLIC_THREAD_DELETE_ATTEMPTS = 3;
+
+export const deletePublicSupportHubThread = async (
+  thread: AnyThreadChannel,
+): Promise<void> => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < PUBLIC_THREAD_DELETE_ATTEMPTS; attempt += 1) {
+    try {
+      await thread.delete("Public threads are not allowed in a Prod support hub");
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
+
 const isDiscordErrorCode = (error: unknown, code: number): boolean =>
   typeof error === "object" &&
   error !== null &&
@@ -212,7 +229,8 @@ const resolveHub = async (
     .filter(([, permission]) => permissions?.has(permission) !== true)
     .map(([name]) => name);
   const conflict = conflictingOverwriteIssue(channel, guild, botMember);
-  const publicThreads = await findPublicSupportHubThreads(channel);
+  const publicThreads =
+    missing.length === 0 ? await findPublicSupportHubThreads(channel) : [];
   const issues = [
     ...(missing.length === 0
       ? []
@@ -530,9 +548,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
       if (channel === undefined) return 0;
       const publicThreads = await findPublicSupportHubThreads(channel);
       await Promise.all(
-        publicThreads.map((thread) =>
-          thread.delete("Public threads are not allowed in a Prod support hub"),
-        ),
+        publicThreads.map(deletePublicSupportHubThread),
       );
       return publicThreads.length;
     },

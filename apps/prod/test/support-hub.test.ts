@@ -212,6 +212,9 @@ describe("Discord support hub", () => {
     });
 
     const missing = fixture([]);
+    missing.channel.threads.fetchArchived.mockRejectedValue(
+      new Error("Discord denied thread history access"),
+    );
     const result = await hub.validateHub(missing.guild, "hub-1");
     expect(result).toEqual({
       valid: false,
@@ -220,6 +223,8 @@ describe("Discord support hub", () => {
     for (const permissionName of REQUIRED_HUB_BOT_PERMISSION_NAMES) {
       expect(result.valid ? "" : result.issues[0]).toContain(permissionName);
     }
+    expect(missing.channel.threads.fetchActive).not.toHaveBeenCalled();
+    expect(missing.channel.threads.fetchArchived).not.toHaveBeenCalled();
   });
 
   it("applies the empty-hub reporter overwrite idempotently", async () => {
@@ -307,7 +312,11 @@ describe("Discord support hub", () => {
   it("rejects hubs with public threads and can remove later drift", async () => {
     const hub = createSupportHubDiscord();
     const state = fixture();
-    const remove = vi.fn().mockResolvedValue(undefined);
+    const remove = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("transient failure one"))
+      .mockRejectedValueOnce(new Error("transient failure two"))
+      .mockResolvedValue(undefined);
     state.activeThreads.set("public-1", {
       id: "public-1",
       type: ChannelType.PublicThread,
@@ -321,7 +330,7 @@ describe("Discord support hub", () => {
     await expect(
       hub.deletePublicThreads(state.guild, "hub-1"),
     ).resolves.toBe(1);
-    expect(remove).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledTimes(3);
   });
 
   it("rejects the reporter permission shape when it belongs to a role", async () => {
