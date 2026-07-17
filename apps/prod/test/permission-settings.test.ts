@@ -18,7 +18,11 @@ import type {
 
 type Context = PermissionSettingsContext;
 
-const context: Context = { guildId: "guild-1", userId: "admin-1" };
+const context: Context = {
+  guildId: "guild-1",
+  userId: "admin-1",
+  settingsSessionId: "message-1",
+};
 
 const makeRule = (index: number): PermissionRule => ({
   id: `rule-${String(index).padStart(2, "0")}`,
@@ -301,6 +305,37 @@ describe("permission settings category", () => {
         verbs: ["label", "close"],
         permit: "deny",
         actorUserId: "admin-1",
+      }),
+    );
+  });
+
+  it("isolates staged rules between settings messages", async () => {
+    const { category, applyCustomRules } = setup();
+    const subjects = field(category, "advanced", "subjects");
+    const verbs = field(category, "advanced", "verbs");
+    const permit = field(category, "advanced", "permit");
+    const confirm = field(category, "advanced", "confirm");
+    if (
+      subjects.kind !== "mentionable-select" ||
+      verbs.kind !== "string-select" ||
+      permit.kind !== "string-select" ||
+      confirm.kind !== "button"
+    ) {
+      throw new Error("Unexpected advanced field types");
+    }
+    const otherMessage = { ...context, settingsSessionId: "message-2" };
+    await subjects.mutate([mentionables[0]!], context);
+    await verbs.mutate(["close"], context);
+    await subjects.mutate([mentionables[1]!], otherMessage);
+    await verbs.mutate(["reopen"], otherMessage);
+    await permit.mutate(["deny"], otherMessage);
+
+    await confirm.mutate(context);
+    expect(applyCustomRules).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subjects: [{ subjectType: "user", subjectId: "user-1" }],
+        verbs: ["close"],
+        permit: "allow",
       }),
     );
   });

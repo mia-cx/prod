@@ -23,6 +23,7 @@ import {
 export type PermissionSettingsContext = Readonly<{
   guildId?: string;
   userId: string;
+  settingsSessionId: string;
 }>;
 
 export type CreatePermissionSettingsCategoryOptions<
@@ -183,7 +184,7 @@ export function createPermissionSettingsCategory<
   const presetRemovalPages = new Map<string, number>();
   const ruleRemovalPages = new Map<string, number>();
   const draftKey = (context: Context): string =>
-    `${requireGuildId(context)}:${context.userId}`;
+    `${requireGuildId(context)}:${context.userId}:${context.settingsSessionId}`;
   const getDraft = (context: Context): CustomRuleDraft => {
     const key = draftKey(context);
     const existing = drafts.get(key);

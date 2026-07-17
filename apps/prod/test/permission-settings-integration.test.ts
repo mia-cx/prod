@@ -110,7 +110,7 @@ describe("permission settings integration", () => {
     const roleIds = new Set([guildId, configuratorRoleId]);
     const guildRecord: Record<string, unknown> = {
       id: guildId,
-      ownerId: "123456789012345698",
+      ownerId: managerId,
     };
     const member: DiscordMemberLike = {
       id: managerId,
@@ -125,14 +125,6 @@ describe("permission settings integration", () => {
     const fetchMember = vi.fn(async () => member);
     guildRecord.members = { fetch: fetchMember };
     const guild = guildRecord as unknown as Guild;
-
-    await administration.setPresetSubjects({
-      guildId,
-      preset: "configurator",
-      subjects: [{ subjectType: "role", subjectId: configuratorRoleId }],
-      actorUserId: "seed-admin",
-    });
-    seedAuthorization.mockClear();
 
     const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
       textCommandPrefix: "",
@@ -149,6 +141,17 @@ describe("permission settings integration", () => {
     expect(JSON.stringify(command.editReply.mock.calls[0]?.[0])).toContain(
       "Permissions",
     );
+
+    const bootstrap = mentionableInteraction(guild, "configurator", [
+      configuratorRoleId,
+    ]);
+    await runtime.handleInteraction(bootstrap as unknown as Interaction);
+    await expect(
+      administration.listPresetSubjects(guildId, "configurator"),
+    ).resolves.toEqual([
+      { subjectType: "role", subjectId: configuratorRoleId },
+    ]);
+    guildRecord.ownerId = "123456789012345698";
 
     const fetchesBeforeMutation = fetchMember.mock.calls.length;
     const supportStaff = mentionableInteraction(guild, "support_staff", [
@@ -224,7 +227,7 @@ const commandInteraction = (guild: Guild) => {
 
 const mentionableInteraction = (
   guild: Guild,
-  preset: "support_staff" | "assignment_manager",
+  preset: "support_staff" | "assignment_manager" | "configurator",
   values: readonly string[],
 ) => {
   const users = new Collection();
@@ -235,6 +238,10 @@ const mentionableInteraction = (
   });
   const roles = new Collection();
   roles.set(targetRoleId, { id: targetRoleId, name: "Target role" });
+  roles.set(configuratorRoleId, {
+    id: configuratorRoleId,
+    name: "Configurator",
+  });
   const interaction: Record<string, unknown> = {
     ...baseInteraction(guild),
     customId: encodeSettingsCustomId({
