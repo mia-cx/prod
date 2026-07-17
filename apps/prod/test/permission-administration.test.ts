@@ -284,6 +284,39 @@ describe("permission administration", () => {
     });
   });
 
+  it("removes an inspected legacy rule that has no contribution rows", async () => {
+    const { service, sqliteRules, authorize } = await setup();
+    await sqliteRules.upsert({
+      context: { guildId: "guild-1" },
+      rule: {
+        id: "legacy-rule",
+        context: { guildId: "guild-1" },
+        subject: user,
+        object: { objectType: "ticket", objectId: "ticket-1" },
+        verb: "close",
+        permit: "deny",
+      },
+      actor: { actorType: "user", actorId: "legacy-admin" },
+    });
+    authorize.mockClear();
+
+    await service.removeRule({
+      guildId: "guild-1",
+      ruleId: "legacy-rule",
+      actorUserId: "admin-2",
+    });
+
+    await expect(
+      service.listRules({ guildId: "guild-1" }),
+    ).resolves.toMatchObject({ total: 0, items: [] });
+    expect(authorize).toHaveBeenCalledOnce();
+    expect((await sqliteRules.listEvents()).at(-1)).toMatchObject({
+      ruleId: "legacy-rule",
+      eventType: "removed",
+      actorUserId: "admin-2",
+    });
+  });
+
   it("rejects invalid object/verb combinations before authorization", async () => {
     const { service, rules, sqliteRules, authorize } = await setup();
     await expect(

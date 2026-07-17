@@ -449,6 +449,7 @@ export const createPermissionContributionStore = (
                   ),
             )
             .all();
+          if (change.kind === "remove-identity") affect(identity);
           for (const row of rows) {
             const origin: PermissionRuleOrigin = {
               sourceType: row.sourceType,
