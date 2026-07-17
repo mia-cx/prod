@@ -14,6 +14,10 @@ import {
   type SettingsMutationResult,
   type SettingsValidationIssue,
 } from "@protocord/settings";
+import type {
+  AuthorizationService,
+  UserAuthorizationSubject,
+} from "@protocord/permissions";
 import { slashCommand, type Action } from "protocord";
 
 import type {
@@ -22,17 +26,27 @@ import type {
 } from "../guild-settings.js";
 import { createGuildSetupService } from "../guild-setup.js";
 import type { ExecuteGuildOperation } from "../guild-operation.js";
+import type { PermissionAdministrationService } from "../permission-administration.js";
+import { createProdAuthorizationContext } from "../authorization.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
+import { createPermissionSettingsCategory } from "./permission-settings.js";
 import type { ProdActionContext } from "./runtime.js";
 
 type GuildSetupSettingsContext = Readonly<{
   userId: string;
+  guildId?: string;
   isGuildOwner: boolean;
   isAdministrator: boolean;
   canManageGuild: boolean;
   isApplicationOperator: boolean;
   guild?: Guild;
+}>;
+
+export type PermissionSettingsDependencies = Readonly<{
+  administration: PermissionAdministrationService;
+  authorization: AuthorizationService;
+  createUserAuthorizationSubject: ProdActionContext["createUserAuthorizationSubject"];
 }>;
 
 export type GuildSetupSettingsConsumer = Readonly<{
@@ -68,6 +82,7 @@ export function createGuildSetupSettingsConsumer(
   supportHub: SupportHubDiscord,
   ticketProvisioning: TicketProvisioningService,
   executeGuildOperation?: ExecuteGuildOperation,
+  permissionSettings?: PermissionSettingsDependencies,
 ): GuildSetupSettingsConsumer {
   const setup = createGuildSetupService(
     store,
@@ -75,7 +90,7 @@ export function createGuildSetupSettingsConsumer(
     ticketProvisioning,
     executeGuildOperation,
   );
-  const authorize = async (context: GuildSetupSettingsContext) => {
+  const authorizeSetup = async (context: GuildSetupSettingsContext) => {
     if (context.guild === undefined) {
       return {
         authorized: false as const,
@@ -91,6 +106,26 @@ export function createGuildSetupSettingsConsumer(
         reason:
           "Only the server owner or an administrator can configure the first support hub.",
       };
+    }
+    if (state.hubChannelId !== undefined && permissionSettings !== undefined) {
+      try {
+        const decision = await permissionDecision(
+          context,
+          permissionSettings,
+          "settings",
+        );
+        return decision.allowed
+          ? { authorized: true as const }
+          : {
+              authorized: false as const,
+              reason: "Settings management access is required.",
+            };
+      } catch {
+        return {
+          authorized: false as const,
+          reason: "Settings management access could not be verified.",
+        };
+      }
     }
     return isBootstrapAdministrator ||
       context.canManageGuild ||
@@ -111,7 +146,7 @@ export function createGuildSetupSettingsConsumer(
         id: "setup",
         label: "Setup",
         description: "Configure basic setup for Prod.",
-        authorize,
+        authorize: authorizeSetup,
         fields: [
           {
             kind: "channel-select",
@@ -157,7 +192,7 @@ export function createGuildSetupSettingsConsumer(
         id: "identity",
         label: "Identity",
         description: "Configure Prod's personality and knowledge.",
-        authorize,
+        authorize: authorizeSetup,
         subcategories: [
           {
             id: "personality",
@@ -366,6 +401,41 @@ export function createGuildSetupSettingsConsumer(
           },
         ],
       },
+      ...(permissionSettings === undefined
+        ? []
+        : [
+            createPermissionSettingsCategory<GuildSetupSettingsContext>({
+              service: permissionSettings.administration,
+              authorize: async (context) => {
+                try {
+                  const decision = await permissionDecision(
+                    context,
+                    permissionSettings,
+                  );
+                  return decision.allowed
+                    ? { authorized: true as const }
+                    : {
+                        authorized: false as const,
+                        reason:
+                          "Permission management access is required for this category.",
+                      };
+                } catch {
+                  return {
+                    authorized: false as const,
+                    reason:
+                      "Permission management access could not be verified.",
+                  };
+                }
+              },
+              requireAuthorization: async (context) => {
+                const input = await permissionCheck(
+                  context,
+                  permissionSettings,
+                );
+                await permissionSettings.authorization.require(input);
+              },
+            }),
+          ]),
     ],
   };
 
@@ -428,6 +498,7 @@ function settingsContext(
   const guild = interaction.guild ?? undefined;
   return {
     userId: interaction.user.id,
+    ...(interaction.guildId === null ? {} : { guildId: interaction.guildId }),
     isGuildOwner: guild?.ownerId === interaction.user.id,
     isAdministrator:
       interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
@@ -438,4 +509,32 @@ function settingsContext(
     isApplicationOperator: isApplicationOperator(interaction.user.id),
     ...(guild === undefined ? {} : { guild }),
   };
+}
+
+async function permissionCheck(
+  context: GuildSetupSettingsContext,
+  dependencies: PermissionSettingsDependencies,
+  objectType: "settings" | "permissions" = "permissions",
+): Promise<Parameters<AuthorizationService["check"]>[0]> {
+  const guild = requireGuild(context);
+  const member = await guild.members.fetch(context.userId);
+  const authorizationContext = createProdAuthorizationContext(guild.id);
+  const subject: UserAuthorizationSubject =
+    dependencies.createUserAuthorizationSubject(member, authorizationContext);
+  return {
+    context: authorizationContext,
+    subject,
+    object: { objectType, objectId: "*" },
+    verb: "manage",
+  };
+}
+
+async function permissionDecision(
+  context: GuildSetupSettingsContext,
+  dependencies: PermissionSettingsDependencies,
+  objectType: "settings" | "permissions" = "permissions",
+) {
+  return dependencies.authorization.check(
+    await permissionCheck(context, dependencies, objectType),
+  );
 }

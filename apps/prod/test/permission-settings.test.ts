@@ -70,6 +70,7 @@ const setup = (
   const category = createPermissionSettingsCategory<Context>({
     service,
     authorize: () => true,
+    requireAuthorization: async () => undefined,
     now: () => time,
   });
   return {
@@ -116,7 +117,7 @@ describe("permission settings category", () => {
 
     await add.mutate(mentionables, context);
 
-    expect(setPresetSubjects).toHaveBeenCalledWith({
+    expect(setPresetSubjects).toHaveBeenCalledWith(expect.objectContaining({
       guildId: "guild-1",
       preset: "support_staff",
       subjects: [
@@ -124,7 +125,7 @@ describe("permission settings category", () => {
         { subjectType: "role", subjectId: "role-1" },
       ],
       actorUserId: "admin-1",
-    });
+    }));
   });
 
   it("renders explicit subject types and paginates preset controls", async () => {
@@ -166,12 +167,12 @@ describe("permission settings category", () => {
       buttonLabel: "Confirm clear",
     });
     await clear.mutate(context);
-    expect(setPresetSubjects).toHaveBeenCalledWith({
+    expect(setPresetSubjects).toHaveBeenCalledWith(expect.objectContaining({
       guildId: "guild-1",
       preset: "support_staff",
       subjects: [],
       actorUserId: "admin-1",
-    });
+    }));
 
     advanceTime(2 * 60 * 1_000 + 1);
     await clear.mutate(context);
@@ -211,7 +212,7 @@ describe("permission settings category", () => {
     expect((await preview.load(context)).value).toContain("Permit: DENY");
     expect((await confirm.load(context)).disabled).toBe(false);
     await confirm.mutate(context);
-    expect(applyCustomRules).toHaveBeenCalledWith({
+    expect(applyCustomRules).toHaveBeenCalledWith(expect.objectContaining({
       guildId: "guild-1",
       subjects: [
         { subjectType: "user", subjectId: "user-1" },
@@ -221,7 +222,7 @@ describe("permission settings category", () => {
       verbs: ["label", "close"],
       permit: "deny",
       actorUserId: "admin-1",
-    });
+    }));
   });
 
   it("paginates inspection controls and removes one selected rule", async () => {
@@ -241,11 +242,11 @@ describe("permission settings category", () => {
     const third = field(category, "rules", "rules-3");
     if (third.kind !== "string-select") throw new Error("Expected rule select");
     await third.mutate([rules[55]!.id], context);
-    expect(removeRule).toHaveBeenCalledWith({
+    expect(removeRule).toHaveBeenCalledWith(expect.objectContaining({
       guildId: "guild-1",
       ruleId: rules[55]!.id,
       actorUserId: "admin-1",
-    });
+    }));
   });
 
   it("exposes no category- or channel-context administration control", () => {

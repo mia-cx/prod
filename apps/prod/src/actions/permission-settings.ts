@@ -30,6 +30,7 @@ export type CreatePermissionSettingsCategoryOptions<
 > = Readonly<{
   service: PermissionAdministrationService;
   authorize: SettingsAuthorization<Context>;
+  requireAuthorization(context: Context): Promise<void>;
   now?: () => number;
 }>;
 
@@ -239,6 +240,7 @@ export function createPermissionSettingsCategory<
             preset,
             subjects: mergeSubjects(current, values.map(mentionableSubject)),
             actorUserId: context.userId,
+            recheckAuthorization: () => options.requireAuthorization(context),
           });
         },
       },
@@ -286,6 +288,7 @@ export function createPermissionSettingsCategory<
             preset,
             subjects: current.filter((subject) => !removed.has(subjectKey(subject))),
             actorUserId: context.userId,
+            recheckAuthorization: () => options.requireAuthorization(context),
           });
         },
       });
@@ -317,6 +320,7 @@ export function createPermissionSettingsCategory<
           preset,
           subjects: [],
           actorUserId: context.userId,
+          recheckAuthorization: () => options.requireAuthorization(context),
         });
         clearConfirmations.delete(key);
       },
@@ -486,6 +490,7 @@ export function createPermissionSettingsCategory<
           verbs: draft.verbs,
           permit: draft.permit,
           actorUserId: context.userId,
+          recheckAuthorization: () => options.requireAuthorization(context),
         });
         drafts.delete(draftKey(context));
         return { status: "success" as const };
@@ -555,6 +560,7 @@ export function createPermissionSettingsCategory<
           guildId: requireGuildId(context),
           ruleId,
           actorUserId: context.userId,
+          recheckAuthorization: () => options.requireAuthorization(context),
         });
       },
     });

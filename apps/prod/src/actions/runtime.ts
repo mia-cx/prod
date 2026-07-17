@@ -7,6 +7,7 @@ import type { Logger } from "pino";
 import {
   createDiscordUserSubject,
   type AuthorizationContext,
+  type AuthorizationService,
   type DiscordMemberLike,
   type UserAuthorizationSubject,
 } from "@protocord/permissions";
@@ -25,6 +26,7 @@ import {
 import type { DiscordActionSurface } from "../discord.js";
 import type { GuildSettingsStore } from "../guild-settings.js";
 import type { ExecuteGuildOperation } from "../guild-operation.js";
+import type { PermissionAdministrationService } from "../permission-administration.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
 import { createTicketAction } from "./create-ticket.js";
@@ -59,6 +61,8 @@ export type ProdActionRuntimeOptions = Readonly<{
   supportHubDiscord: SupportHubDiscord;
   ticketProvisioningService: TicketProvisioningService;
   executeGuildOperation?: ExecuteGuildOperation;
+  permissionAdministration?: PermissionAdministrationService;
+  permissionAuthorization?: AuthorizationService;
 }>;
 
 export const createProdActionRuntime = (
@@ -76,6 +80,14 @@ export const createProdActionRuntime = (
     isApplicationOperator,
     createUserAuthorizationSubject,
   };
+  if (
+    (options.permissionAdministration === undefined) !==
+    (options.permissionAuthorization === undefined)
+  ) {
+    throw new TypeError(
+      "Permission settings require both administration and authorization services",
+    );
+  }
   const settings = createGuildSetupSettingsConsumer(
     logger,
     isApplicationOperator,
@@ -83,6 +95,14 @@ export const createProdActionRuntime = (
     options.supportHubDiscord,
     options.ticketProvisioningService,
     options.executeGuildOperation,
+    options.permissionAdministration === undefined ||
+      options.permissionAuthorization === undefined
+      ? undefined
+      : {
+          administration: options.permissionAdministration,
+          authorization: options.permissionAuthorization,
+          createUserAuthorizationSubject,
+        },
   );
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,
