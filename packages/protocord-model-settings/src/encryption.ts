@@ -1,0 +1,102 @@
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  type BinaryLike,
+} from "node:crypto";
+
+import { ModelCredentialError } from "./contracts.js";
+
+const KEY_BYTES = 32;
+const NONCE_BYTES = 12;
+const AUTH_TAG_BYTES = 16;
+
+export type EncryptedApiKey = Readonly<{
+  ciphertext: string;
+  nonce: string;
+  authTag: string;
+  hint: string;
+}>;
+
+export class InvalidEncryptionKeyError extends Error {
+  override readonly name = "InvalidEncryptionKeyError";
+}
+
+export const decodeEncryptionKey = (encoded: string): Buffer => {
+  const normalized = encoded.trim();
+  const decoded = Buffer.from(normalized, "base64");
+  if (
+    decoded.length !== KEY_BYTES ||
+    decoded.toString("base64").replaceAll("=", "") !==
+      normalized.replaceAll("=", "")
+  ) {
+    throw new InvalidEncryptionKeyError(
+      "API_KEY_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
+    );
+  }
+  return decoded;
+};
+
+const keyHint = (apiKey: string): string =>
+  apiKey.length < 8 ? "Configured" : `••••${apiKey.slice(-4)}`;
+
+export const encryptApiKey = (
+  apiKey: string,
+  encryptionKey: BinaryLike,
+  createNonce: () => Buffer = () => randomBytes(NONCE_BYTES),
+): EncryptedApiKey => {
+  if (apiKey.trim().length === 0) {
+    throw new TypeError("API key must not be empty");
+  }
+  const nonce = createNonce();
+  if (nonce.length !== NONCE_BYTES) {
+    throw new TypeError("AES-256-GCM nonce must contain 12 bytes");
+  }
+  const cipher = createCipheriv("aes-256-gcm", encryptionKey, nonce, {
+    authTagLength: AUTH_TAG_BYTES,
+  });
+  const ciphertext = Buffer.concat([
+    cipher.update(apiKey, "utf8"),
+    cipher.final(),
+  ]);
+  return Object.freeze({
+    ciphertext: ciphertext.toString("base64"),
+    nonce: nonce.toString("base64"),
+    authTag: cipher.getAuthTag().toString("base64"),
+    hint: keyHint(apiKey),
+  });
+};
+
+const decodePart = (value: string, expectedLength?: number): Buffer => {
+  const decoded = Buffer.from(value, "base64");
+  if (
+    decoded.toString("base64").replaceAll("=", "") !==
+      value.replaceAll("=", "") ||
+    (expectedLength !== undefined && decoded.length !== expectedLength)
+  ) {
+    throw new ModelCredentialError();
+  }
+  return decoded;
+};
+
+export const decryptApiKey = (
+  encrypted: Pick<EncryptedApiKey, "ciphertext" | "nonce" | "authTag">,
+  encryptionKey: BinaryLike,
+): string => {
+  try {
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      encryptionKey,
+      decodePart(encrypted.nonce, NONCE_BYTES),
+      { authTagLength: AUTH_TAG_BYTES },
+    );
+    decipher.setAuthTag(decodePart(encrypted.authTag, AUTH_TAG_BYTES));
+    return Buffer.concat([
+      decipher.update(decodePart(encrypted.ciphertext)),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch (error) {
+    if (error instanceof ModelCredentialError) throw error;
+    throw new ModelCredentialError();
+  }
+};

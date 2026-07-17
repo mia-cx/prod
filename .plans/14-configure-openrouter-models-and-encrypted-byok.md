@@ -20,7 +20,7 @@ schema into its application-owned migration history.
 
 ## TODOs
 
-- [ ] Add the package-owned model schema and SQLite store with AES-256-GCM credential persistence and adversarial tests.
+- [x] Add the package-owned model schema and SQLite store with AES-256-GCM credential persistence and adversarial tests.
 - [ ] Define injected provider catalog access and secure guild/deployment resolution semantics with focused tests.
 - [ ] Export and test a complete reusable model settings category with catalog suggestions, manual entry, masked status, key replacement, and clearing.
 - [ ] Compose the package into Prod configuration, OpenRouter catalog access, settings authorization, and the application-owned migration; then run repository validation.
@@ -37,3 +37,4 @@ schema into its application-owned migration history.
 - 2026-07-17: The supplied worktree is clean on `t3code/fast-forward-main-2` at `origin/main`; blockers #4, #5, and #6 are closed.
 - 2026-07-17: The canonical persistence decision separates schema from migration ownership: this package exports its Drizzle declarations, while Prod generates and applies the single deployment migration stream.
 - 2026-07-17: The mandatory Discord/OpenRouter validation is HITL. The implementation PR must reference rather than close #14 until a human records a redacted passing result.
+- 2026-07-17: Added the package-prefixed model configuration schema and SQLite store. Credentials use validated 32-byte base64 master keys, fresh 12-byte nonces, separate ciphertext/auth-tag/nonce/hint columns, authenticated decryption, guild-first resolution, and atomic credential clearing. The package has 6 passing tests; focused test, typecheck, lint, and build commands pass.
