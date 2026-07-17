@@ -82,6 +82,8 @@ const fixture = (
     delete: ReturnType<typeof vi.fn>;
   };
   const messageCache = new Collection<string, TestMessage>();
+  const activeThreads = new Collection();
+  const archivedThreads = new Collection();
   let nextMessage = 1;
   const addMessage = (
     id: string,
@@ -147,6 +149,13 @@ const fixture = (
       effectiveFor(member.id),
     ),
     permissionOverwrites: { edit: editOverwrite, cache: overwriteCache },
+    threads: {
+      fetchActive: vi.fn().mockResolvedValue({ threads: activeThreads }),
+      fetchArchived: vi.fn().mockResolvedValue({
+        threads: archivedThreads,
+        hasMore: false,
+      }),
+    },
     messages: { fetch: fetchMessage },
     send,
   };
@@ -178,6 +187,8 @@ const fixture = (
     fetchMessage,
     send,
     messageCache,
+    activeThreads,
+    archivedThreads,
     addMessage,
     roleCache,
     effectiveFor,
@@ -291,6 +302,26 @@ describe("Discord support hub", () => {
       valid: true,
     });
     expect(REPORTER_TICKET_HUB_OVERWRITE.SendMessagesInThreads).toBe(true);
+  });
+
+  it("rejects hubs with public threads and can remove later drift", async () => {
+    const hub = createSupportHubDiscord();
+    const state = fixture();
+    const remove = vi.fn().mockResolvedValue(undefined);
+    state.activeThreads.set("public-1", {
+      id: "public-1",
+      type: ChannelType.PublicThread,
+      delete: remove,
+    });
+
+    await expect(hub.validateHub(state.guild, "hub-1")).resolves.toEqual({
+      valid: false,
+      issues: [expect.stringContaining("Remove public threads")],
+    });
+    await expect(
+      hub.deletePublicThreads(state.guild, "hub-1"),
+    ).resolves.toBe(1);
+    expect(remove).toHaveBeenCalledOnce();
   });
 
   it("rejects the reporter permission shape when it belongs to a role", async () => {

@@ -51,6 +51,7 @@ const setup = async () => {
     restoreHub: vi.fn(async () => undefined),
     releaseHub: vi.fn(async () => undefined),
     releaseFormerHub: vi.fn(async () => undefined),
+    deletePublicThreads: vi.fn(async () => 0),
     upsertInformationMessage: vi.fn(
       async (input) => input.messageId ?? "message-1",
     ),

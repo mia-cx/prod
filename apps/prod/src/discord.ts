@@ -4,6 +4,7 @@ import {
   GatewayIntentBits,
   TeamMemberMembershipState,
   TeamMemberRole,
+  type AnyThreadChannel,
   type Interaction,
   type Message,
 } from "discord.js";
@@ -25,6 +26,7 @@ export type DiscordActionSurface = Readonly<{
   reconcile?(client: Client<true>): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
   handleMessage?(message: Message): Promise<boolean>;
+  handleThread?(thread: AnyThreadChannel): Promise<void>;
   handleError(error: unknown): void;
 }>;
 
@@ -183,6 +185,17 @@ export const createDiscordGateway = (
         void handleMessage(message).catch((error: unknown) =>
           actions.handleError(error),
         );
+      });
+    }
+    if (actions.handleThread) {
+      const handleThread = (thread: AnyThreadChannel): void => {
+        void actions
+          .handleThread!(thread)
+          .catch((error: unknown) => actions.handleError(error));
+      };
+      client.on(Events.ThreadCreate, handleThread);
+      client.on(Events.ThreadUpdate, (_oldThread, newThread) => {
+        handleThread(newThread);
       });
     }
   }

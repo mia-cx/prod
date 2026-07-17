@@ -1,6 +1,7 @@
 import {
   ApplicationCommandOptionType,
   ApplicationCommandType,
+  ChannelType,
   MessageFlags,
   type ChatInputCommandInteraction,
   type Client,
@@ -71,6 +72,7 @@ const supportHubDiscord: SupportHubDiscord = {
   restoreHub: async () => undefined,
   releaseHub: async () => undefined,
   releaseFormerHub: async () => undefined,
+  deletePublicThreads: vi.fn(async () => 0),
   upsertInformationMessage: async () => "message-1",
   deleteInformationMessage: async () => undefined,
 };
@@ -545,6 +547,7 @@ describe("Prod action runtime", () => {
   });
 
   it("resolves guilds through the ready client during startup reconciliation", async () => {
+    vi.mocked(supportHubDiscord.deletePublicThreads).mockClear();
     const fetchGuild = vi.fn().mockResolvedValue({ id: "guild-stale" });
     vi.mocked(ticketProvisioningService.recover).mockImplementationOnce(
       async (resolveGuild) => {
@@ -559,13 +562,46 @@ describe("Prod action runtime", () => {
       runtimeOptions,
     );
     const client = {
-      guilds: { fetch: fetchGuild },
+      guilds: {
+        fetch: fetchGuild,
+        cache: new Map([["guild-1", { id: "guild-1" }]]),
+      },
     } as unknown as Client<true>;
 
     await runtime.reconcile!(client);
 
     expect(ticketProvisioningService.recover).toHaveBeenCalledOnce();
+    expect(supportHubDiscord.deletePublicThreads).toHaveBeenCalledWith(
+      { id: "guild-1" },
+      "123456789012345678",
+    );
     expect(fetchGuild).toHaveBeenCalledWith("guild-stale");
+  });
+
+  it("deletes public thread drift only inside the configured support hub", async () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const publicThread = {
+      type: ChannelType.PublicThread,
+      guildId: "guild-1",
+      parentId: "123456789012345678",
+      delete: remove,
+    };
+
+    await runtime.handleThread!(publicThread as never);
+    await runtime.handleThread!({
+      ...publicThread,
+      type: ChannelType.PrivateThread,
+    } as never);
+    await runtime.handleThread!({
+      ...publicThread,
+      parentId: "other-channel",
+    } as never);
+
+    expect(remove).toHaveBeenCalledOnce();
   });
 
   it.each([

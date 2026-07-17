@@ -1,4 +1,10 @@
-import type { ApplicationCommandData, Interaction, Message } from "discord.js";
+import {
+  ChannelType,
+  type AnyThreadChannel,
+  type ApplicationCommandData,
+  type Interaction,
+  type Message,
+} from "discord.js";
 import type { Logger } from "pino";
 import {
   createDiscordUserSubject,
@@ -145,6 +151,15 @@ export const createProdActionRuntime = (
     },
     refreshCommands: (client) => registerDiscordCommands(client, registry),
     reconcile: async (client) => {
+      for (const guild of client.guilds.cache.values()) {
+        const state = await options.guildSettingsStore.get(guild.id);
+        if (state.hubChannelId !== undefined) {
+          await options.supportHubDiscord.deletePublicThreads(
+            guild,
+            state.hubChannelId,
+          );
+        }
+      }
       const result = await options.ticketProvisioningService.recover(
         async (guildId) => client.guilds.fetch(guildId),
       );
@@ -160,6 +175,12 @@ export const createProdActionRuntime = (
       } else {
         logger.info(details, "ticket provisioning reconciliation completed");
       }
+    },
+    handleThread: async (thread: AnyThreadChannel) => {
+      if (thread.type !== ChannelType.PublicThread) return;
+      const state = await options.guildSettingsStore.get(thread.guildId);
+      if (state.hubChannelId !== thread.parentId) return;
+      await thread.delete("Public threads are not allowed in a Prod support hub");
     },
     handleInteraction: async (interaction: Interaction) => {
       const settingsResult = await settings.handle(interaction);

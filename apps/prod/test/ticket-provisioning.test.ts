@@ -633,6 +633,15 @@ describe("Discord ticket privacy adapter", () => {
         fetch: vi.fn().mockResolvedValue({
           type: ChannelType.GuildText,
           permissionOverwrites: { edit },
+          threads: {
+            fetchActive: vi.fn().mockResolvedValue({
+              threads: new Collection(),
+            }),
+            fetchArchived: vi.fn().mockResolvedValue({
+              threads: new Collection(),
+              hasMore: false,
+            }),
+          },
           send,
         }),
       },
@@ -662,6 +671,41 @@ describe("Discord ticket privacy adapter", () => {
       CreatePrivateThreads: false,
     });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("refuses reporter access while the hub contains a public thread", async () => {
+    const edit = vi.fn();
+    const mockGuild = {
+      channels: {
+        fetch: vi.fn().mockResolvedValue({
+          type: ChannelType.GuildText,
+          permissionOverwrites: { edit },
+          threads: {
+            fetchActive: vi.fn().mockResolvedValue({
+              threads: new Collection([
+                [
+                  "public-1",
+                  { id: "public-1", type: ChannelType.PublicThread },
+                ],
+              ]),
+            }),
+            fetchArchived: vi.fn().mockResolvedValue({
+              threads: new Collection(),
+              hasMore: false,
+            }),
+          },
+        }),
+      },
+    } as unknown as Guild;
+
+    await expect(
+      createTicketProvisioningDiscord().grantReporterAccess(
+        mockGuild,
+        "hub-1",
+        reporter,
+      ),
+    ).rejects.toThrow("public thread");
+    expect(edit).not.toHaveBeenCalled();
   });
 
   it("ignores only a missing thread during cleanup", async () => {

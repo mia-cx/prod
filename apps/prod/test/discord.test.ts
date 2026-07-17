@@ -5,6 +5,10 @@ const discordMock = vi.hoisted(() => ({
   readyHandler: undefined as undefined | ((client: unknown) => void),
   interactionHandler: undefined as undefined | ((interaction: unknown) => void),
   messageHandler: undefined as undefined | ((message: unknown) => void),
+  threadCreateHandler: undefined as undefined | ((thread: unknown) => void),
+  threadUpdateHandler: undefined as
+    | undefined
+    | ((oldThread: unknown, newThread: unknown) => void),
   intents: [] as number[],
   applicationOwner: null as
     | null
@@ -27,6 +31,8 @@ vi.mock("discord.js", () => ({
     ClientReady: "clientReady",
     InteractionCreate: "interactionCreate",
     MessageCreate: "messageCreate",
+    ThreadCreate: "threadCreate",
+    ThreadUpdate: "threadUpdate",
   },
   GatewayIntentBits: {
     Guilds: 1,
@@ -62,11 +68,18 @@ vi.mock("discord.js", () => ({
       return this;
     }
 
-    on(event: string, handler: (event: unknown) => void): this {
+    on(
+      event: string,
+      handler: (event: unknown, second?: unknown) => void,
+    ): this {
       if (event === "interactionCreate") {
         discordMock.interactionHandler = handler;
       } else if (event === "messageCreate") {
         discordMock.messageHandler = handler;
+      } else if (event === "threadCreate") {
+        discordMock.threadCreateHandler = handler;
+      } else if (event === "threadUpdate") {
+        discordMock.threadUpdateHandler = handler;
       }
       return this;
     }
@@ -100,6 +113,8 @@ describe("createDiscordGateway", () => {
     discordMock.readyHandler = undefined;
     discordMock.interactionHandler = undefined;
     discordMock.messageHandler = undefined;
+    discordMock.threadCreateHandler = undefined;
+    discordMock.threadUpdateHandler = undefined;
     discordMock.intents = [];
     discordMock.applicationOwner = null;
     discordMock.applicationFetch.mockReset().mockResolvedValue(undefined);
@@ -223,6 +238,7 @@ describe("createDiscordGateway", () => {
     const reconcile = vi.fn(async () => undefined);
     const handleInteraction = vi.fn(async () => undefined);
     const handleMessage = vi.fn(async () => true);
+    const handleThread = vi.fn(async () => undefined);
     const handleError = vi.fn();
     const setApplicationOperatorUserIds = vi.fn();
     const gateway = createDiscordGateway({
@@ -232,6 +248,7 @@ describe("createDiscordGateway", () => {
         reconcile,
         handleInteraction,
         handleMessage,
+        handleThread,
         handleError,
       },
     });
@@ -253,6 +270,15 @@ describe("createDiscordGateway", () => {
     const message = { id: "message-1", content: "!ping" };
     discordMock.messageHandler?.(message);
     await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledWith(message));
+
+    const createdThread = { id: "thread-created" };
+    discordMock.threadCreateHandler?.(createdThread);
+    const updatedThread = { id: "thread-updated" };
+    discordMock.threadUpdateHandler?.({ id: "thread-old" }, updatedThread);
+    await vi.waitFor(() => {
+      expect(handleThread).toHaveBeenCalledWith(createdThread);
+      expect(handleThread).toHaveBeenCalledWith(updatedThread);
+    });
 
     expect(discordMock.intents).toEqual([1, 2, 4]);
     expect(handleError).not.toHaveBeenCalled();

@@ -14,6 +14,7 @@ import {
 } from "discord.js";
 
 import type { GuildSettingsStore } from "./guild-settings.js";
+import { findPublicSupportHubThreads } from "./support-hub.js";
 import {
   captureReporterHubAccess,
   isEmptyPermissionOverwrite,
@@ -262,6 +263,11 @@ export const createTicketProvisioningDiscord =
       },
       grantReporterAccess: async (guild, hubChannelId, reporter) => {
         const hub = await requireHub(guild, hubChannelId);
+        if ((await findPublicSupportHubThreads(hub)).length > 0) {
+          throw new Error(
+            "The support hub contains a public thread and cannot safely grant reporter access",
+          );
+        }
         await hub.permissionOverwrites.edit(
           reporter,
           REPORTER_TICKET_HUB_OVERWRITE,
