@@ -118,9 +118,6 @@ export const startProd = async (
       ),
       modelCatalog: createOpenRouterCatalog({
         baseUrl: config.openRouterBaseUrl,
-        ...(config.openRouterApiKey === undefined
-          ? {}
-          : { apiKey: config.openRouterApiKey }),
       }),
       deploymentCredentialConfigured: config.openRouterApiKey !== undefined,
       executeGuildOperation,
