@@ -216,6 +216,34 @@ describe("permission administration", () => {
     ]).toContainEqual(subjects);
   });
 
+  it("does not present a partial preset expansion as configured membership", async () => {
+    const { service } = await setup();
+    await service.setPresetSubjects({
+      guildId: "guild-1",
+      preset: "support_staff",
+      subjects: [role],
+      actorUserId: "admin-1",
+    });
+    const closeRule = (
+      await service.listRules({ guildId: "guild-1", limit: 100 })
+    ).items.find(({ subject, verb }) =>
+      subject.subjectType === role.subjectType &&
+      subject.subjectId === role.subjectId &&
+      verb === "close",
+    );
+    if (closeRule === undefined) throw new Error("Expected preset close rule");
+
+    await service.removeRule({
+      guildId: "guild-1",
+      ruleId: closeRule.id,
+      actorUserId: "admin-1",
+    });
+
+    await expect(
+      service.listPresetSubjects("guild-1", "support_staff"),
+    ).resolves.toEqual([]);
+  });
+
   it("round-trips guild-wide and exact-ticket custom allow/deny rules", async () => {
     const { service } = await setup();
     await service.applyCustomRules({

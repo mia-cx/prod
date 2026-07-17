@@ -248,16 +248,35 @@ export const createPermissionAdministrationService = (
         guildId,
         presetOrigin(preset),
       );
-      const subjects = new Map<string, PermissionSubject>();
+      const subjects = new Map<
+        string,
+        { subject: PermissionSubject; rules: Set<string> }
+      >();
       for (const identity of identities) {
         const key = `${identity.subject.subjectType}:${identity.subject.subjectId}`;
-        subjects.set(key, identity.subject);
+        const entry = subjects.get(key) ?? {
+          subject: identity.subject,
+          rules: new Set<string>(),
+        };
+        entry.rules.add(
+          `${identity.object.objectType}:${identity.object.objectId}:${identity.verb}`,
+        );
+        subjects.set(key, entry);
       }
-      return [...subjects.values()].sort(
+      const requiredRules = PERMISSION_PRESET_RULES[preset].map(
+        ({ object, verb }) =>
+          `${object.objectType}:${object.objectId}:${verb}`,
+      );
+      return [...subjects.values()]
+        .filter(({ rules }) =>
+          requiredRules.every((requiredRule) => rules.has(requiredRule)),
+        )
+        .map(({ subject }) => subject)
+        .sort(
         (left, right) =>
           left.subjectType.localeCompare(right.subjectType) ||
           left.subjectId.localeCompare(right.subjectId),
-      );
+        );
     },
     setPresetSubjects: async (input: {
       guildId: string;
