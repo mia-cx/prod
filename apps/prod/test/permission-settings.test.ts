@@ -56,54 +56,11 @@ const setup = (
       subjects.set(input.preset, input.subjects);
     },
   );
-  const addPresetSubjects = vi.fn(
-    async (input: {
-      preset: PermissionPreset;
-      subjects: readonly PermissionSubject[];
-    }) => {
-      const current = subjects.get(input.preset) ?? [];
-      const merged = new Map(
-        current.map((subject) => [
-          `${subject.subjectType}:${subject.subjectId}`,
-          subject,
-        ]),
-      );
-      for (const subject of input.subjects) {
-        merged.set(`${subject.subjectType}:${subject.subjectId}`, subject);
-      }
-      subjects.set(input.preset, [...merged.values()]);
-    },
-  );
-  const removePresetSubjects = vi.fn(
-    async (input: {
-      preset: PermissionPreset;
-      subjects: readonly PermissionSubject[];
-    }) => {
-      const removed = new Set(
-        input.subjects.map(
-          (subject) => `${subject.subjectType}:${subject.subjectId}`,
-        ),
-      );
-      subjects.set(
-        input.preset,
-        (subjects.get(input.preset) ?? []).filter(
-          (subject) =>
-            !removed.has(`${subject.subjectType}:${subject.subjectId}`),
-        ),
-      );
-    },
-  );
-  const clearPreset = vi.fn(async (input: { preset: PermissionPreset }) => {
-    subjects.set(input.preset, []);
-  });
   const applyCustomRules = vi.fn(async () => undefined);
   const removeRule = vi.fn(async () => undefined);
   const service: PermissionAdministrationService = {
     listPresetSubjects: async (_guildId, preset) => subjects.get(preset) ?? [],
     setPresetSubjects,
-    addPresetSubjects,
-    removePresetSubjects,
-    clearPreset,
     applyCustomRules,
     listRules: async ({ offset = 0, limit = 10 }) => ({
       items: rules.slice(offset, offset + limit),
@@ -113,24 +70,16 @@ const setup = (
     }),
     removeRule,
   };
-  let time = 1_000;
   const category = createPermissionSettingsCategory<Context>({
     service,
     authorize: () => true,
     requireAuthorization: async () => undefined,
-    now: () => time,
   });
   return {
     category,
     setPresetSubjects,
-    addPresetSubjects,
-    removePresetSubjects,
-    clearPreset,
     applyCustomRules,
     removeRule,
-    advanceTime: (milliseconds: number) => {
-      time += milliseconds;
-    },
   };
 };
 
@@ -161,31 +110,35 @@ const mentionables: readonly SettingsMentionable[] = [
 ];
 
 describe("permission settings category", () => {
-  it("adds users and roles through one preset mentionable control", async () => {
-    const { category, addPresetSubjects } = setup();
-    const add = field(category, "support_staff", "add");
-    if (add.kind !== "mentionable-select")
+  it("edits users and roles through one preset mentionable control", async () => {
+    const { category, setPresetSubjects } = setup([
+      { subjectType: "role", subjectId: "role-1" },
+    ]);
+    const subjects = field(category, "support_staff", "subjects");
+    if (subjects.kind !== "mentionable-select")
       throw new Error("Expected mentionable select");
 
-    await add.mutate(mentionables, context);
+    expect(await subjects.load(context)).toMatchObject({
+      defaults: [{ kind: "role", id: "role-1" }],
+      minValues: 0,
+      maxValues: 25,
+    });
+    await subjects.mutate([mentionables[0]!], context);
 
-    expect(addPresetSubjects).toHaveBeenCalledWith(
+    expect(setPresetSubjects).toHaveBeenCalledWith(
       expect.objectContaining({
         guildId: "guild-1",
         preset: "support_staff",
-        subjects: [
-          { subjectType: "user", subjectId: "user-1" },
-          { subjectType: "role", subjectId: "role-1" },
-        ],
+        subjects: [{ subjectType: "user", subjectId: "user-1" }],
         actorUserId: "admin-1",
       }),
     );
   });
 
-  it("renders explicit subject types with stateful preset pagination", async () => {
-    const subjects = Array.from({ length: 80 }, (_, index) => ({
+  it("renders explicit subject types in the native preset selector", async () => {
+    const subjects = Array.from({ length: 2 }, (_, index) => ({
       subjectType: index % 2 === 0 ? ("user" as const) : ("role" as const),
-      subjectId: `subject-${String(index)}`,
+      subjectId: `12345678901234567${String(index)}`,
     }));
     const { category } = setup(subjects);
     const renderer = createSettingsRenderer({
@@ -204,61 +157,33 @@ describe("permission settings category", () => {
 
     expect(rendered.location.pageCount).toBe(1);
     const content = JSON.stringify(rendered.components);
-    expect(content).toContain("User · subject-0");
-    expect(content).toContain("Role · subject-1");
+    expect(content).toContain("User · 123456789012345670");
+    expect(content).toContain("Role · 123456789012345671");
   });
 
-  it("can reach and remove a preset subject beyond the first 500", async () => {
-    const subjects = Array.from({ length: 520 }, (_, index) => ({
-      subjectType: "role" as const,
-      subjectId: `subject-${String(index)}`,
-    }));
-    const { category, removePresetSubjects } = setup(subjects);
-    const next = field(category, "support_staff", "next");
-    const remove = field(category, "support_staff", "remove");
-    if (next.kind !== "button" || remove.kind !== "string-select") {
-      throw new Error("Expected preset pagination controls");
-    }
-    for (let page = 0; page < 20; page += 1) await next.mutate(context);
-
-    expect(await remove.load(context)).toMatchObject({
-      options: expect.arrayContaining([
-        expect.objectContaining({ value: "role:subject-500" }),
-      ]),
-    });
-    await remove.mutate(["role:subject-500"], context);
-    expect(removePresetSubjects).toHaveBeenCalledWith(
-      expect.objectContaining({
-        preset: "support_staff",
-        subjects: [{ subjectType: "role", subjectId: "subject-500" }],
-      }),
-    );
-  });
-
-  it("requires a second clear click within the confirmation window", async () => {
-    const { category, clearPreset, advanceTime } = setup([
+  it("clears a preset by removing every mentionable selection", async () => {
+    const { category, setPresetSubjects } = setup([
       { subjectType: "role", subjectId: "role-1" },
     ]);
-    const clear = field(category, "support_staff", "clear");
-    if (clear.kind !== "button") throw new Error("Expected clear button");
+    const subjects = field(category, "support_staff", "subjects");
+    if (subjects.kind !== "mentionable-select") {
+      throw new Error("Expected mentionable select");
+    }
 
-    await clear.mutate(context);
-    expect(clearPreset).not.toHaveBeenCalled();
-    expect(await clear.load(context)).toMatchObject({
-      buttonLabel: "Confirm clear",
-    });
-    await clear.mutate(context);
-    expect(clearPreset).toHaveBeenCalledWith(
+    await subjects.mutate([], context);
+    expect(setPresetSubjects).toHaveBeenCalledWith(
       expect.objectContaining({
         guildId: "guild-1",
         preset: "support_staff",
+        subjects: [],
         actorUserId: "admin-1",
       }),
     );
-
-    advanceTime(2 * 60 * 1_000 + 1);
-    await clear.mutate(context);
-    expect(clearPreset).toHaveBeenCalledOnce();
+    expect(
+      category.subcategories
+        .find(({ id }) => id === "support_staff")
+        ?.fields.map(({ id }) => id),
+    ).toEqual(["current", "subjects"]);
   });
 
   it("previews a staged exact-ticket deny before confirmation", async () => {

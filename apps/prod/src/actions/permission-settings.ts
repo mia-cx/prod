@@ -32,7 +32,6 @@ export type CreatePermissionSettingsCategoryOptions<
   service: PermissionAdministrationService;
   authorize: SettingsAuthorization<Context>;
   requireAuthorization(context: Context): Promise<void>;
-  now?: () => number;
 }>;
 
 type CustomRuleDraft = {
@@ -63,9 +62,7 @@ const PRESET_DETAILS: Readonly<
 };
 
 const PRESETS = Object.keys(PRESET_DETAILS) as readonly PermissionPreset[];
-const SUBJECTS_PER_CONTROL = 25;
 const RULES_PER_CONTROL = 25;
-const CLEAR_CONFIRMATION_MS = 2 * 60 * 1_000;
 const SESSION_STATE_LIMIT = 100;
 
 const requireGuildId = (context: PermissionSettingsContext): string => {
@@ -74,9 +71,6 @@ const requireGuildId = (context: PermissionSettingsContext): string => {
   }
   return context.guildId;
 };
-
-const subjectKey = (subject: PermissionSubject): string =>
-  `${subject.subjectType}:${subject.subjectId}`;
 
 const subjectLabel = (subject: PermissionSubject): string =>
   `${subject.subjectType === "user" ? "User" : "Role"} · ${subject.subjectId}`;
@@ -92,15 +86,6 @@ const invalid = (message: string): SettingsMutationResult => ({
   status: "invalid",
   issues: [{ message }],
 });
-
-const presetSubjectOptions = (
-  subjects: readonly PermissionSubject[],
-): readonly SettingsSelectOption[] =>
-  subjects.map((subject) => ({
-    label: subjectLabel(subject),
-    value: subjectKey(subject),
-    description: `Remove this ${subject.subjectType} from the preset`,
-  }));
 
 const emptyOption = (label: string): readonly SettingsSelectOption[] => [
   { label, value: "none" },
@@ -179,20 +164,13 @@ export function createPermissionSettingsCategory<
 >(
   options: CreatePermissionSettingsCategoryOptions<Context>,
 ): SettingsCategory<Context> {
-  const now = options.now ?? Date.now;
-  const clearConfirmations = new Map<string, number>();
   const drafts = new Map<string, CustomRuleDraft>();
-  const presetRemovalPages = new Map<string, number>();
   const ruleRemovalPages = new Map<string, number>();
   const sessions = new Map<string, true>();
   const clearSessionState = (key: string): void => {
     sessions.delete(key);
     drafts.delete(key);
     ruleRemovalPages.delete(key);
-    for (const preset of PRESETS) {
-      clearConfirmations.delete(`${key}:${preset}`);
-      presetRemovalPages.delete(`${key}:${preset}`);
-    }
   };
   const draftKey = (context: Context): string => {
     const key = `${requireGuildId(context)}:${context.userId}:${context.settingsSessionId}`;
@@ -247,18 +225,27 @@ export function createPermissionSettingsCategory<
       },
       {
         kind: "mentionable-select",
-        id: "add",
-        label: `Add ${details.label.toLowerCase()}`,
-        description:
-          "Select users and roles together. Existing members remain configured.",
-        load: async (context) => ({
-          value: `${String((await options.service.listPresetSubjects(requireGuildId(context), preset)).length)} configured`,
-          placeholder: "Choose users and roles to add",
-          minValues: 1,
-          maxValues: 25,
-        }),
+        id: "subjects",
+        label: details.label,
+        description: "Select every user and role that belongs to this preset.",
+        load: async (context) => {
+          const subjects = await options.service.listPresetSubjects(
+            requireGuildId(context),
+            preset,
+          );
+          return {
+            value: `${String(subjects.length)} configured`,
+            defaults: subjects.map((subject) => ({
+              kind: subject.subjectType,
+              id: subject.subjectId,
+            })),
+            placeholder: "Choose users and roles",
+            minValues: 0,
+            maxValues: 25,
+          };
+        },
         mutate: async (values, context) => {
-          await options.service.addPresetSubjects({
+          await options.service.setPresetSubjects({
             guildId: requireGuildId(context),
             preset,
             subjects: values.map(mentionableSubject),
@@ -268,134 +255,6 @@ export function createPermissionSettingsCategory<
         },
       },
     ];
-    const removalPageKey = (context: Context) =>
-      `${draftKey(context)}:${preset}`;
-    const getRemovalPage = (context: Context) =>
-      presetRemovalPages.get(removalPageKey(context)) ?? 0;
-    fields.push({
-      kind: "string-select",
-      id: "remove",
-      label: "Remove subjects on current page",
-      load: async (context) => {
-        const subjects = await options.service.listPresetSubjects(
-          requireGuildId(context),
-          preset,
-        );
-        const lastPage = Math.max(
-          0,
-          Math.ceil(subjects.length / SUBJECTS_PER_CONTROL) - 1,
-        );
-        const pageNumber = Math.min(getRemovalPage(context), lastPage);
-        presetRemovalPages.set(removalPageKey(context), pageNumber);
-        const page = subjects.slice(
-          pageNumber * SUBJECTS_PER_CONTROL,
-          (pageNumber + 1) * SUBJECTS_PER_CONTROL,
-        );
-        return {
-          value: `Page ${String(pageNumber + 1)} of ${String(lastPage + 1)} · ${String(subjects.length)} configured`,
-          options:
-            page.length === 0
-              ? emptyOption("No configured subjects")
-              : presetSubjectOptions(page),
-          minValues: 1,
-          maxValues: Math.max(1, page.length),
-          disabled: page.length === 0,
-        };
-      },
-      mutate: async (values, context) => {
-        const subjects = values
-          .filter((value) => value !== "none")
-          .map((value) => {
-            const [subjectType, subjectId] = value.split(":", 2);
-            return {
-              subjectType: subjectType as "user" | "role",
-              subjectId: subjectId!,
-            };
-          });
-        await options.service.removePresetSubjects({
-          guildId: requireGuildId(context),
-          preset,
-          subjects,
-          actorUserId: context.userId,
-          recheckAuthorization: () => options.requireAuthorization(context),
-        });
-      },
-    });
-    fields.push(
-      {
-        kind: "button",
-        id: "previous",
-        label: "Previous removal page",
-        load: (context) => ({
-          value: "Show the previous page of configured subjects.",
-          buttonLabel: "Previous",
-          disabled: getRemovalPage(context) === 0,
-        }),
-        mutate: (context) => {
-          presetRemovalPages.set(
-            removalPageKey(context),
-            Math.max(0, getRemovalPage(context) - 1),
-          );
-        },
-      },
-      {
-        kind: "button",
-        id: "next",
-        label: "Next removal page",
-        load: async (context) => {
-          const count = (
-            await options.service.listPresetSubjects(
-              requireGuildId(context),
-              preset,
-            )
-          ).length;
-          return {
-            value: "Show the next page of configured subjects.",
-            buttonLabel: "Next",
-            disabled:
-              (getRemovalPage(context) + 1) * SUBJECTS_PER_CONTROL >= count,
-          };
-        },
-        mutate: (context) => {
-          presetRemovalPages.set(
-            removalPageKey(context),
-            getRemovalPage(context) + 1,
-          );
-        },
-      },
-    );
-    fields.push({
-      kind: "button",
-      id: "clear",
-      label: `Clear ${details.label.toLowerCase()}`,
-      description:
-        "Requires a second click and preserves rules with another origin.",
-      style: ButtonStyle.Danger,
-      load: (context) => {
-        const key = `${draftKey(context)}:${preset}`;
-        const armed = (clearConfirmations.get(key) ?? 0) > now();
-        return {
-          value: armed
-            ? "Confirmation armed for two minutes. Click again to clear this preset."
-            : "Click once to arm confirmation.",
-          buttonLabel: armed ? "Confirm clear" : "Clear preset",
-        };
-      },
-      mutate: async (context) => {
-        const key = `${draftKey(context)}:${preset}`;
-        if ((clearConfirmations.get(key) ?? 0) <= now()) {
-          clearConfirmations.set(key, now() + CLEAR_CONFIRMATION_MS);
-          return;
-        }
-        await options.service.clearPreset({
-          guildId: requireGuildId(context),
-          preset,
-          actorUserId: context.userId,
-          recheckAuthorization: () => options.requireAuthorization(context),
-        });
-        clearConfirmations.delete(key);
-      },
-    });
     return {
       id: preset,
       label: details.label,

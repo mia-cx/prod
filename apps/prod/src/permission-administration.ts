@@ -136,26 +136,6 @@ export interface PermissionAdministrationService {
     actorUserId: string;
     recheckAuthorization?: PermissionMutationAuthorization;
   }): Promise<void>;
-  addPresetSubjects(input: {
-    guildId: string;
-    preset: PermissionPreset;
-    subjects: readonly PermissionSubject[];
-    actorUserId: string;
-    recheckAuthorization?: PermissionMutationAuthorization;
-  }): Promise<void>;
-  removePresetSubjects(input: {
-    guildId: string;
-    preset: PermissionPreset;
-    subjects: readonly PermissionSubject[];
-    actorUserId: string;
-    recheckAuthorization?: PermissionMutationAuthorization;
-  }): Promise<void>;
-  clearPreset(input: {
-    guildId: string;
-    preset: PermissionPreset;
-    actorUserId: string;
-    recheckAuthorization?: PermissionMutationAuthorization;
-  }): Promise<void>;
   applyCustomRules(input: {
     guildId: string;
     subjects: readonly PermissionSubject[];
@@ -254,40 +234,6 @@ export const createPermissionAdministrationService = (
   const listGuildRules = (guildId: string) =>
     options.rules.listForContext(createProdAuthorizationContext(guildId));
 
-  const presetChanges = (
-    guildId: string,
-    preset: PermissionPreset,
-    subjects: readonly PermissionSubject[],
-    kind: "put" | "remove",
-  ): PermissionContributionChange[] => {
-    for (const subject of subjects) validateSubject(subject);
-    const origin = presetOrigin(preset);
-    return subjects.flatMap((subject) =>
-      PERMISSION_PRESET_RULES[preset].map((presetRule) => {
-        assertObjectVerb(presetRule.object, presetRule.verb);
-        const identity = {
-          guildId,
-          subject,
-          object: presetRule.object,
-          verb: presetRule.verb,
-        };
-        return kind === "put"
-          ? { kind, identity, origin, permit: "allow" as const }
-          : { kind, identity, origin };
-      }),
-    );
-  };
-
-  const applyAuthorized = async (
-    guildId: string,
-    actorUserId: string,
-    changes: readonly PermissionContributionChange[],
-    recheckAuthorization?: PermissionMutationAuthorization,
-  ) => {
-    await authorize(guildId, actorUserId, recheckAuthorization);
-    await options.contributions.apply({ changes, actorUserId });
-  };
-
   const service: PermissionAdministrationService = {
     listPresetSubjects: async (guildId: string, preset: PermissionPreset) => {
       const identities = await options.contributions.listForSource(
@@ -357,34 +303,6 @@ export const createPermissionAdministrationService = (
         changes,
         actorUserId: input.actorUserId,
       });
-    },
-    addPresetSubjects: async (input) =>
-      applyAuthorized(
-        input.guildId,
-        input.actorUserId,
-        presetChanges(input.guildId, input.preset, input.subjects, "put"),
-        input.recheckAuthorization,
-      ),
-    removePresetSubjects: async (input) =>
-      applyAuthorized(
-        input.guildId,
-        input.actorUserId,
-        presetChanges(input.guildId, input.preset, input.subjects, "remove"),
-        input.recheckAuthorization,
-      ),
-    clearPreset: async (input) => {
-      await applyAuthorized(
-        input.guildId,
-        input.actorUserId,
-        [
-          {
-            kind: "clear-source",
-            guildId: input.guildId,
-            origin: presetOrigin(input.preset),
-          },
-        ],
-        input.recheckAuthorization,
-      );
     },
     applyCustomRules: async (input: {
       guildId: string;

@@ -272,7 +272,7 @@ const mentionableInteraction = (
       action: "mentionable-select",
       categoryId: "permissions",
       subcategoryId: preset,
-      fieldId: "add",
+      fieldId: "subjects",
       page: 0,
     }),
     values,

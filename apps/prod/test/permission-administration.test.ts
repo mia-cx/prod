@@ -150,28 +150,6 @@ describe("permission administration", () => {
     ]);
   });
 
-  it("preserves concurrent preset additions from separate settings views", async () => {
-    const { service } = await setup();
-    await Promise.all([
-      service.addPresetSubjects({
-        guildId: "guild-1",
-        preset: "support_staff",
-        subjects: [role],
-        actorUserId: "admin-1",
-      }),
-      service.addPresetSubjects({
-        guildId: "guild-1",
-        preset: "support_staff",
-        subjects: [user],
-        actorUserId: "admin-2",
-      }),
-    ]);
-
-    await expect(
-      service.listPresetSubjects("guild-1", "support_staff"),
-    ).resolves.toEqual([role, user]);
-  });
-
   it("round-trips guild-wide and exact-ticket custom allow/deny rules", async () => {
     const { service } = await setup();
     await service.applyCustomRules({
