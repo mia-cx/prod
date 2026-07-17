@@ -649,6 +649,50 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("skips departed reporters while resuming remaining active access", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const departed = await store.create({
+      id: "ticket-departed-reporter",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-departed",
+      originatingAlias: "issue",
+    });
+    const remaining = await store.create({
+      id: "ticket-remaining-reporter",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-remaining",
+      originatingAlias: "report",
+    });
+    await store.beginReporterAccess(departed, emptyAccessSnapshot);
+    await store.beginReporterAccess(remaining, emptyAccessSnapshot);
+    const remainingReporter = { id: "reporter-remaining" } as GuildMember;
+    const discord = discordFixture({
+      validateReporter: vi.fn(async (_guild, reporterUserId) => {
+        if (reporterUserId === "reporter-departed") {
+          throw { code: RESTJSONErrorCodes.UnknownMember };
+        }
+        return remainingReporter;
+      }),
+    });
+    const service = createTicketProvisioningService(settings, store, discord);
+    try {
+      await expect(service.resumeHubAccess(guild, "hub-1")).resolves.toBe(1);
+      expect(discord.validateReporter).toHaveBeenCalledTimes(2);
+      expect(discord.grantReporterAccess).toHaveBeenCalledOnce();
+      expect(discord.grantReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        remainingReporter,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   it("recovers a known thread idempotently without creating another thread", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);

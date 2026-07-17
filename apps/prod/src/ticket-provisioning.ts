@@ -761,14 +761,24 @@ export const createTicketProvisioningService = (
             guild.id,
             hubChannelId,
           );
+          let resumed = 0;
           for (const ownership of ownerships) {
-            const reporter = await discord.validateReporter(
-              guild,
-              ownership.reporterUserId,
-            );
+            let reporter: GuildMember;
+            try {
+              reporter = await discord.validateReporter(
+                guild,
+                ownership.reporterUserId,
+              );
+            } catch (error) {
+              if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMember)) {
+                continue;
+              }
+              throw error;
+            }
             await discord.grantReporterAccess(guild, hubChannelId, reporter);
+            resumed += 1;
           }
-          return ownerships.length;
+          return resumed;
         }),
       ),
   };

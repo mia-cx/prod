@@ -280,10 +280,7 @@ export const createProdActionRuntime = (
       if (state.hubChannelId !== thread.parentId) return;
       try {
         await deletePublicSupportHubThread(thread);
-        await options.ticketProvisioningService.resumeHubAccess(
-          thread.guild,
-          state.hubChannelId,
-        );
+        await reconcileHubSafety(thread.guild, state.hubChannelId);
       } catch (error) {
         const unsafeError = await suspendHubSafety(
           thread.guild,

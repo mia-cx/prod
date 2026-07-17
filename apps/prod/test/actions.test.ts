@@ -698,6 +698,51 @@ describe("Prod action runtime", () => {
     expect(ticketProvisioningService.suspendHubAccess).not.toHaveBeenCalled();
   });
 
+  it("revalidates parent history before resuming after public-thread cleanup", async () => {
+    vi.useFakeTimers();
+    const unsafeHistory = "unmanaged starter message remains";
+    const unsafeHubDiscord = {
+      ...supportHubDiscord,
+      deletePublicThreads: vi.fn().mockResolvedValue(0),
+      validateHub: vi
+        .fn()
+        .mockResolvedValue({ valid: false, issues: [unsafeHistory] }),
+    };
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockReset();
+    vi.mocked(ticketProvisioningService.suspendHubAccess)
+      .mockReset()
+      .mockResolvedValue(0);
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      supportHubDiscord: unsafeHubDiscord,
+      hubSafetyRetryMs: 10,
+    });
+    const threadGuild = { id: "guild-1" };
+    const publicThread = {
+      type: ChannelType.PublicThread,
+      guildId: "guild-1",
+      guild: threadGuild,
+      parentId: "123456789012345678",
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await expect(runtime.handleThread!(publicThread as never)).rejects.toThrow(
+      unsafeHistory,
+    );
+
+    expect(publicThread.delete).toHaveBeenCalledOnce();
+    expect(unsafeHubDiscord.deletePublicThreads).toHaveBeenCalledWith(
+      threadGuild,
+      "123456789012345678",
+    );
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledWith(
+      threadGuild,
+      "123456789012345678",
+    );
+    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it("suspends reporter access when live public drift cannot be deleted", async () => {
     vi.useFakeTimers();
     vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
