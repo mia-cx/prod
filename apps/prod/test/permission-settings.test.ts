@@ -252,6 +252,46 @@ describe("permission settings category", () => {
     );
   });
 
+  it("refreshes an expired selector instead of silently skipping removals", async () => {
+    const { category, updatePresetSubjects } = setup([
+      { subjectType: "role", subjectId: "role-1" },
+    ]);
+    const subjects = field(category, "support_staff", "subjects");
+    if (subjects.kind !== "mentionable-select") {
+      throw new Error("Expected mentionable select");
+    }
+
+    await expect(subjects.mutate([], context)).resolves.toMatchObject({
+      status: "invalid",
+      issues: [
+        expect.objectContaining({ message: expect.stringContaining("expired") }),
+      ],
+    });
+    expect(updatePresetSubjects).not.toHaveBeenCalled();
+  });
+
+  it("expires selector baselines with abandoned settings sessions", async () => {
+    const { category, updatePresetSubjects } = setup([
+      { subjectType: "role", subjectId: "role-1" },
+    ]);
+    const subjects = field(category, "support_staff", "subjects");
+    if (subjects.kind !== "mentionable-select") {
+      throw new Error("Expected mentionable select");
+    }
+    await subjects.load(context, "render");
+    for (let index = 0; index < 100; index += 1) {
+      await subjects.load(
+        { ...context, settingsSessionId: `abandoned-${String(index)}` },
+        "render",
+      );
+    }
+
+    await expect(subjects.mutate([], context)).resolves.toMatchObject({
+      status: "invalid",
+    });
+    expect(updatePresetSubjects).not.toHaveBeenCalled();
+  });
+
   it("recovers oversized legacy presets through the same native selector", async () => {
     const initial = Array.from({ length: 26 }, (_, index) => ({
       subjectType: "role" as const,

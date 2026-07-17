@@ -166,6 +166,28 @@ describe("permission settings integration", () => {
       actorUserId: "seed-admin",
     });
     guildRecord.ownerId = managerId;
+    await runtime.handleInteraction(
+      navigationInteraction(
+        guild,
+        {
+          action: "category",
+          categoryId: "setup",
+          subcategoryId: "hub",
+        },
+        "permissions",
+      ) as unknown as Interaction,
+    );
+    await runtime.handleInteraction(
+      navigationInteraction(
+        guild,
+        {
+          action: "subcategory",
+          categoryId: "permissions",
+          subcategoryId: "support_staff",
+        },
+        "configurator",
+      ) as unknown as Interaction,
+    );
     const bootstrap = mentionableInteraction(guild, "configurator", [
       configuratorRoleId,
     ]);
@@ -178,6 +200,17 @@ describe("permission settings integration", () => {
     guildRecord.ownerId = "123456789012345698";
 
     const fetchesBeforeMutation = fetchMember.mock.calls.length;
+    await runtime.handleInteraction(
+      navigationInteraction(
+        guild,
+        {
+          action: "subcategory",
+          categoryId: "permissions",
+          subcategoryId: "support_staff",
+        },
+        "support_staff",
+      ) as unknown as Interaction,
+    );
     const supportStaff = mentionableInteraction(guild, "support_staff", [
       targetUserId,
       targetRoleId,
@@ -293,4 +326,32 @@ const mentionableInteraction = (
   return interaction as typeof interaction & {
     followUp: ReturnType<typeof vi.fn>;
   };
+};
+
+const navigationInteraction = (
+  guild: Guild,
+  route: Readonly<{
+    action: "category" | "subcategory";
+    categoryId: string;
+    subcategoryId: string;
+  }>,
+  value: string,
+) => {
+  const interaction: Record<string, unknown> = {
+    ...baseInteraction(guild),
+    customId: encodeSettingsCustomId({ ...route, page: 0 }),
+    values: [value],
+    message: { id: "settings-message" },
+    isFromMessage: () => true,
+    isChatInputCommand: () => false,
+    isStringSelectMenu: () => true,
+    reply: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
+    editReply: vi.fn().mockResolvedValue(undefined),
+    deferUpdate: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+    }),
+  };
+  return interaction;
 };

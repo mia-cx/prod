@@ -260,7 +260,12 @@ export function createPermissionSettingsCategory<
         },
         mutate: async (values, context) => {
           const key = baselineKey(context);
-          const baseline = presetSubjectBaselines.get(key) ?? [];
+          const baseline = presetSubjectBaselines.get(key);
+          if (baseline === undefined) {
+            return invalid(
+              "This preset selector expired. Review the refreshed selection and try again.",
+            );
+          }
           const selected = values.map(mentionableSubject);
           const baselineByKey = new Map(
             baseline.map((subject) => [
