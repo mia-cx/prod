@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 
 import type { ProdDatabase } from "./database.js";
 import { guildLabelTaxonomies, labels, ticketLabels } from "./schema.js";
 
 export const DEFAULT_LABEL_SEED_VERSION = 1;
+export const MAX_ACTIVE_LABELS = 20;
 
 export const DEFAULT_LABELS = Object.freeze([
   {
@@ -89,6 +90,10 @@ export class LabelNotFoundError extends Error {
 
 export class LabelInactiveError extends Error {
   override readonly name = "LabelInactiveError";
+}
+
+export class LabelLimitError extends Error {
+  override readonly name = "LabelLimitError";
 }
 
 const visibleLength = (value: string): number => [...value].length;
@@ -237,6 +242,16 @@ export const createSqliteLabelTaxonomyStore = (
         ) {
           throw duplicate(normalizedName);
         }
+        const activeCount = transaction
+          .select({ value: count() })
+          .from(labels)
+          .where(and(eq(labels.guildId, guildId), eq(labels.active, true)))
+          .get()!.value;
+        if (activeCount >= MAX_ACTIVE_LABELS) {
+          throw new LabelLimitError(
+            `A server may have at most ${String(MAX_ACTIVE_LABELS)} active labels. Deactivate one before creating another.`,
+          );
+        }
         const timestamp = now();
         const row = {
           id: createId(),
@@ -271,6 +286,11 @@ export const createSqliteLabelTaxonomyStore = (
           .get();
         if (current === undefined) {
           throw new LabelNotFoundError("That label no longer exists.");
+        }
+        if (!current.active) {
+          throw new LabelInactiveError(
+            "Inactive labels are retained as immutable ticket history.",
+          );
         }
         const collision = transaction
           .select({ id: labels.id })

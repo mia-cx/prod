@@ -32,6 +32,7 @@ import type { PermissionAdministrationService } from "../permission-administrati
 import {
   DuplicateLabelNameError,
   LabelInactiveError,
+  LabelLimitError,
   LabelNotFoundError,
   LabelValidationError,
   type LabelTaxonomyStore,
@@ -201,7 +202,8 @@ export function createGuildSetupSettingsConsumer(
         error instanceof LabelValidationError ||
         error instanceof DuplicateLabelNameError ||
         error instanceof LabelNotFoundError ||
-        error instanceof LabelInactiveError
+        error instanceof LabelInactiveError ||
+        error instanceof LabelLimitError
       ) {
         return invalid([issue(error.message)]);
       }
@@ -525,25 +527,13 @@ export function createGuildSetupSettingsConsumer(
                 id: "label-list",
                 label: "Current taxonomy",
                 load: async (context) => {
-                  const allLabels = await labelStore.list(
+                  const activeLabels = await labelStore.list(
                     requireGuild(context).id,
-                    { includeInactive: true },
                   );
-                  const render = (active: boolean) => {
-                    const matching = allLabels.filter(
-                      (label) => label.active === active,
-                    );
-                    return matching.length === 0
-                      ? "None"
-                      : matching
-                          .map(
-                            (label) =>
-                              `**${escapeMarkdown(label.name)}** — ${escapeMarkdown(label.description)}`,
-                          )
-                          .join("\n");
-                  };
                   return {
-                    value: `**Active**\n${render(true)}\n\n**Inactive**\n${render(false)}`,
+                    value: activeLabels
+                      .map((label) => `- **${escapeMarkdown(label.name)}**`)
+                      .join("\n"),
                   };
                 },
               },
@@ -609,7 +599,7 @@ export function createGuildSetupSettingsConsumer(
                 ],
                 load: () => ({
                   value:
-                    "Identify a label by its current name, then replace its display name and description.",
+                    "Identify an active label by its current name, then replace its display name and description.",
                   buttonLabel: "Edit",
                 }),
                 mutate: (values, context) =>

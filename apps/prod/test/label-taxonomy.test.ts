@@ -5,6 +5,8 @@ import {
   DEFAULT_LABELS,
   DuplicateLabelNameError,
   LabelInactiveError,
+  LabelLimitError,
+  MAX_ACTIVE_LABELS,
   createSqliteLabelTaxonomyStore,
   normalizeLabelName,
 } from "../src/label-taxonomy.js";
@@ -175,5 +177,44 @@ describe("SQLite guild label taxonomy", () => {
       reason: expect.any(LabelInactiveError),
     });
     await expect(store.listForTicket("ticket-2")).resolves.toEqual([]);
+  });
+
+  it("bounds active choices while allowing inactive history to accumulate", async () => {
+    const { store } = await setup();
+    await store.ensureDefaults("guild-1");
+    for (
+      let index = DEFAULT_LABELS.length;
+      index < MAX_ACTIVE_LABELS;
+      index++
+    ) {
+      await store.create("guild-1", {
+        name: `custom-${String(index)}`,
+        description: `Custom label ${String(index)}.`,
+      });
+    }
+
+    await expect(
+      store.create("guild-1", {
+        name: "overflow",
+        description: "This label exceeds the active limit.",
+      }),
+    ).rejects.toBeInstanceOf(LabelLimitError);
+
+    await store.deactivate("guild-1", "custom-5");
+    await expect(
+      store.create("guild-1", {
+        name: "replacement",
+        description: "A replacement active label.",
+      }),
+    ).resolves.toMatchObject({ active: true });
+    await expect(store.list("guild-1")).resolves.toHaveLength(
+      MAX_ACTIVE_LABELS,
+    );
+    await expect(
+      store.update("guild-1", "custom-5", {
+        name: "changed-history",
+        description: "Historical metadata must remain stable.",
+      }),
+    ).rejects.toBeInstanceOf(LabelInactiveError);
   });
 });

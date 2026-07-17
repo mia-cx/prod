@@ -20,7 +20,10 @@ import {
 } from "../src/authorization.js";
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
-import { createSqliteLabelTaxonomyStore } from "../src/label-taxonomy.js";
+import {
+  MAX_ACTIVE_LABELS,
+  createSqliteLabelTaxonomyStore,
+} from "../src/label-taxonomy.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import type { HubTransition } from "../src/hub-transition.js";
 import { createLogger } from "../src/logger.js";
@@ -734,9 +737,9 @@ describe("guild setup settings integration", () => {
       modalValues: { name: "connectivity" },
     });
     await runtime.handleInteraction(deactivate as unknown as Interaction);
-    expect(JSON.stringify(deactivate.editReply.mock.calls[0]?.[0])).toContain(
-      "Inactive",
-    );
+    expect(
+      JSON.stringify(deactivate.editReply.mock.calls[0]?.[0]),
+    ).not.toContain("Connectivity");
 
     await expect(labelStore.list(guildId)).resolves.not.toEqual(
       expect.arrayContaining([
@@ -780,5 +783,45 @@ describe("guild setup settings integration", () => {
     await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject({
       active: true,
     });
+  });
+
+  it("keeps every supported active name reachable within the Discord view", async () => {
+    const { runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+    const customNames: string[] = [];
+    for (let index = 0; index < MAX_ACTIVE_LABELS - 5; index++) {
+      const name = `${String(index).padStart(2, "0")}-${"*".repeat(77)}`;
+      customNames.push(name);
+      await labelStore.create(guildId, {
+        name,
+        description: "x".repeat(500),
+      });
+    }
+
+    const edit = component("modal", labelModalRoute("label-edit"), {
+      modalValues: {
+        "current-name": customNames.at(-1)!,
+        name: customNames.at(-1)!.replace("14-", "zz-"),
+        description: "Updated at the supported boundary.",
+      },
+    });
+    await runtime.handleInteraction(edit as unknown as Interaction);
+    const payload = JSON.stringify(edit.editReply.mock.calls[0]?.[0]);
+
+    for (let index = 0; index < customNames.length - 1; index++) {
+      expect(payload).toContain(`${String(index).padStart(2, "0")}-`);
+    }
+    expect(payload).toContain("zz-");
+
+    const overflow = component("modal", labelModalRoute("label-create"), {
+      modalValues: {
+        name: "overflow",
+        description: "This exceeds the supported active taxonomy bound.",
+      },
+    });
+    await runtime.handleInteraction(overflow as unknown as Interaction);
+    expect(JSON.stringify(overflow.editReply.mock.calls[0]?.[0])).toContain(
+      "at most 20 active labels",
+    );
   });
 });
