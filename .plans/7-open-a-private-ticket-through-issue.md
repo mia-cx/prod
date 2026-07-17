@@ -23,7 +23,7 @@ and compensated, and startup reconciles interrupted provisioning idempotently.
 ## TODOs
 
 - [x] Add the application-owned ticket and event schema, migration, SQLite store, and persistence tests.
-- [ ] Implement Discord ticket provisioning, sanitized deterministic instructions, compensation, and focused privacy/idempotency tests.
+- [x] Implement Discord ticket provisioning, sanitized deterministic instructions, compensation, and focused privacy/idempotency tests.
 - [ ] Register `/issue`, `/report`, `/debugshare` and prefix-text aliases with private/minimal link presentation and runtime tests.
 - [ ] Reconcile stale provisioning tickets after Discord startup, run the full automated checks, and document the pending human validation gate.
 
@@ -36,3 +36,4 @@ and compensated, and startup reconciles interrupted provisioning idempotently.
 - Reporter overwrite cleanup will query for other active (`provisioning` or `open`) tickets before removing shared hub access.
 - The issue must remain open until the mandatory real-Discord checklist is completed by a human; the PR will explicitly call out that gate.
 - Persistence validation: `corepack pnpm build`, focused app tests (the app runner executed all 82 tests), app typecheck, and app lint passed.
+- Provisioning validation: app tests (89 total), app typecheck, and app lint passed. Tests assert exact reporter overwrites, invite-only thread creation without hub content, multi-ticket-safe compensation, and marker-based recovery without duplicate instructions.
