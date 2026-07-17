@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, gte, inArray, ne } from "drizzle-orm";
 
 import type { ProdDatabase } from "./database.js";
-import { ticketEvents, tickets } from "./schema.js";
+import {
+  parseReporterHubAccessSnapshot,
+  type ReporterHubAccessSnapshot,
+} from "./reporter-hub-access.js";
+import { reporterHubAccess, ticketEvents, tickets } from "./schema.js";
 
 export type TicketAlias = "issue" | "report" | "debugshare";
 export type TicketStatus = "provisioning" | "open" | "closed" | "failed";
@@ -49,6 +53,14 @@ export interface TicketStore {
   get(ticketId: string): Promise<Ticket | undefined>;
   listProvisioning(): Promise<readonly Ticket[]>;
   hasOtherActiveTicket(ticket: Ticket): Promise<boolean>;
+  beginReporterAccess(
+    ticket: Ticket,
+    snapshot: ReporterHubAccessSnapshot,
+  ): Promise<ReporterHubAccessSnapshot>;
+  getReporterAccess(
+    ticket: Ticket,
+  ): Promise<ReporterHubAccessSnapshot | undefined>;
+  finishReporterAccess(ticket: Ticket): Promise<void>;
   recordProgress(
     ticketId: string,
     eventType: TicketEventType,
@@ -68,7 +80,28 @@ export interface TicketStore {
 export type CreateSqliteTicketStoreOptions = Readonly<{
   now?: () => string;
   createId?: () => string;
+  maxActiveTicketsPerReporter?: number;
+  maxTicketsPerReporterWindow?: number;
+  reporterWindowMs?: number;
+  maxProvisioningTicketsPerGuild?: number;
 }>;
+
+export class TicketAdmissionError extends Error {
+  override readonly name = "TicketAdmissionError";
+  readonly code: "active_limit" | "guild_busy" | "rate_limited";
+
+  constructor(code: TicketAdmissionError["code"], message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+export const DEFAULT_TICKET_ADMISSION = Object.freeze({
+  maxActiveTicketsPerReporter: 5,
+  maxTicketsPerReporterWindow: 3,
+  reporterWindowMs: 60_000,
+  maxProvisioningTicketsPerGuild: 8,
+});
 
 const assertId = (label: string, value: string): void => {
   if (value.trim().length === 0)
@@ -100,6 +133,24 @@ export const createSqliteTicketStore = (
 ): TicketStore => {
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? randomUUID;
+  const admission = {
+    maxActiveTicketsPerReporter:
+      options.maxActiveTicketsPerReporter ??
+      DEFAULT_TICKET_ADMISSION.maxActiveTicketsPerReporter,
+    maxTicketsPerReporterWindow:
+      options.maxTicketsPerReporterWindow ??
+      DEFAULT_TICKET_ADMISSION.maxTicketsPerReporterWindow,
+    reporterWindowMs:
+      options.reporterWindowMs ?? DEFAULT_TICKET_ADMISSION.reporterWindowMs,
+    maxProvisioningTicketsPerGuild:
+      options.maxProvisioningTicketsPerGuild ??
+      DEFAULT_TICKET_ADMISSION.maxProvisioningTicketsPerGuild,
+  };
+  for (const [name, value] of Object.entries(admission)) {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new RangeError(`${name} must be a positive integer`);
+    }
+  }
   const insertEvent = (
     writer: Pick<ProdDatabase, "insert">,
     ticket: Pick<Ticket, "id" | "guildId">,
@@ -156,6 +207,61 @@ export const createSqliteTicketStore = (
         updatedAt: timestamp,
       };
       database.transaction((transaction) => {
+        const activeReporterTickets = transaction
+          .select({ id: tickets.id })
+          .from(tickets)
+          .where(
+            and(
+              eq(tickets.guildId, input.guildId),
+              eq(tickets.reporterUserId, input.reporterUserId),
+              inArray(tickets.status, ["provisioning", "open"]),
+            ),
+          )
+          .all().length;
+        if (activeReporterTickets >= admission.maxActiveTicketsPerReporter) {
+          throw new TicketAdmissionError(
+            "active_limit",
+            "You already have several active tickets. Please use an existing ticket or ask support staff for help.",
+          );
+        }
+        const windowStart = new Date(
+          new Date(timestamp).getTime() - admission.reporterWindowMs,
+        ).toISOString();
+        const recentReporterTickets = transaction
+          .select({ id: tickets.id })
+          .from(tickets)
+          .where(
+            and(
+              eq(tickets.guildId, input.guildId),
+              eq(tickets.reporterUserId, input.reporterUserId),
+              gte(tickets.createdAt, windowStart),
+            ),
+          )
+          .all().length;
+        if (recentReporterTickets >= admission.maxTicketsPerReporterWindow) {
+          throw new TicketAdmissionError(
+            "rate_limited",
+            "Please wait a minute before opening another private ticket.",
+          );
+        }
+        const provisioningGuildTickets = transaction
+          .select({ id: tickets.id })
+          .from(tickets)
+          .where(
+            and(
+              eq(tickets.guildId, input.guildId),
+              eq(tickets.status, "provisioning"),
+            ),
+          )
+          .all().length;
+        if (
+          provisioningGuildTickets >= admission.maxProvisioningTicketsPerGuild
+        ) {
+          throw new TicketAdmissionError(
+            "guild_busy",
+            "This server is opening several tickets right now. Please retry shortly.",
+          );
+        }
         transaction.insert(tickets).values(row).run();
         insertEvent(
           transaction,
@@ -196,12 +302,74 @@ export const createSqliteTicketStore = (
         .where(
           and(
             eq(tickets.guildId, ticket.guildId),
+            eq(tickets.hubChannelId, ticket.hubChannelId),
             eq(tickets.reporterUserId, ticket.reporterUserId),
             inArray(tickets.status, ["provisioning", "open"]),
             ne(tickets.id, ticket.id),
           ),
         )
         .get() !== undefined,
+    beginReporterAccess: async (
+      ticket: Ticket,
+      snapshot: ReporterHubAccessSnapshot,
+    ) => {
+      const timestamp = now();
+      database
+        .insert(reporterHubAccess)
+        .values({
+          guildId: ticket.guildId,
+          hubChannelId: ticket.hubChannelId,
+          reporterUserId: ticket.reporterUserId,
+          snapshotJson: JSON.stringify(snapshot),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .onConflictDoNothing()
+        .run();
+      const stored = database
+        .select({ snapshotJson: reporterHubAccess.snapshotJson })
+        .from(reporterHubAccess)
+        .where(
+          and(
+            eq(reporterHubAccess.guildId, ticket.guildId),
+            eq(reporterHubAccess.hubChannelId, ticket.hubChannelId),
+            eq(reporterHubAccess.reporterUserId, ticket.reporterUserId),
+          ),
+        )
+        .get();
+      if (stored === undefined) {
+        throw new Error("Reporter hub access ownership was not persisted");
+      }
+      return parseReporterHubAccessSnapshot(stored.snapshotJson);
+    },
+    getReporterAccess: async (ticket: Ticket) => {
+      const stored = database
+        .select({ snapshotJson: reporterHubAccess.snapshotJson })
+        .from(reporterHubAccess)
+        .where(
+          and(
+            eq(reporterHubAccess.guildId, ticket.guildId),
+            eq(reporterHubAccess.hubChannelId, ticket.hubChannelId),
+            eq(reporterHubAccess.reporterUserId, ticket.reporterUserId),
+          ),
+        )
+        .get();
+      return stored === undefined
+        ? undefined
+        : parseReporterHubAccessSnapshot(stored.snapshotJson);
+    },
+    finishReporterAccess: async (ticket: Ticket) => {
+      database
+        .delete(reporterHubAccess)
+        .where(
+          and(
+            eq(reporterHubAccess.guildId, ticket.guildId),
+            eq(reporterHubAccess.hubChannelId, ticket.hubChannelId),
+            eq(reporterHubAccess.reporterUserId, ticket.reporterUserId),
+          ),
+        )
+        .run();
+    },
     recordProgress: async (
       ticketId: string,
       eventType: TicketEventType,

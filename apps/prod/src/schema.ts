@@ -104,6 +104,24 @@ export const ticketEvents = sqliteTable(
   ],
 );
 
+export const reporterHubAccess = sqliteTable(
+  "reporter_hub_access",
+  {
+    guildId: text("guild_id").notNull(),
+    hubChannelId: text("hub_channel_id").notNull(),
+    reporterUserId: text("reporter_user_id").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.guildId, table.hubChannelId, table.reporterUserId],
+    }),
+    index("reporter_hub_access_guild").on(table.guildId),
+  ],
+);
+
 export const schemaContributors = Object.freeze([
   permissionsSchemaOwner,
   modelSettingsSchemaOwner,

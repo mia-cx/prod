@@ -8,6 +8,7 @@ import {
   type PermissionResolvable,
 } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
+import { REPORTER_TICKET_HUB_OVERWRITE } from "../src/reporter-hub-access.js";
 
 import {
   createSupportHubDiscord,
@@ -262,6 +263,30 @@ describe("Discord support hub", () => {
       });
       expect(conflict.editOverwrite).not.toHaveBeenCalled();
     }
+  });
+
+  it("accepts the exact managed reporter ticket overwrite", async () => {
+    const hub = createSupportHubDiscord();
+    const managed = fixture();
+    managed.addOverwrite(
+      "reporter-1",
+      [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.SendMessagesInThreads,
+        PermissionFlagsBits.UseApplicationCommands,
+      ],
+      [
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.CreatePublicThreads,
+        PermissionFlagsBits.CreatePrivateThreads,
+      ],
+    );
+
+    await expect(hub.validateHub(managed.guild, "hub-1")).resolves.toEqual({
+      valid: true,
+    });
+    expect(REPORTER_TICKET_HUB_OVERWRITE.SendMessagesInThreads).toBe(true);
   });
 
   it("accepts the bot's managed integration role overwrite", async () => {

@@ -17,6 +17,7 @@ import {
   type HubPermissionState,
   type HubProtectedPermissionName,
 } from "./hub-permission-ownership.js";
+import { isManagedReporterHubAccess } from "./reporter-hub-access.js";
 
 export const EMPTY_HUB_REPORTER_OVERWRITE = Object.freeze({
   SendMessages: false,
@@ -136,6 +137,7 @@ const conflictingOverwriteIssue = (
       overwrite.id !== guild.roles.everyone.id &&
       overwrite.id !== botMember.id &&
       guild.roles.cache.get(overwrite.id)?.tags?.botId !== botMember.id &&
+      !isManagedReporterHubAccess(overwrite) &&
       HUB_PROTECTED_PERMISSION_NAMES.some((name) =>
         overwrite.allow.has(protectedPermissionBits[name]),
       ),

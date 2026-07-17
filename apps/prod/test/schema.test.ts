@@ -5,6 +5,7 @@ import {
   guildSettings,
   permissionRuleEvents,
   permissionRules,
+  reporterHubAccess,
   schemaContributors,
   ticketEvents,
   tickets,
@@ -30,5 +31,6 @@ describe("Drizzle schema composition", () => {
     expect(getTableName(guildSettings)).toBe("guild_settings");
     expect(getTableName(tickets)).toBe("tickets");
     expect(getTableName(ticketEvents)).toBe("ticket_events");
+    expect(getTableName(reporterHubAccess)).toBe("reporter_hub_access");
   });
 });

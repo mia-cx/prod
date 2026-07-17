@@ -10,7 +10,7 @@ import {
   TicketProvisioningError,
   type TicketProvisioningService,
 } from "../ticket-provisioning.js";
-import type { TicketAlias } from "../tickets.js";
+import { TicketAdmissionError, type TicketAlias } from "../tickets.js";
 import type { ProdActionContext } from "./runtime.js";
 
 type CreateTicketInput = Readonly<{
@@ -37,6 +37,12 @@ const outcomeContent = (outcome: DispatchOutcome): string => {
   if (
     outcome.status === "failed" &&
     outcome.error instanceof TicketProvisioningError
+  ) {
+    return outcome.error.message;
+  }
+  if (
+    outcome.status === "failed" &&
+    outcome.error instanceof TicketAdmissionError
   ) {
     return outcome.error.message;
   }

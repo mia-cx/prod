@@ -21,6 +21,7 @@ import {
 import { createLogger } from "../src/logger.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
 import type { TicketProvisioningService } from "../src/ticket-provisioning.js";
+import { TicketAdmissionError } from "../src/tickets.js";
 
 const noMentions = { parse: [], repliedUser: false };
 const permissionOwnership: HubPermissionOwnership = {
@@ -449,6 +450,27 @@ describe("Prod action runtime", () => {
       });
     },
   );
+
+  it("presents persistent ticket admission rejection without provisioning", async () => {
+    vi.mocked(ticketProvisioningService.open).mockRejectedValueOnce(
+      new TicketAdmissionError(
+        "rate_limited",
+        "Please wait a minute before opening another private ticket.",
+      ),
+    );
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = ticketInteraction("issue", null);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Please wait a minute before opening another private ticket.",
+      allowedMentions: { parse: [] },
+    });
+  });
 
   it("returns a minimal text-command link and deletes it after 30 seconds", async () => {
     vi.useFakeTimers();

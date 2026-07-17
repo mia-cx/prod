@@ -2,7 +2,22 @@ import { describe, expect, it } from "vitest";
 
 import { openDatabase } from "../src/database.js";
 import { applyMigrations } from "../src/migrations.js";
+import type { ReporterHubAccessSnapshot } from "../src/reporter-hub-access.js";
 import { createSqliteTicketStore } from "../src/tickets.js";
+
+const emptySnapshot: ReporterHubAccessSnapshot = {
+  version: 1,
+  overwriteExisted: false,
+  permissions: {
+    ViewChannel: "unset",
+    ReadMessageHistory: "unset",
+    SendMessagesInThreads: "unset",
+    UseApplicationCommands: "unset",
+    SendMessages: "unset",
+    CreatePublicThreads: "unset",
+    CreatePrivateThreads: "unset",
+  },
+};
 
 describe("SQLite ticket store", () => {
   it("persists provisioning resources and opens only after both exist", async () => {
@@ -86,7 +101,132 @@ describe("SQLite ticket store", () => {
       expect(await store.hasOtherActiveTicket(first)).toBe(true);
       await store.markFailed(second.id, "controlled failure");
       expect(await store.hasOtherActiveTicket(first)).toBe(false);
-      expect(await store.listProvisioning()).toEqual([first]);
+      const otherHub = await store.create({
+        id: "ticket-3",
+        guildId: "guild-1",
+        hubChannelId: "hub-2",
+        reporterUserId: "reporter-1",
+        originatingAlias: "debugshare",
+      });
+      expect(await store.hasOtherActiveTicket(first)).toBe(false);
+      expect(await store.hasOtherActiveTicket(otherHub)).toBe(false);
+      expect(await store.listProvisioning()).toEqual([first, otherHub]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("persists the first reporter hub-access snapshot until final release", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await store.create({
+        id: "ticket-access",
+        guildId: "guild-1",
+        hubChannelId: "hub-1",
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      expect(await store.beginReporterAccess(ticket, emptySnapshot)).toEqual(
+        emptySnapshot,
+      );
+      const laterSnapshot: ReporterHubAccessSnapshot = {
+        ...emptySnapshot,
+        overwriteExisted: true,
+      };
+      expect(await store.beginReporterAccess(ticket, laterSnapshot)).toEqual(
+        emptySnapshot,
+      );
+      expect(await store.getReporterAccess(ticket)).toEqual(emptySnapshot);
+      await store.finishReporterAccess(ticket);
+      expect(await store.getReporterAccess(ticket)).toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("enforces persistent reporter and guild admission before inserting", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    let timestamp = Date.parse("2026-07-17T10:00:00.000Z");
+    const options = {
+      now: () => new Date(timestamp).toISOString(),
+      maxActiveTicketsPerReporter: 5,
+      maxTicketsPerReporterWindow: 3,
+      reporterWindowMs: 60_000,
+      maxProvisioningTicketsPerGuild: 8,
+    };
+    const store = createSqliteTicketStore(connection.database, options);
+    const create = (id: string, reporterUserId = "reporter-1") =>
+      store.create({
+        id,
+        guildId: "guild-1",
+        hubChannelId: "hub-1",
+        reporterUserId,
+        originatingAlias: "issue",
+      });
+    try {
+      await create("ticket-1");
+      await create("ticket-2");
+      await create("ticket-3");
+      const recreated = createSqliteTicketStore(connection.database, options);
+      await expect(
+        recreated.create({
+          id: "ticket-rate-limited",
+          guildId: "guild-1",
+          hubChannelId: "hub-1",
+          reporterUserId: "reporter-1",
+          originatingAlias: "issue",
+        }),
+      ).rejects.toMatchObject({
+        name: "TicketAdmissionError",
+        code: "rate_limited",
+      });
+      expect(await store.get("ticket-rate-limited")).toBeUndefined();
+
+      await store.markFailed("ticket-1", "retryable failure");
+      await expect(create("ticket-still-rate-limited")).rejects.toMatchObject({
+        code: "rate_limited",
+      });
+      const retryable = await create("ticket-retryable", "reporter-2");
+      await store.markFailed(retryable.id, "retryable failure");
+      await expect(create("ticket-retry", "reporter-2")).resolves.toMatchObject(
+        {
+          status: "provisioning",
+        },
+      );
+
+      timestamp += 61_000;
+      const activeLimited = createSqliteTicketStore(connection.database, {
+        ...options,
+        maxActiveTicketsPerReporter: 2,
+        maxTicketsPerReporterWindow: 10,
+      });
+      await expect(
+        activeLimited.create({
+          id: "ticket-active-limited",
+          guildId: "guild-1",
+          hubChannelId: "hub-1",
+          reporterUserId: "reporter-1",
+          originatingAlias: "issue",
+        }),
+      ).rejects.toMatchObject({ code: "active_limit" });
+
+      const guildLimited = createSqliteTicketStore(connection.database, {
+        ...options,
+        maxTicketsPerReporterWindow: 10,
+        maxProvisioningTicketsPerGuild: 3,
+      });
+      await expect(
+        guildLimited.create({
+          id: "ticket-guild-limited",
+          guildId: "guild-1",
+          hubChannelId: "hub-1",
+          reporterUserId: "reporter-2",
+          originatingAlias: "issue",
+        }),
+      ).rejects.toMatchObject({ code: "guild_busy" });
     } finally {
       connection.close();
     }

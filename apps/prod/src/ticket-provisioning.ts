@@ -2,34 +2,27 @@ import { randomUUID } from "node:crypto";
 import {
   ChannelType,
   escapeMarkdown,
+  OverwriteType,
+  RESTJSONErrorCodes,
   ThreadAutoArchiveDuration,
   type Guild,
+  type GuildMember,
   type Message,
   type PrivateThreadChannel,
   type TextChannel,
 } from "discord.js";
 
 import type { GuildSettingsStore } from "./guild-settings.js";
+import {
+  captureReporterHubAccess,
+  isEmptyPermissionOverwrite,
+  reporterHubAccessRestorationPatch,
+  REPORTER_TICKET_HUB_OVERWRITE,
+  type ReporterHubAccessSnapshot,
+} from "./reporter-hub-access.js";
 import type { Ticket, TicketAlias, TicketStore } from "./tickets.js";
 
-export const REPORTER_TICKET_HUB_OVERWRITE = Object.freeze({
-  ViewChannel: true,
-  ReadMessageHistory: true,
-  SendMessagesInThreads: true,
-  UseApplicationCommands: true,
-  SendMessages: false,
-  CreatePublicThreads: false,
-  CreatePrivateThreads: false,
-} as const);
-
-const RELEASE_REPORTER_TICKET_HUB_OVERWRITE = Object.freeze(
-  Object.fromEntries(
-    Object.keys(REPORTER_TICKET_HUB_OVERWRITE).map((permission) => [
-      permission,
-      null,
-    ]),
-  ),
-);
+export { REPORTER_TICKET_HUB_OVERWRITE } from "./reporter-hub-access.js";
 
 export type OpenTicketInput = Readonly<{
   guild: Guild;
@@ -39,19 +32,30 @@ export type OpenTicketInput = Readonly<{
 }>;
 
 export interface TicketProvisioningDiscord {
-  validateReporter(guild: Guild, reporterUserId: string): Promise<void>;
+  validateReporter(guild: Guild, reporterUserId: string): Promise<GuildMember>;
+  captureReporterAccess(
+    guild: Guild,
+    hubChannelId: string,
+    reporterUserId: string,
+  ): Promise<ReporterHubAccessSnapshot>;
   grantReporterAccess(
     guild: Guild,
     hubChannelId: string,
-    reporterUserId: string,
+    reporter: GuildMember,
   ): Promise<void>;
-  revokeReporterAccess(
+  restoreReporterAccess(
     guild: Guild,
     hubChannelId: string,
     reporterUserId: string,
+    snapshot: ReporterHubAccessSnapshot,
   ): Promise<void>;
   findTicketThread(guild: Guild, ticket: Ticket): Promise<string | undefined>;
   createTicketThread(guild: Guild, ticket: Ticket): Promise<string>;
+  prepareTicketThread(
+    guild: Guild,
+    threadId: string,
+    ticket: Ticket,
+  ): Promise<void>;
   addReporter(
     guild: Guild,
     threadId: string,
@@ -131,8 +135,9 @@ export const ticketOpeningInstructions = (ticket: Ticket): string =>
 const requireHub = async (
   guild: Guild,
   channelId: string,
+  force = false,
 ): Promise<TextChannel> => {
-  const channel = await guild.channels.fetch(channelId);
+  const channel = await guild.channels.fetch(channelId, { force });
   if (channel?.type !== ChannelType.GuildText) {
     throw new Error("The configured support hub is unavailable");
   }
@@ -157,12 +162,35 @@ const findNamedThread = async (
   const active = await threads.fetchActive();
   const activeMatch = active.threads.find((thread) => thread.name === name);
   if (activeMatch?.type === ChannelType.PrivateThread) return activeMatch;
-  const archived = await threads.fetchArchived({ type: "private", limit: 100 });
-  const archivedMatch = archived.threads.find((thread) => thread.name === name);
-  return archivedMatch?.type === ChannelType.PrivateThread
-    ? archivedMatch
-    : undefined;
+  let before: PrivateThreadChannel | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const archived = await threads.fetchArchived({
+      type: "private",
+      fetchAll: true,
+      limit: 100,
+      ...(before === undefined ? {} : { before }),
+    });
+    const archivedMatch = archived.threads.find(
+      (thread) => thread.name === name,
+    );
+    if (archivedMatch?.type === ChannelType.PrivateThread) {
+      return archivedMatch;
+    }
+    if (!archived.hasMore) return undefined;
+    const oldest = archived.threads.last();
+    if (oldest?.type !== ChannelType.PrivateThread) {
+      throw new Error("Discord archived-thread pagination did not advance");
+    }
+    before = oldest;
+  }
+  throw new Error("Ticket thread discovery exceeded its safe page limit");
 };
+
+const isDiscordErrorCode = (error: unknown, code: number): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  error.code === code;
 
 const findManagedOpening = async (
   thread: PrivateThreadChannel,
@@ -171,7 +199,12 @@ const findManagedOpening = async (
   if (ticket.openingMessageId !== undefined) {
     const stored = await thread.messages
       .fetch(ticket.openingMessageId)
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMessage)) {
+          return undefined;
+        }
+        throw error;
+      });
     if (stored !== undefined) return stored;
   }
   const marker = `ticket:${ticket.id}`;
@@ -183,29 +216,66 @@ export const createTicketProvisioningDiscord =
   (): TicketProvisioningDiscord => {
     const discord: TicketProvisioningDiscord = {
       validateReporter: async (guild, reporterUserId) => {
-        await guild.members.fetch(reporterUserId);
+        return guild.members.fetch(reporterUserId);
       },
-      grantReporterAccess: async (guild, hubChannelId, reporterUserId) => {
+      captureReporterAccess: async (guild, hubChannelId, reporterUserId) => {
+        const hub = await requireHub(guild, hubChannelId, true);
+        return captureReporterHubAccess(
+          hub.permissionOverwrites.cache.get(reporterUserId),
+        );
+      },
+      grantReporterAccess: async (guild, hubChannelId, reporter) => {
         const hub = await requireHub(guild, hubChannelId);
         await hub.permissionOverwrites.edit(
-          reporterUserId,
+          reporter,
           REPORTER_TICKET_HUB_OVERWRITE,
-          { reason: "Grant access to Prod private ticket threads" },
+          {
+            type: OverwriteType.Member,
+            reason: "Grant access to Prod private ticket threads",
+          },
         );
       },
-      revokeReporterAccess: async (guild, hubChannelId, reporterUserId) => {
-        const hub = await requireHub(guild, hubChannelId);
-        await hub.permissionOverwrites.edit(
-          reporterUserId,
-          RELEASE_REPORTER_TICKET_HUB_OVERWRITE,
-          { reason: "Release access after Prod ticket provisioning failure" },
-        );
+      restoreReporterAccess: async (
+        guild,
+        hubChannelId,
+        reporterUserId,
+        snapshot,
+      ) => {
+        const hub = await requireHub(guild, hubChannelId, true);
+        const current = hub.permissionOverwrites.cache.get(reporterUserId);
+        const patch = reporterHubAccessRestorationPatch(current, snapshot);
+        if (Object.keys(patch).length > 0) {
+          await hub.permissionOverwrites.edit(reporterUserId, patch, {
+            type: OverwriteType.Member,
+            reason: "Restore access after Prod ticket provisioning failure",
+          });
+        }
+        if (!snapshot.overwriteExisted) {
+          const refreshed = await requireHub(guild, hubChannelId, true);
+          if (
+            isEmptyPermissionOverwrite(
+              refreshed.permissionOverwrites.cache.get(reporterUserId),
+            )
+          ) {
+            await refreshed.permissionOverwrites.delete(
+              reporterUserId,
+              "Remove Prod-created empty reporter overwrite",
+            );
+          }
+        }
       },
       findTicketThread: async (guild, ticket) => {
         if (ticket.threadId !== undefined) {
           const existing = await guild.channels
             .fetch(ticket.threadId)
-            .catch(() => null);
+            .catch((error: unknown) => {
+              if (
+                isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)
+              ) {
+                return null;
+              }
+              throw error;
+            });
           if (
             existing?.type === ChannelType.PrivateThread &&
             existing.parentId === ticket.hubChannelId
@@ -227,6 +297,15 @@ export const createTicketProvisioningDiscord =
           reason: `Provision Prod ticket ${ticket.id}`,
         });
         return thread.id;
+      },
+      prepareTicketThread: async (guild, threadId, ticket) => {
+        const thread = await requirePrivateThread(guild, threadId);
+        if (thread.parentId !== ticket.hubChannelId) {
+          throw new Error("Ticket thread does not belong to its stored hub");
+        }
+        if (thread.archived) {
+          await thread.setArchived(false, `Recover Prod ticket ${ticket.id}`);
+        }
       },
       addReporter: async (guild, threadId, reporterUserId) => {
         const thread = await requirePrivateThread(guild, threadId);
@@ -289,22 +368,28 @@ export const createTicketProvisioningService = (
   const compensate = async (
     guild: Guild,
     ticket: Ticket,
-    threadId: string | undefined,
+    createdThreadId: string | undefined,
     cause: unknown,
   ): Promise<never> => {
     const compensationErrors: unknown[] = [];
-    if (threadId !== undefined) {
+    if (createdThreadId !== undefined) {
       await discord
-        .deleteTicketThread(guild, threadId)
+        .deleteTicketThread(guild, createdThreadId)
         .catch((error: unknown) => compensationErrors.push(error));
     }
     try {
       if (!(await store.hasOtherActiveTicket(ticket))) {
-        await discord.revokeReporterAccess(
+        const snapshot = await store.getReporterAccess(ticket);
+        if (snapshot === undefined) {
+          throw new Error("Reporter hub access ownership is missing");
+        }
+        await discord.restoreReporterAccess(
           guild,
           ticket.hubChannelId,
           ticket.reporterUserId,
+          snapshot,
         );
+        await store.finishReporterAccess(ticket);
       }
     } catch (error) {
       compensationErrors.push(error);
@@ -338,22 +423,36 @@ export const createTicketProvisioningService = (
     guild: Guild,
     initial: Ticket,
     recovering: boolean,
+    preparedAccess?: Readonly<{
+      reporter: GuildMember;
+      snapshot: ReporterHubAccessSnapshot;
+    }>,
   ): Promise<Ticket> => {
     let ticket = initial;
     let threadId = ticket.threadId;
+    let createdThreadId: string | undefined;
     try {
       if (recovering) {
         await store.recordEvent(ticket.id, "recovery_started");
       }
-      await discord.grantReporterAccess(
-        guild,
-        ticket.hubChannelId,
-        ticket.reporterUserId,
-      );
+      const reporter =
+        preparedAccess?.reporter ??
+        (await discord.validateReporter(guild, ticket.reporterUserId));
+      const snapshot =
+        preparedAccess?.snapshot ??
+        (await discord.captureReporterAccess(
+          guild,
+          ticket.hubChannelId,
+          ticket.reporterUserId,
+        ));
+      await store.beginReporterAccess(ticket, snapshot);
+      await discord.grantReporterAccess(guild, ticket.hubChannelId, reporter);
       await store.recordProgress(ticket.id, "reporter_access_granted");
       threadId ??= await discord.findTicketThread(guild, ticket);
-      if (threadId === undefined)
+      if (threadId === undefined) {
         threadId = await discord.createTicketThread(guild, ticket);
+        createdThreadId = threadId;
+      }
       if (ticket.threadId !== threadId) {
         await store.recordProgress(
           ticket.id,
@@ -363,6 +462,7 @@ export const createTicketProvisioningService = (
         );
         ticket = (await store.get(ticket.id))!;
       }
+      await discord.prepareTicketThread(guild, threadId, ticket);
       await discord.addReporter(guild, threadId, ticket.reporterUserId);
       await store.recordProgress(ticket.id, "reporter_added");
       const openingMessageId = await discord.upsertOpeningInstructions(
@@ -380,7 +480,7 @@ export const createTicketProvisioningService = (
       await store.markOpen(ticket.id);
       return (await store.get(ticket.id))!;
     } catch (error) {
-      return compensate(guild, ticket, threadId, error);
+      return compensate(guild, ticket, createdThreadId, error);
     }
   };
 
@@ -391,7 +491,15 @@ export const createTicketProvisioningService = (
         if (state.hubChannelId === undefined) {
           throw new Error("This server has not configured a support hub yet.");
         }
-        await discord.validateReporter(input.guild, input.reporterUserId);
+        const reporter = await discord.validateReporter(
+          input.guild,
+          input.reporterUserId,
+        );
+        const snapshot = await discord.captureReporterAccess(
+          input.guild,
+          state.hubChannelId,
+          input.reporterUserId,
+        );
         const summary = sanitizeTicketSummary(input.summary);
         const ticket = await store.create({
           id: createId(),
@@ -401,7 +509,7 @@ export const createTicketProvisioningService = (
           originatingAlias: input.originatingAlias,
           ...(summary === undefined ? {} : { summary }),
         });
-        return provision(input.guild, ticket, false);
+        return provision(input.guild, ticket, false, { reporter, snapshot });
       }),
     recover: async (resolveGuild) => {
       let recovered = 0;
