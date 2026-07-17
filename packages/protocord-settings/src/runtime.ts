@@ -237,7 +237,12 @@ async function handleSettingsInteraction<Context>(
         if (!component.isStringSelectMenu()) {
           return staleInteraction(component);
         }
-        return await navigateSubcategory(renderer, resolved, component, context);
+        return await navigateSubcategory(
+          renderer,
+          resolved,
+          component,
+          context,
+        );
       case "home-page":
         if (!component.isButton()) {
           return staleInteraction(component);
@@ -278,12 +283,7 @@ async function handleSettingsInteraction<Context>(
         if (!component.isButton()) {
           return staleInteraction(component);
         }
-        return await showSettingsModal(
-          resolved,
-          component,
-          drafts,
-          context,
-        );
+        return await showSettingsModal(resolved, component, drafts, context);
       case "button":
         if (!component.isButton()) {
           return staleInteraction(component);
@@ -392,7 +392,10 @@ async function showSettingsModal<Context>(
   if (field?.kind !== "modal") {
     throw new SettingsViewError("stale", "settings modal is stale");
   }
-  await requireFieldVisible(field, context);
+  await beforeModalDeadline(
+    () => requireFieldVisible(field, context),
+    deadline,
+  );
   const view = await beforeModalDeadline(() => field.load(context), deadline);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings modal is disabled");
@@ -540,7 +543,10 @@ async function mutateMentionables<Context>(
   await requireAuthorization(resolved.category, context);
   const field = resolved.field;
   if (field?.kind !== "mentionable-select") {
-    throw new SettingsViewError("stale", "settings mentionable select is stale");
+    throw new SettingsViewError(
+      "stale",
+      "settings mentionable select is stale",
+    );
   }
   await requireFieldVisible(field, context);
   const view = await field.load(context);
@@ -600,10 +606,7 @@ async function mutateChannels<Context>(
   await requireFieldVisible(field, context);
   const view = await field.load(context);
   if (view.disabled === true) {
-    throw new SettingsViewError(
-      "stale",
-      "settings channel select is disabled",
-    );
+    throw new SettingsViewError("stale", "settings channel select is disabled");
   }
   assertCurrentSelection(field.id, interaction.values.length, view);
   const values = interaction.values.map((id): SettingsChannel => {
@@ -757,7 +760,9 @@ function resolveRoute<Context>(
   definition: SettingsDefinition<Context>,
   route: SettingsRoute,
 ): ResolvedRoute<Context> | undefined {
-  const category = definition.categories.find(({ id }) => id === route.categoryId);
+  const category = definition.categories.find(
+    ({ id }) => id === route.categoryId,
+  );
   const subcategory =
     category === undefined
       ? undefined
@@ -872,13 +877,7 @@ function assertCurrentSelection(
       ...(view.minValues === undefined ? {} : { minimum: view.minValues }),
       ...(view.maxValues === undefined ? {} : { maximum: view.maxValues }),
     });
-    assertSelectionCount(
-      fieldId,
-      count,
-      bounds,
-      "current selection",
-      false,
-    );
+    assertSelectionCount(fieldId, count, bounds, "current selection", false);
   } catch (error) {
     if (error instanceof SettingsSelectConstraintError) {
       throw new SettingsViewError("stale", error.message);
