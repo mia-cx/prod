@@ -232,7 +232,13 @@ export const createProdActionRuntime = (
     reconcile: async (client) => {
       const hubSafetyFailures: unknown[] = [];
       for (const guild of client.guilds.cache.values()) {
-        const state = await options.guildSettingsStore.get(guild.id);
+        let state: Awaited<ReturnType<typeof settings.reconcile>>;
+        try {
+          state = await settings.reconcile(guild);
+        } catch (error) {
+          hubSafetyFailures.push(error);
+          continue;
+        }
         if (state.hubChannelId !== undefined) {
           try {
             await reconcileHubSafety(guild, state.hubChannelId);

@@ -3,6 +3,7 @@ import {
   Collection,
   MessageFlags,
   PermissionFlagsBits,
+  type Client,
   type Guild,
   type Interaction,
   type PermissionResolvable,
@@ -14,6 +15,7 @@ import { createProdActionRuntime } from "../src/actions/runtime.js";
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
+import type { HubTransition } from "../src/hub-transition.js";
 import { createLogger } from "../src/logger.js";
 import { applyMigrations } from "../src/migrations.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
@@ -21,6 +23,7 @@ import type { TicketProvisioningService } from "../src/ticket-provisioning.js";
 
 const guildId = "123456789012345670";
 const hubChannelId = "123456789012345671";
+const replacementHubChannelId = "123456789012345679";
 const informationMessageId = "123456789012345672";
 const ownerId = "123456789012345673";
 const administratorId = "123456789012345674";
@@ -223,6 +226,59 @@ const modalRoute = (fieldId: "assistant-identity" | "assistant-tone") => ({
 });
 
 describe("guild setup settings integration", () => {
+  it("recovers a promoted hub transition before resuming the replacement hub", async () => {
+    const { runtime, store, supportHub } = await setup();
+    await store.configureHub(guildId, hubChannelId, ownership(hubChannelId));
+    const transition: HubTransition = {
+      version: 1,
+      id: "transition-restart",
+      phase: "prepared",
+      previous: {
+        hubChannelId,
+        hubPermissionOwnership: ownership(hubChannelId),
+      },
+      next: ownership(replacementHubChannelId),
+    };
+    await store.beginHubTransition(guildId, transition);
+    await store.promoteHubTransition(guildId, transition);
+    vi.mocked(ticketProvisioningService.suspendHubAccess)
+      .mockReset()
+      .mockRejectedValueOnce(new Error("transient suspension failure"))
+      .mockResolvedValue(2);
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
+    const client = {
+      guilds: { fetch: vi.fn(), cache: new Map([[guildId, guild]]) },
+    } as unknown as Client<true>;
+
+    await expect(runtime.reconcile!(client)).rejects.toThrow(
+      "One or more support hubs",
+    );
+    expect(supportHub.releaseFormerHub).not.toHaveBeenCalled();
+    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
+    await expect(store.getHubTransition(guildId)).resolves.toMatchObject({
+      phase: "promoted",
+    });
+
+    await runtime.reconcile!(client);
+
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledTimes(2);
+    expect(supportHub.releaseFormerHub).toHaveBeenCalledWith(
+      guild,
+      ownership(hubChannelId),
+    );
+    expect(ticketProvisioningService.resumeHubAccess).toHaveBeenCalledWith(
+      guild,
+      replacementHubChannelId,
+    );
+    expect(
+      vi.mocked(supportHub.releaseFormerHub).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(ticketProvisioningService.resumeHubAccess).mock
+        .invocationCallOrder[0]!,
+    );
+    await expect(store.getHubTransition(guildId)).resolves.toBeUndefined();
+  });
+
   it("allows only the owner or an administrator to bootstrap, then permits Manage Server", async () => {
     const { runtime, store } = await setup();
     runtime.setApplicationOperatorUserIds([operatorId]);

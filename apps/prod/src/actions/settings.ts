@@ -15,7 +15,10 @@ import {
 } from "@protocord/settings";
 import { slashCommand, type Action } from "protocord";
 
-import type { GuildSettingsStore } from "../guild-settings.js";
+import type {
+  GuildSettingsStore,
+  GuildSetupSettings,
+} from "../guild-settings.js";
 import { createGuildSetupService } from "../guild-setup.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
@@ -37,6 +40,7 @@ export type GuildSetupSettingsConsumer = Readonly<{
     ProdActionContext
   >;
   handle(interaction: Interaction): Promise<SettingsDispatchResult>;
+  reconcile(guild: Guild): Promise<GuildSetupSettings>;
 }>;
 
 const invalid = (
@@ -324,6 +328,7 @@ export function createGuildSetupSettingsConsumer(
 
   return Object.freeze({
     action,
+    reconcile: (guild: Guild) => setup.get(guild),
     handle: (interaction) =>
       runtime.handle(
         interaction,
