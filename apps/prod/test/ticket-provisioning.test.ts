@@ -258,6 +258,35 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("audits a transient thread cleanup error as failed compensation", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture({
+      addReporter: vi.fn().mockRejectedValue(new Error("member add failed")),
+      deleteTicketThread: vi
+        .fn()
+        .mockRejectedValue(new Error("Discord temporarily unavailable")),
+    });
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-cleanup-failure",
+    });
+    try {
+      await expect(
+        service.open({
+          guild,
+          reporterUserId: "reporter-1",
+          originatingAlias: "issue",
+        }),
+      ).rejects.toMatchObject({ name: "TicketProvisioningError" });
+      expect(
+        (await store.listEvents("ticket-cleanup-failure")).at(-1)?.eventType,
+      ).toBe("compensation_failed");
+    } finally {
+      connection.close();
+    }
+  });
+
   it("fails an admitted ticket before access ownership without restoring unknown state", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -633,6 +662,28 @@ describe("Discord ticket privacy adapter", () => {
       CreatePrivateThreads: false,
     });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("ignores only a missing thread during cleanup", async () => {
+    const adapter = createTicketProvisioningDiscord();
+    const missingGuild = {
+      channels: {
+        fetch: vi
+          .fn()
+          .mockRejectedValue({ code: RESTJSONErrorCodes.UnknownChannel }),
+      },
+    } as unknown as Guild;
+    await expect(
+      adapter.deleteTicketThread(missingGuild, "thread-missing"),
+    ).resolves.toBeUndefined();
+
+    const transient = new Error("Discord temporarily unavailable");
+    const unavailableGuild = {
+      channels: { fetch: vi.fn().mockRejectedValue(transient) },
+    } as unknown as Guild;
+    await expect(
+      adapter.deleteTicketThread(unavailableGuild, "thread-unknown"),
+    ).rejects.toBe(transient);
   });
 
   it("restores owned permission fields without erasing moderation state", async () => {

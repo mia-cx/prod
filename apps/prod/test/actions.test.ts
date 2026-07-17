@@ -519,6 +519,11 @@ describe("Prod action runtime", () => {
     } as unknown as Message;
 
     await expect(runtime.handleMessage!(message)).resolves.toBe(true);
+    expect(ticketProvisioningService.open).toHaveBeenCalledWith({
+      guild: message.guild,
+      reporterUserId: "user-1",
+      originatingAlias: "issue",
+    });
     expect(reply).toHaveBeenCalledWith({
       content: "https://discord.com/channels/guild-1/thread-1",
       allowedMentions: { parse: [], repliedUser: false },

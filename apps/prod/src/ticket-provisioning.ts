@@ -431,7 +431,14 @@ export const createTicketProvisioningDiscord =
         }
       },
       deleteTicketThread: async (guild, threadId) => {
-        const thread = await guild.channels.fetch(threadId).catch(() => null);
+        const thread = await guild.channels
+          .fetch(threadId)
+          .catch((error: unknown) => {
+            if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) {
+              return null;
+            }
+            throw error;
+          });
         if (thread?.isThread() === true)
           await thread.delete("Compensate failed Prod ticket provisioning");
       },
