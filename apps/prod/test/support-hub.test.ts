@@ -370,8 +370,9 @@ describe("Discord support hub", () => {
     expect(send).toHaveBeenCalledOnce();
     const content = messageCache.get("message-1")?.content ?? "";
     expect(content).toContain("## Support Guide support");
-    expect(content).toContain("Ticket intake is not enabled yet");
-    expect(content).not.toMatch(/\/(issue|report|debugshare)\b/);
+    expect(content).toContain("`/issue`, `/report`, or `/debugshare`");
+    expect(content).toContain("Keep this channel empty");
+    expect(content).not.toContain("Opening summary:");
     expect(messageCache.get("message-1")?.edit).toHaveBeenLastCalledWith({
       content,
       allowedMentions: { parse: [] },

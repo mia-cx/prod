@@ -144,6 +144,23 @@ export const createProdActionRuntime = (
       for (const userId of userIds) applicationOperatorUserIds.add(userId);
     },
     refreshCommands: (client) => registerDiscordCommands(client, registry),
+    reconcile: async (client) => {
+      const result = await options.ticketProvisioningService.recover(
+        async (guildId) => client.guilds.fetch(guildId),
+      );
+      const details = {
+        recoveredTicketCount: result.recovered,
+        failedTicketCount: result.failed,
+      };
+      if (result.failed > 0) {
+        logger.error(
+          details,
+          "ticket provisioning reconciliation completed with failures",
+        );
+      } else {
+        logger.info(details, "ticket provisioning reconciliation completed");
+      }
+    },
     handleInteraction: async (interaction: Interaction) => {
       const settingsResult = await settings.handle(interaction);
       if (settingsResult.matched) {

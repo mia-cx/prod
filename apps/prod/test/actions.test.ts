@@ -495,6 +495,30 @@ describe("Prod action runtime", () => {
     expect(runtime.commands).toHaveLength(7);
   });
 
+  it("resolves guilds through the ready client during startup reconciliation", async () => {
+    const fetchGuild = vi.fn().mockResolvedValue({ id: "guild-stale" });
+    vi.mocked(ticketProvisioningService.recover).mockImplementationOnce(
+      async (resolveGuild) => {
+        expect(await resolveGuild("guild-stale")).toEqual({
+          id: "guild-stale",
+        });
+        return { recovered: 1, failed: 0 };
+      },
+    );
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const client = {
+      guilds: { fetch: fetchGuild },
+    } as unknown as Client<true>;
+
+    await runtime.reconcile!(client);
+
+    expect(ticketProvisioningService.recover).toHaveBeenCalledOnce();
+    expect(fetchGuild).toHaveBeenCalledWith("guild-stale");
+  });
+
   it.each([
     ["lifecycle", true, false, 1],
     ["presentation", false, true, 1],

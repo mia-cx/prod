@@ -276,7 +276,7 @@ const applyOwnedPermissions = async (
 const informationMessageContent = (assistantIdentity: string): string =>
   [
     `## ${assistantIdentity} support`,
-    "Ticket intake is not enabled yet. Once it is available, Prod will create invite-only private threads for support conversations.",
+    "Use `/issue`, `/report`, or `/debugshare` to open an invite-only private support thread.",
     "Keep this channel empty, and do not post support details here.",
     SUPPORT_HUB_INFORMATION_MARKER,
   ].join("\n\n");

@@ -28,6 +28,7 @@ const settings = {
 const discordFixture = (
   overrides: Partial<TicketProvisioningDiscord> = {},
 ): TicketProvisioningDiscord => ({
+  validateReporter: vi.fn().mockResolvedValue(undefined),
   grantReporterAccess: vi.fn().mockResolvedValue(undefined),
   revokeReporterAccess: vi.fn().mockResolvedValue(undefined),
   findTicketThread: vi.fn().mockResolvedValue(undefined),
@@ -134,6 +135,57 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("compensates Discord access when the following database audit write fails", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const failingStore = {
+      ...store,
+      recordProgress: vi
+        .fn(store.recordProgress)
+        .mockRejectedValueOnce(new Error("controlled database failure")),
+    };
+    const service = createTicketProvisioningService(
+      settings,
+      failingStore,
+      discord,
+      { createId: () => "ticket-db-failure" },
+    );
+    try {
+      await expect(
+        service.open({
+          guild,
+          reporterUserId: "reporter-1",
+          originatingAlias: "issue",
+        }),
+      ).rejects.toMatchObject({ name: "TicketProvisioningError" });
+
+      expect(discord.grantReporterAccess).toHaveBeenCalledOnce();
+      expect(discord.createTicketThread).not.toHaveBeenCalled();
+      expect(discord.revokeReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        "reporter-1",
+      );
+      expect(await store.get("ticket-db-failure")).toMatchObject({
+        status: "failed",
+        failureReason: "controlled database failure",
+      });
+      expect(
+        (await store.listEvents("ticket-db-failure")).map(
+          ({ eventType }) => eventType,
+        ),
+      ).toEqual([
+        "provisioning_started",
+        "provisioning_failed",
+        "compensation_completed",
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("recovers a known thread idempotently without creating another thread", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -179,6 +231,18 @@ describe("ticket provisioning", () => {
 });
 
 describe("Discord ticket privacy adapter", () => {
+  it("verifies that the reporter still belongs to the guild", async () => {
+    const fetch = vi.fn().mockResolvedValue({ id: "reporter-1" });
+    const mockGuild = { members: { fetch } } as unknown as Guild;
+
+    await createTicketProvisioningDiscord().validateReporter(
+      mockGuild,
+      "reporter-1",
+    );
+
+    expect(fetch).toHaveBeenCalledWith("reporter-1");
+  });
+
   it("grants only shared hub/thread capabilities and posts no hub content", async () => {
     const edit = vi.fn().mockResolvedValue(undefined);
     const send = vi.fn();

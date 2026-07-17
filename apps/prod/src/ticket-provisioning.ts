@@ -39,6 +39,7 @@ export type OpenTicketInput = Readonly<{
 }>;
 
 export interface TicketProvisioningDiscord {
+  validateReporter(guild: Guild, reporterUserId: string): Promise<void>;
   grantReporterAccess(
     guild: Guild,
     hubChannelId: string,
@@ -181,6 +182,9 @@ const findManagedOpening = async (
 export const createTicketProvisioningDiscord =
   (): TicketProvisioningDiscord => {
     const discord: TicketProvisioningDiscord = {
+      validateReporter: async (guild, reporterUserId) => {
+        await guild.members.fetch(reporterUserId);
+      },
       grantReporterAccess: async (guild, hubChannelId, reporterUserId) => {
         const hub = await requireHub(guild, hubChannelId);
         await hub.permissionOverwrites.edit(
@@ -387,6 +391,7 @@ export const createTicketProvisioningService = (
         if (state.hubChannelId === undefined) {
           throw new Error("This server has not configured a support hub yet.");
         }
+        await discord.validateReporter(input.guild, input.reporterUserId);
         const summary = sanitizeTicketSummary(input.summary);
         const ticket = await store.create({
           id: createId(),

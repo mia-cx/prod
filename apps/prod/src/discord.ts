@@ -22,6 +22,7 @@ export interface DiscordGateway {
 export type DiscordActionSurface = Readonly<{
   setApplicationOperatorUserIds?(userIds: readonly string[]): void;
   refreshCommands(client: Client<true>): Promise<void>;
+  reconcile?(client: Client<true>): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
   handleMessage?(message: Message): Promise<boolean>;
   handleError(error: unknown): void;
@@ -94,10 +95,11 @@ export const createDiscordGateway = (
     intents: handleMessage
       ? [
           GatewayIntentBits.Guilds,
+          GatewayIntentBits.GuildMembers,
           GatewayIntentBits.GuildMessages,
           GatewayIntentBits.MessageContent,
         ]
-      : [GatewayIntentBits.Guilds],
+      : [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
   });
   let closed = false;
   let operatorRefreshTimer: NodeJS.Timeout | undefined;
@@ -223,17 +225,12 @@ export const createDiscordGateway = (
             signal.throwIfAborted();
             if (closed) throw new Error("Discord gateway is closed");
           };
-          void prepareReadyClient(
-            readyClient,
-            options,
-            assertActive,
-            () => {
-              if (options.actions?.setApplicationOperatorUserIds) {
-                scheduleOperatorExpiry();
-                scheduleOperatorRefresh(readyClient);
-              }
-            },
-          ).then(
+          void prepareReadyClient(readyClient, options, assertActive, () => {
+            if (options.actions?.setApplicationOperatorUserIds) {
+              scheduleOperatorExpiry();
+              scheduleOperatorRefresh(readyClient);
+            }
+          }).then(
             (identity) =>
               settle(() => {
                 resolve(identity);
@@ -271,14 +268,14 @@ const prepareReadyClient = async (
     null,
     options.configuredApplicationOperatorUserIds,
   );
-  options.actions?.setApplicationOperatorUserIds?.(
-    applicationOperatorUserIds,
-  );
-  const application = await client.application.fetch().catch((error: unknown) => {
-    assertActive();
-    options.actions?.handleError(error);
-    return undefined;
-  });
+  options.actions?.setApplicationOperatorUserIds?.(applicationOperatorUserIds);
+  const application = await client.application
+    .fetch()
+    .catch((error: unknown) => {
+      assertActive();
+      options.actions?.handleError(error);
+      return undefined;
+    });
   assertActive();
   if (application !== undefined) {
     applicationOperatorUserIds = resolveApplicationOperatorUserIds(
@@ -292,6 +289,9 @@ const prepareReadyClient = async (
   if (options.actions) {
     onApplicationOperatorsInstalled?.();
     await options.actions.refreshCommands(client);
+    assertActive();
+    await options.actions.reconcile?.(client);
+    assertActive();
   }
 
   return Object.freeze({
