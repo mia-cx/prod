@@ -5,6 +5,7 @@ import {
   PermissionFlagsBits,
   PermissionsBitField,
   RESTJSONErrorCodes,
+  Routes,
   type Guild,
   type GuildMember,
 } from "discord.js";
@@ -694,16 +695,16 @@ describe("Discord ticket privacy adapter", () => {
       },
     };
     const setArchived = vi.fn().mockResolvedValue(undefined);
+    const getThreadMember = vi
+      .fn()
+      .mockRejectedValue({ code: RESTJSONErrorCodes.UnknownMember });
     const thread = {
+      id: "thread-match",
       type: ChannelType.PrivateThread,
       parentId: "hub-1",
       archived: true,
       setArchived,
-      members: {
-        fetch: vi
-          .fn()
-          .mockRejectedValue({ code: RESTJSONErrorCodes.UnknownMember }),
-      },
+      client: { rest: { get: getThreadMember } },
     };
     const fetch = vi.fn(async (id: string) => (id === "hub-1" ? hub : thread));
     const mockGuild = { channels: { fetch } } as unknown as Guild;
@@ -733,7 +734,9 @@ describe("Discord ticket privacy adapter", () => {
       false,
       "Recover Prod ticket ticket-stale",
     );
-    expect(thread.members.fetch).toHaveBeenCalledWith("reporter-1");
+    expect(getThreadMember).toHaveBeenCalledWith(
+      Routes.threadMembers("thread-match", "reporter-1"),
+    );
   });
 
   it("creates an invite-only private thread without a hub starter message", async () => {
