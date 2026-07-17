@@ -293,6 +293,43 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("restores persisted access when recovery fails before this run begins ownership", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const ticket = await store.create({
+      id: "ticket-stale-access",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    await store.beginReporterAccess(ticket, emptyAccessSnapshot);
+    const discord = discordFixture({
+      validateReporter: vi
+        .fn()
+        .mockRejectedValue(new Error("reporter lookup unavailable")),
+    });
+    const service = createTicketProvisioningService(settings, store, discord);
+    try {
+      await expect(service.recover(async () => guild)).resolves.toEqual({
+        recovered: 0,
+        failed: 1,
+      });
+
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        "reporter-1",
+        emptyAccessSnapshot,
+      );
+      expect(await store.getReporterAccess(ticket)).toBeUndefined();
+      expect(await store.get(ticket.id)).toMatchObject({ status: "failed" });
+    } finally {
+      connection.close();
+    }
+  });
+
   it("recovers a known thread idempotently without creating another thread", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);

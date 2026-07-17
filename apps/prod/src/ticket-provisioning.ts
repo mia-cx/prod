@@ -554,6 +554,8 @@ export const createTicketProvisioningService = (
     let opening: OpeningInstructionsMutation | undefined;
     try {
       if (recovering) {
+        accessOwnershipStarted =
+          (await store.getReporterAccess(ticket)) !== undefined;
         await store.recordEvent(ticket.id, "recovery_started");
       }
       const reporter = await discord.validateReporter(
