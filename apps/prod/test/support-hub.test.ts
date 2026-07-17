@@ -354,6 +354,24 @@ describe("Discord support hub", () => {
     expect(remove).toHaveBeenCalledTimes(3);
   });
 
+  it("treats a concurrently deleted public thread as already cleaned", async () => {
+    const hub = createSupportHubDiscord();
+    const state = fixture();
+    const remove = vi
+      .fn()
+      .mockRejectedValue({ code: RESTJSONErrorCodes.UnknownChannel });
+    state.activeThreads.set("public-gone", {
+      id: "public-gone",
+      type: ChannelType.PublicThread,
+      delete: remove,
+    });
+
+    await expect(hub.deletePublicThreads(state.guild, "hub-1")).resolves.toBe(
+      1,
+    );
+    expect(remove).toHaveBeenCalledOnce();
+  });
+
   it("rejects the reporter permission shape when it belongs to a role", async () => {
     const hub = createSupportHubDiscord();
     const managedRole = fixture();

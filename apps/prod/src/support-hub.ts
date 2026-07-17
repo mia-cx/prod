@@ -187,6 +187,7 @@ export const deletePublicSupportHubThread = async (
       );
       return;
     } catch (error) {
+      if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) return;
       lastError = error;
     }
   }

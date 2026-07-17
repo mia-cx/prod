@@ -116,10 +116,31 @@ export const createProdActionRuntime = (
     hubChannelId: string,
   ): Promise<void> => {
     await options.supportHubDiscord.deletePublicThreads(guild, hubChannelId);
+    const validation = await options.supportHubDiscord.validateHub(
+      guild,
+      hubChannelId,
+    );
+    if (!validation.valid) {
+      throw new Error(validation.issues.join(" "));
+    }
     await options.ticketProvisioningService.resumeHubAccess(
       guild,
       hubChannelId,
     );
+  };
+  const reconcileScheduledHubSafety = async (
+    guild: Guild,
+    hubChannelId: string,
+  ): Promise<void> => {
+    const state = await options.guildSettingsStore.get(guild.id);
+    if (state.hubChannelId !== hubChannelId) {
+      await options.ticketProvisioningService.suspendHubAccess(
+        guild,
+        hubChannelId,
+      );
+      return;
+    }
+    await reconcileHubSafety(guild, hubChannelId);
   };
   const suspendHubSafety = async (
     guild: Guild,
@@ -144,14 +165,16 @@ export const createProdActionRuntime = (
     if (scheduledHubSafetyRetries.has(key)) return;
     const timer = setTimeout(() => {
       scheduledHubSafetyRetries.delete(key);
-      void reconcileHubSafety(guild, hubChannelId).catch(async (error) => {
-        const retryError = await suspendHubSafety(guild, hubChannelId, error);
-        logger.error(
-          { err: retryError, guildId: guild.id, hubChannelId },
-          "support hub remains unsafe; scheduling another reconciliation",
-        );
-        scheduleHubSafetyRetry(guild, hubChannelId);
-      });
+      void reconcileScheduledHubSafety(guild, hubChannelId).catch(
+        async (error) => {
+          const retryError = await suspendHubSafety(guild, hubChannelId, error);
+          logger.error(
+            { err: retryError, guildId: guild.id, hubChannelId },
+            "support hub remains unsafe; scheduling another reconciliation",
+          );
+          scheduleHubSafetyRetry(guild, hubChannelId);
+        },
+      );
     }, options.hubSafetyRetryMs ?? 30_000);
     timer.unref();
     scheduledHubSafetyRetries.set(key, timer);
@@ -206,15 +229,24 @@ export const createProdActionRuntime = (
     },
     refreshCommands: (client) => registerDiscordCommands(client, registry),
     reconcile: async (client) => {
+      const hubSafetyFailures: unknown[] = [];
       for (const guild of client.guilds.cache.values()) {
         const state = await options.guildSettingsStore.get(guild.id);
         if (state.hubChannelId !== undefined) {
           try {
             await reconcileHubSafety(guild, state.hubChannelId);
           } catch (error) {
-            throw await suspendHubSafety(guild, state.hubChannelId, error);
+            hubSafetyFailures.push(
+              await suspendHubSafety(guild, state.hubChannelId, error),
+            );
           }
         }
+      }
+      if (hubSafetyFailures.length > 0) {
+        throw new AggregateError(
+          hubSafetyFailures,
+          "One or more support hubs could not be made safe during startup",
+        );
       }
       const result = await options.ticketProvisioningService.recover(
         async (guildId) => client.guilds.fetch(guildId),
@@ -249,6 +281,22 @@ export const createProdActionRuntime = (
           error,
         );
         scheduleHubSafetyRetry(thread.guild, state.hubChannelId);
+        throw unsafeError;
+      }
+    },
+    handleHubMessage: async (message: Message) => {
+      if (message.guild === null) return;
+      const state = await options.guildSettingsStore.get(message.guild.id);
+      if (state.hubChannelId !== message.channelId) return;
+      try {
+        await reconcileHubSafety(message.guild, state.hubChannelId);
+      } catch (error) {
+        const unsafeError = await suspendHubSafety(
+          message.guild,
+          state.hubChannelId,
+          error,
+        );
+        scheduleHubSafetyRetry(message.guild, state.hubChannelId);
         throw unsafeError;
       }
     },

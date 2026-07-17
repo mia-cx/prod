@@ -26,6 +26,7 @@ export type DiscordActionSurface = Readonly<{
   reconcile?(client: Client<true>): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
   handleMessage?(message: Message): Promise<boolean>;
+  handleHubMessage?(message: Message): Promise<void>;
   handleThread?(thread: AnyThreadChannel): Promise<void>;
   handleError(error: unknown): void;
 }>;
@@ -93,6 +94,7 @@ export const createDiscordGateway = (
 ): DiscordGateway => {
   const actions = options.actions;
   const handleMessage = actions?.handleMessage;
+  const handleHubMessage = actions?.handleHubMessage;
   const client = new Client({
     intents: handleMessage
       ? [
@@ -100,7 +102,9 @@ export const createDiscordGateway = (
           GatewayIntentBits.GuildMessages,
           GatewayIntentBits.MessageContent,
         ]
-      : [GatewayIntentBits.Guilds],
+      : handleHubMessage
+        ? [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+        : [GatewayIntentBits.Guilds],
   });
   let closed = false;
   let operatorRefreshTimer: NodeJS.Timeout | undefined;
@@ -180,18 +184,19 @@ export const createDiscordGateway = (
         .handleInteraction(interaction)
         .catch((error: unknown) => actions.handleError(error));
     });
-    if (handleMessage) {
+    if (handleMessage || handleHubMessage) {
       client.on(Events.MessageCreate, (message) => {
-        void handleMessage(message).catch((error: unknown) =>
-          actions.handleError(error),
-        );
+        void (async () => {
+          await handleHubMessage?.(message);
+          await handleMessage?.(message);
+        })().catch((error: unknown) => actions.handleError(error));
       });
     }
     if (actions.handleThread) {
       const handleThread = (thread: AnyThreadChannel): void => {
-        void actions
-          .handleThread!(thread)
-          .catch((error: unknown) => actions.handleError(error));
+        void actions.handleThread!(thread).catch((error: unknown) =>
+          actions.handleError(error),
+        );
       };
       client.on(Events.ThreadCreate, handleThread);
       client.on(Events.ThreadUpdate, (_oldThread, newThread) => {

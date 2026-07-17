@@ -7,8 +7,7 @@ const discordMock = vi.hoisted(() => ({
   messageHandler: undefined as undefined | ((message: unknown) => void),
   threadCreateHandler: undefined as undefined | ((thread: unknown) => void),
   threadUpdateHandler: undefined as
-    | undefined
-    | ((oldThread: unknown, newThread: unknown) => void),
+    undefined | ((oldThread: unknown, newThread: unknown) => void),
   intents: [] as number[],
   applicationOwner: null as
     | null
@@ -238,6 +237,7 @@ describe("createDiscordGateway", () => {
     const reconcile = vi.fn(async () => undefined);
     const handleInteraction = vi.fn(async () => undefined);
     const handleMessage = vi.fn(async () => true);
+    const handleHubMessage = vi.fn(async () => undefined);
     const handleThread = vi.fn(async () => undefined);
     const handleError = vi.fn();
     const setApplicationOperatorUserIds = vi.fn();
@@ -248,6 +248,7 @@ describe("createDiscordGateway", () => {
         reconcile,
         handleInteraction,
         handleMessage,
+        handleHubMessage,
         handleThread,
         handleError,
       },
@@ -270,6 +271,10 @@ describe("createDiscordGateway", () => {
     const message = { id: "message-1", content: "!ping" };
     discordMock.messageHandler?.(message);
     await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledWith(message));
+    expect(handleHubMessage).toHaveBeenCalledWith(message);
+    expect(handleHubMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      handleMessage.mock.invocationCallOrder[0]!,
+    );
 
     const createdThread = { id: "thread-created" };
     discordMock.threadCreateHandler?.(createdThread);
@@ -297,6 +302,27 @@ describe("createDiscordGateway", () => {
 
     expect(discordMock.intents).toEqual([1]);
     expect(discordMock.messageHandler).toBeUndefined();
+  });
+
+  it("uses GuildMessages without MessageContent for hub safety only", async () => {
+    const handleHubMessage = vi.fn(async () => undefined);
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleHubMessage,
+        handleError: vi.fn(),
+      },
+    });
+
+    await gateway.connect("development-token", new AbortController().signal);
+    const message = { id: "message-1" };
+    discordMock.messageHandler?.(message);
+    await vi.waitFor(() =>
+      expect(handleHubMessage).toHaveBeenCalledWith(message),
+    );
+
+    expect(discordMock.intents).toEqual([1, 2]);
   });
 
   it("unions configured IDs with an individual application owner", async () => {

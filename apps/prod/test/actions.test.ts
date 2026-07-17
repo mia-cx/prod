@@ -3,6 +3,7 @@ import {
   ApplicationCommandType,
   ChannelType,
   MessageFlags,
+  RESTJSONErrorCodes,
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
@@ -66,7 +67,7 @@ const guildSettingsStore: GuildSettingsStore = {
   abortHubTransition: async () => undefined,
 };
 const supportHubDiscord: SupportHubDiscord = {
-  validateHub: async () => ({ valid: true }),
+  validateHub: vi.fn(async () => ({ valid: true as const })),
   prepareHub: async () => ({ valid: true, permissionOwnership }),
   applyHub: async () => ({ valid: true, permissionOwnership }),
   restoreHub: async () => undefined,
@@ -545,6 +546,7 @@ describe("Prod action runtime", () => {
     });
 
     expect(runtime.handleMessage).toBeUndefined();
+    expect(runtime.handleHubMessage).toBeTypeOf("function");
     expect(runtime.commands).toHaveLength(7);
   });
 
@@ -587,11 +589,14 @@ describe("Prod action runtime", () => {
     expect(fetchGuild).toHaveBeenCalledWith("guild-stale");
   });
 
-  it("suspends reporter access and stops startup when public drift cleanup fails", async () => {
+  it("reconciles every guild before failing startup for unsafe hubs", async () => {
     const cleanupError = new Error("Discord unavailable");
-    vi.mocked(supportHubDiscord.deletePublicThreads).mockRejectedValueOnce(
-      cleanupError,
-    );
+    vi.mocked(supportHubDiscord.deletePublicThreads)
+      .mockReset()
+      .mockImplementation(async (guild) => {
+        if (guild.id === "guild-1") throw cleanupError;
+        return 0;
+      });
     vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
     vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
     vi.mocked(ticketProvisioningService.recover).mockClear();
@@ -599,19 +604,33 @@ describe("Prod action runtime", () => {
       createLogger({ level: "fatal" }),
       runtimeOptions,
     );
-    const cachedGuild = { id: "guild-1" };
+    const firstGuild = { id: "guild-1" };
+    const secondGuild = { id: "guild-2" };
     const client = {
-      guilds: { fetch: vi.fn(), cache: new Map([["guild-1", cachedGuild]]) },
+      guilds: {
+        fetch: vi.fn(),
+        cache: new Map([
+          ["guild-1", firstGuild],
+          ["guild-2", secondGuild],
+        ]),
+      },
     } as unknown as Client<true>;
 
-    await expect(runtime.reconcile!(client)).rejects.toBe(cleanupError);
+    await expect(runtime.reconcile!(client)).rejects.toMatchObject({
+      errors: [cleanupError],
+    });
 
     expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledWith(
-      cachedGuild,
+      firstGuild,
       "123456789012345678",
     );
-    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
+    expect(ticketProvisioningService.resumeHubAccess).toHaveBeenCalledWith(
+      secondGuild,
+      "123456789012345678",
+    );
+    expect(supportHubDiscord.deletePublicThreads).toHaveBeenCalledTimes(2);
     expect(ticketProvisioningService.recover).not.toHaveBeenCalled();
+    vi.mocked(supportHubDiscord.deletePublicThreads).mockResolvedValue(0);
   });
 
   it("rolls back partial access resumption before startup recovery", async () => {
@@ -631,7 +650,9 @@ describe("Prod action runtime", () => {
       guilds: { fetch: vi.fn(), cache: new Map([["guild-1", cachedGuild]]) },
     } as unknown as Client<true>;
 
-    await expect(runtime.reconcile!(client)).rejects.toBe(resumeError);
+    await expect(runtime.reconcile!(client)).rejects.toMatchObject({
+      errors: [resumeError],
+    });
 
     expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledWith(
       cachedGuild,
@@ -649,8 +670,7 @@ describe("Prod action runtime", () => {
     );
     const remove = vi
       .fn()
-      .mockRejectedValueOnce(new Error("transient Discord failure"))
-      .mockResolvedValue(undefined);
+      .mockRejectedValue({ code: RESTJSONErrorCodes.UnknownChannel });
     const threadGuild = { id: "guild-1" };
     const publicThread = {
       type: ChannelType.PublicThread,
@@ -670,7 +690,7 @@ describe("Prod action runtime", () => {
       parentId: "other-channel",
     } as never);
 
-    expect(remove).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalledOnce();
     expect(ticketProvisioningService.resumeHubAccess).toHaveBeenCalledWith(
       threadGuild,
       "123456789012345678",
@@ -720,6 +740,81 @@ describe("Prod action runtime", () => {
       threadGuild,
       "123456789012345678",
     );
+    vi.useRealTimers();
+  });
+
+  it("does not resume access on a former hub from a stale retry", async () => {
+    vi.useFakeTimers();
+    let configuredHub = "123456789012345678";
+    const changingSettings = {
+      ...guildSettingsStore,
+      get: vi.fn(async (guildId: string) => ({
+        ...(await guildSettingsStore.get(guildId)),
+        hubChannelId: configuredHub,
+      })),
+    };
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
+    vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
+    vi.mocked(supportHubDiscord.deletePublicThreads).mockClear();
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      guildSettingsStore: changingSettings,
+      hubSafetyRetryMs: 10,
+    });
+    const cleanupError = new Error("Discord unavailable");
+    const threadGuild = { id: "guild-1" };
+
+    await expect(
+      runtime.handleThread!({
+        type: ChannelType.PublicThread,
+        guildId: "guild-1",
+        guild: threadGuild,
+        parentId: configuredHub,
+        delete: vi.fn().mockRejectedValue(cleanupError),
+      } as never),
+    ).rejects.toBe(cleanupError);
+    configuredHub = "hub-2";
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(supportHubDiscord.deletePublicThreads).not.toHaveBeenCalled();
+    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledTimes(2);
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenLastCalledWith(
+      threadGuild,
+      "123456789012345678",
+    );
+    vi.useRealTimers();
+  });
+
+  it("suspends on unmanaged live hub messages until a clean scan succeeds", async () => {
+    vi.useFakeTimers();
+    const unsafeHistory = "unmanaged messages remain";
+    vi.mocked(supportHubDiscord.deletePublicThreads).mockResolvedValue(0);
+    vi.mocked(supportHubDiscord.validateHub)
+      .mockReset()
+      .mockResolvedValueOnce({ valid: false, issues: [unsafeHistory] })
+      .mockResolvedValueOnce({ valid: false, issues: [unsafeHistory] })
+      .mockResolvedValue({ valid: true });
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockReset();
+    vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      hubSafetyRetryMs: 10,
+    });
+    const message = {
+      guild: { id: "guild-1" },
+      guildId: "guild-1",
+      channelId: "123456789012345678",
+    };
+
+    await expect(runtime.handleHubMessage!(message as never)).rejects.toThrow(
+      unsafeHistory,
+    );
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(ticketProvisioningService.resumeHubAccess).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
 
