@@ -317,6 +317,42 @@ describe("permission administration", () => {
     });
   });
 
+  it.each([
+    { subjectType: "service" as const, subjectId: "prod-ai" },
+    { subjectType: "everyone" as const, subjectId: "*" as const },
+  ])("removes an inspected legacy $subjectType rule", async (subject) => {
+    const { service, sqliteRules, authorize } = await setup();
+    await sqliteRules.upsert({
+      context: { guildId: "guild-1" },
+      rule: {
+        id: `legacy-${subject.subjectType}`,
+        context: { guildId: "guild-1" },
+        subject,
+        object: { objectType: "ticket", objectId: "*" },
+        verb: "close",
+        permit: "deny",
+      },
+      actor: { actorType: "user", actorId: "legacy-admin" },
+    });
+    authorize.mockClear();
+
+    await service.removeRule({
+      guildId: "guild-1",
+      ruleId: `legacy-${subject.subjectType}`,
+      actorUserId: "admin-2",
+    });
+
+    await expect(
+      service.listRules({ guildId: "guild-1" }),
+    ).resolves.toMatchObject({ total: 0, items: [] });
+    expect(authorize).toHaveBeenCalledOnce();
+    expect((await sqliteRules.listEvents()).at(-1)).toMatchObject({
+      ruleId: `legacy-${subject.subjectType}`,
+      eventType: "removed",
+      actorUserId: "admin-2",
+    });
+  });
+
   it("rejects invalid object/verb combinations before authorization", async () => {
     const { service, rules, sqliteRules, authorize } = await setup();
     await expect(

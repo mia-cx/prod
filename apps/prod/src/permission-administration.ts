@@ -189,14 +189,14 @@ const customOrigin: PermissionRuleOrigin = {
   sourceId: "custom",
 };
 
-const ruleIdentity = (rule: PermissionRule): PermissionRuleIdentity => {
+const ruleIdentity = (
+  rule: PermissionRule,
+): PermissionRuleIdentity | undefined => {
   if (
     rule.subject.subjectType !== "user" &&
     rule.subject.subjectType !== "role"
   ) {
-    throw new TypeError(
-      "Prod permission administration supports users and roles only",
-    );
+    return undefined;
   }
   return {
     guildId: rule.context.guildId,
@@ -474,8 +474,17 @@ export const createPermissionAdministrationService = (
         input.actorUserId,
         input.recheckAuthorization,
       );
+      const identity = ruleIdentity(rule);
+      if (identity === undefined) {
+        await options.rules.remove({
+          ruleId: rule.id,
+          context: createProdAuthorizationContext(input.guildId),
+          actor: { actorType: "user", actorId: input.actorUserId },
+        });
+        return;
+      }
       await options.contributions.apply({
-        changes: [{ kind: "remove-identity", identity: ruleIdentity(rule) }],
+        changes: [{ kind: "remove-identity", identity }],
         actorUserId: input.actorUserId,
       });
     },
