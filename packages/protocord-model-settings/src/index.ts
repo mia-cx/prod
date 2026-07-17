@@ -1,6 +1,7 @@
 import { settingsBoundary } from "@protocord/settings";
 
 export * from "./contracts.js";
+export * from "./catalog.js";
 export * from "./encryption.js";
 export * from "./sqlite-store.js";
 

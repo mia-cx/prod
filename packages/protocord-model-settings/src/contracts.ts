@@ -29,6 +29,48 @@ export type ModelConfigurationStore = Readonly<{
   clearGuildApiKey(guildId: string, purpose: ModelPurpose): Promise<void>;
 }>;
 
+export type ResolvedModelConfiguration = Readonly<{
+  available: true;
+  provider: ModelProvider;
+  modelId: string;
+  apiKey: string;
+  credentialSource: "guild" | "deployment";
+}>;
+
+export type UnavailableModelConfiguration = Readonly<{
+  available: false;
+  provider: ModelProvider;
+  modelId: string;
+  reason: "missing-credential";
+}>;
+
+export interface SecureModelConfigurationStore
+  extends ModelConfigurationStore {
+  resolve(
+    guildId: string,
+    purpose: ModelPurpose,
+    deploymentApiKey?: string,
+  ): Promise<ResolvedModelConfiguration | UnavailableModelConfiguration>;
+}
+
+export type ProviderModel = Readonly<{
+  id: string;
+  name: string;
+  description?: string;
+}>;
+
+export type ProviderCatalog = Readonly<{
+  listModels(provider: ModelProvider): Promise<readonly ProviderModel[]>;
+}>;
+
+export type ProviderCatalogResult =
+  | Readonly<{ available: true; models: readonly ProviderModel[] }>
+  | Readonly<{
+      available: false;
+      models: readonly [];
+      message: "Model suggestions are temporarily unavailable. Enter a model ID manually.";
+    }>;
+
 export class InvalidModelConfigurationError extends Error {
   override readonly name = "InvalidModelConfigurationError";
 }

@@ -5,8 +5,8 @@ import {
   InvalidModelConfigurationError,
   ModelCredentialError,
   type GuildModelConfiguration,
-  type ModelConfigurationStore,
   type ModelPurpose,
+  type SecureModelConfigurationStore,
   type SetGuildApiKeyInput,
   type SetModelInput,
 } from "./contracts.js";
@@ -26,29 +26,7 @@ export type CreateSqliteModelConfigurationStoreOptions = Readonly<{
   createNonce?: () => Buffer;
 }>;
 
-export type ResolvedModelConfiguration = Readonly<{
-  available: true;
-  provider: "openrouter";
-  modelId: string;
-  apiKey: string;
-  credentialSource: "guild" | "deployment";
-}>;
-
-export type UnavailableModelConfiguration = Readonly<{
-  available: false;
-  provider: "openrouter";
-  modelId: string;
-  reason: "missing-credential";
-}>;
-
-export interface SqliteModelConfigurationStore
-  extends ModelConfigurationStore {
-  resolve(
-    guildId: string,
-    purpose: ModelPurpose,
-    deploymentApiKey?: string,
-  ): Promise<ResolvedModelConfiguration | UnavailableModelConfiguration>;
-}
+export type SqliteModelConfigurationStore = SecureModelConfigurationStore;
 
 const assertIdentifier = (label: string, value: string): void => {
   if (
