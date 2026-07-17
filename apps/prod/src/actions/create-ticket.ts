@@ -135,9 +135,13 @@ export const createTicketAction = (
     textCommandTrigger<CreateTicketInput, ProdActionContext>({
       name: alias,
       description: "Open a private support ticket",
-      // Prefix commands are public, so collect details only after opening the
-      // private thread. Optional summaries remain available through slash UI.
-      parse: () => ({ alias }),
+      parse: (argumentTail) => {
+        const summary = argumentTail.trim();
+        return {
+          alias,
+          ...(summary.length === 0 ? {} : { summary }),
+        };
+      },
       present: async (_trigger, _message, outcome, context) => {
         await context.replyToTextCommand?.(outcomeContent(outcome), 30_000);
       },

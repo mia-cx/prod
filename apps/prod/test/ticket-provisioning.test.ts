@@ -76,6 +76,35 @@ const discordFixture = (
 });
 
 describe("ticket provisioning", () => {
+  it("allows hub release only after dependent tickets stop being active", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const ticket = await store.create({
+      id: "ticket-hub-release",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    const service = createTicketProvisioningService(
+      settings,
+      store,
+      discordFixture(),
+    );
+    try {
+      await expect(service.canReleaseHub(guild.id, "hub-1")).resolves.toBe(
+        false,
+      );
+      await store.markFailed(ticket.id, "controlled failure");
+      await expect(service.canReleaseHub(guild.id, "hub-1")).resolves.toBe(
+        true,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   it("reads the configured hub only after an in-flight hub move completes", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);

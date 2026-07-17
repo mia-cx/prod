@@ -23,6 +23,7 @@ export interface GuildSetupService {
 
 export interface ReporterHubAccessSuspender {
   suspendHubAccess(guild: Guild, hubChannelId: string): Promise<number>;
+  canReleaseHub(guildId: string, hubChannelId: string): Promise<boolean>;
 }
 
 const throwTransitionFailure = (
@@ -133,6 +134,21 @@ export const createGuildSetupService = (
         await recoverPendingTransition(guild);
         const previous = await store.get(guild.id);
         const sameHub = previous.hubChannelId === channelId;
+        if (
+          !sameHub &&
+          previous.hubChannelId !== undefined &&
+          !(await reporterAccess.canReleaseHub(
+            guild.id,
+            previous.hubChannelId,
+          ))
+        ) {
+          return {
+            valid: false as const,
+            issues: [
+              "The support hub cannot be changed while tickets remain active.",
+            ],
+          };
+        }
         const prepared = await discord.prepareHub(
           guild,
           channelId,

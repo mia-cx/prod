@@ -100,6 +100,7 @@ export interface TicketProvisioningService {
   recover(
     resolveGuild: (guildId: string) => Promise<Guild>,
   ): Promise<Readonly<{ recovered: number; failed: number }>>;
+  canReleaseHub(guildId: string, hubChannelId: string): Promise<boolean>;
   suspendHubAccess(guild: Guild, hubChannelId: string): Promise<number>;
   resumeHubAccess(guild: Guild, hubChannelId: string): Promise<number>;
 }
@@ -746,6 +747,8 @@ export const createTicketProvisioningService = (
       }
       return Object.freeze({ recovered, failed });
     },
+    canReleaseHub: async (guildId, hubChannelId) =>
+      !(await store.hasActiveTickets(guildId, hubChannelId)),
     suspendHubAccess: async (guild, hubChannelId) =>
       execute(`hub:${guild.id}:${hubChannelId}`, () =>
         suspendReporterAccess(guild, hubChannelId),

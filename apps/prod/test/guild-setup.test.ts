@@ -62,6 +62,7 @@ const setup = async () => {
   };
   const reporterAccess: ReporterHubAccessSuspender = {
     suspendHubAccess: vi.fn(async () => 0),
+    canReleaseHub: vi.fn(async () => true),
   };
   return {
     store,
@@ -131,6 +132,28 @@ describe("guild setup lifecycle", () => {
       hubPermissionOwnership: ownership("hub-b"),
     });
     expect((await store.get(guild.id)).hubInformationMessageId).toBeUndefined();
+  });
+
+  it("blocks a hub move while active tickets depend on the former hub", async () => {
+    const { store, discord, reporterAccess, service, guild } = await setup();
+    await service.configureHub(guild, "hub-a");
+    vi.mocked(discord.prepareHub).mockClear();
+    vi.mocked(reporterAccess.canReleaseHub).mockResolvedValueOnce(false);
+
+    await expect(service.configureHub(guild, "hub-b")).resolves.toEqual({
+      valid: false,
+      issues: [
+        "The support hub cannot be changed while tickets remain active.",
+      ],
+    });
+
+    expect(discord.prepareHub).not.toHaveBeenCalled();
+    expect(reporterAccess.suspendHubAccess).not.toHaveBeenCalled();
+    expect(discord.releaseFormerHub).not.toHaveBeenCalled();
+    await expect(store.get(guild.id)).resolves.toMatchObject({
+      hubChannelId: "hub-a",
+    });
+    await expect(store.getHubTransition(guild.id)).resolves.toBeUndefined();
   });
 
   it("keeps the secured replacement active and retries interrupted cleanup", async () => {

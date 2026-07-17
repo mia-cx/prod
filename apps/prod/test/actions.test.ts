@@ -92,6 +92,7 @@ const ticketProvisioningService: TicketProvisioningService = {
     updatedAt: "2026-07-17T10:00:00.000Z",
   }),
   recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
+  canReleaseHub: vi.fn().mockResolvedValue(true),
   suspendHubAccess: vi.fn().mockResolvedValue(0),
   resumeHubAccess: vi.fn().mockResolvedValue(0),
 };
@@ -528,6 +529,7 @@ describe("Prod action runtime", () => {
       guild: message.guild,
       reporterUserId: "user-1",
       originatingAlias: "issue",
+      summary: "Poke crashes",
     });
     expect(reply).toHaveBeenCalledWith({
       content: "https://discord.com/channels/guild-1/thread-1",
