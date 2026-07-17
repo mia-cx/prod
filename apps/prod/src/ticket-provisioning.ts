@@ -15,6 +15,10 @@ import {
 
 import type { GuildSettingsStore } from "./guild-settings.js";
 import {
+  createGuildOperationExecutor,
+  type ExecuteGuildOperation,
+} from "./guild-operation.js";
+import {
   findPublicSupportHubThreads,
   findUnmanagedSupportHubMessages,
 } from "./support-hub.js";
@@ -102,6 +106,7 @@ export interface TicketProvisioningService {
 
 export type CreateTicketProvisioningServiceOptions = Readonly<{
   createId?: () => string;
+  executeGuildOperation?: ExecuteGuildOperation;
 }>;
 
 export class TicketProvisioningError extends Error {
@@ -500,6 +505,8 @@ export const createTicketProvisioningService = (
 ): TicketProvisioningService => {
   const createId = options.createId ?? randomUUID;
   const execute = createKeyedExecutor();
+  const executeGuildOperation =
+    options.executeGuildOperation ?? createGuildOperationExecutor();
   const restoreReporterAccess = async (
     guild: Guild,
     hubChannelId: string,
@@ -665,39 +672,39 @@ export const createTicketProvisioningService = (
   };
 
   const service: TicketProvisioningService = {
-    open: async (input) => {
-      const state = await settings.get(input.guild.id);
-      if (state.hubChannelId === undefined) {
-        throw new TicketSetupRequiredError();
-      }
-      const hubChannelId = state.hubChannelId;
-      return execute(`hub:${input.guild.id}:${hubChannelId}`, async () => {
-        const summary = sanitizeTicketSummary(input.summary);
-        const ticket = await store.create({
-          id: createId(),
-          guildId: input.guild.id,
-          hubChannelId,
-          reporterUserId: input.reporterUserId,
-          originatingAlias: input.originatingAlias,
-          ...(summary === undefined ? {} : { summary }),
+    open: async (input) =>
+      executeGuildOperation(input.guild.id, async () => {
+        const state = await settings.get(input.guild.id);
+        if (state.hubChannelId === undefined) {
+          throw new TicketSetupRequiredError();
+        }
+        const hubChannelId = state.hubChannelId;
+        return execute(`hub:${input.guild.id}:${hubChannelId}`, async () => {
+          const summary = sanitizeTicketSummary(input.summary);
+          const ticket = await store.create({
+            id: createId(),
+            guildId: input.guild.id,
+            hubChannelId,
+            reporterUserId: input.reporterUserId,
+            originatingAlias: input.originatingAlias,
+            ...(summary === undefined ? {} : { summary }),
+          });
+          return provision(input.guild, ticket, false);
         });
-        return provision(input.guild, ticket, false);
-      });
-    },
+      }),
     recover: async (resolveGuild) => {
       let recovered = 0;
       let failed = 0;
       for (const ticket of await store.listProvisioning()) {
-        await execute(
-          `hub:${ticket.guildId}:${ticket.hubChannelId}`,
-          async () => {
+        await executeGuildOperation(ticket.guildId, () =>
+          execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
             try {
               await provision(await resolveGuild(ticket.guildId), ticket, true);
               recovered += 1;
             } catch {
               failed += 1;
             }
-          },
+          }),
         );
       }
       return Object.freeze({ recovered, failed });
@@ -726,20 +733,22 @@ export const createTicketProvisioningService = (
         return ownerships.length;
       }),
     resumeHubAccess: async (guild, hubChannelId) =>
-      execute(`hub:${guild.id}:${hubChannelId}`, async () => {
-        const ownerships = await store.listResumableReporterAccess(
-          guild.id,
-          hubChannelId,
-        );
-        for (const ownership of ownerships) {
-          const reporter = await discord.validateReporter(
-            guild,
-            ownership.reporterUserId,
+      executeGuildOperation(guild.id, () =>
+        execute(`hub:${guild.id}:${hubChannelId}`, async () => {
+          const ownerships = await store.listResumableReporterAccess(
+            guild.id,
+            hubChannelId,
           );
-          await discord.grantReporterAccess(guild, hubChannelId, reporter);
-        }
-        return ownerships.length;
-      }),
+          for (const ownership of ownerships) {
+            const reporter = await discord.validateReporter(
+              guild,
+              ownership.reporterUserId,
+            );
+            await discord.grantReporterAccess(guild, hubChannelId, reporter);
+          }
+          return ownerships.length;
+        }),
+      ),
   };
   return Object.freeze(service);
 };

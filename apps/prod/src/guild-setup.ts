@@ -6,6 +6,10 @@ import type {
   GuildSetupSettings,
 } from "./guild-settings.js";
 import type { HubTransition } from "./hub-transition.js";
+import {
+  createGuildOperationExecutor,
+  type ExecuteGuildOperation,
+} from "./guild-operation.js";
 import type { SupportHubDiscord, SupportHubValidation } from "./support-hub.js";
 
 export interface GuildSetupService {
@@ -20,29 +24,6 @@ export interface GuildSetupService {
 export interface ReporterHubAccessSuspender {
   suspendHubAccess(guild: Guild, hubChannelId: string): Promise<number>;
 }
-
-const createKeyedExecutor = () => {
-  const tails = new Map<string, Promise<void>>();
-  return async <Value>(
-    key: string,
-    task: () => Promise<Value>,
-  ): Promise<Value> => {
-    const previous = tails.get(key) ?? Promise.resolve();
-    let release = (): void => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const tail = previous.catch(() => undefined).then(() => gate);
-    tails.set(key, tail);
-    await previous.catch(() => undefined);
-    try {
-      return await task();
-    } finally {
-      release();
-      if (tails.get(key) === tail) tails.delete(key);
-    }
-  };
-};
 
 const throwTransitionFailure = (
   error: unknown,
@@ -59,8 +40,9 @@ export const createGuildSetupService = (
   store: GuildSettingsStore,
   discord: SupportHubDiscord,
   reporterAccess: ReporterHubAccessSuspender,
+  executeGuildOperation: ExecuteGuildOperation = createGuildOperationExecutor(),
 ): GuildSetupService => {
-  const execute = createKeyedExecutor();
+  const execute = executeGuildOperation;
 
   const compensate = async (
     guild: Guild,

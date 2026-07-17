@@ -27,6 +27,7 @@ import {
 
 import type { DiscordActionSurface } from "../discord.js";
 import type { GuildSettingsStore } from "../guild-settings.js";
+import type { ExecuteGuildOperation } from "../guild-operation.js";
 import {
   deletePublicSupportHubThread,
   type SupportHubDiscord,
@@ -64,6 +65,7 @@ export type ProdActionRuntimeOptions = Readonly<{
   supportHubDiscord: SupportHubDiscord;
   ticketProvisioningService: TicketProvisioningService;
   hubSafetyRetryMs?: number;
+  executeGuildOperation?: ExecuteGuildOperation;
 }>;
 
 export const createProdActionRuntime = (
@@ -87,6 +89,7 @@ export const createProdActionRuntime = (
     options.guildSettingsStore,
     options.supportHubDiscord,
     options.ticketProvisioningService,
+    options.executeGuildOperation,
   );
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,

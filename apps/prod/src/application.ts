@@ -9,6 +9,7 @@ import {
 } from "./database.js";
 import { createDiscordGateway, type DiscordGateway } from "./discord.js";
 import { createSqliteGuildSettingsStore } from "./guild-settings.js";
+import { createGuildOperationExecutor } from "./guild-operation.js";
 import { applyMigrations } from "./migrations.js";
 import { createSupportHubDiscord } from "./support-hub.js";
 import {
@@ -66,16 +67,19 @@ export const startProd = async (
     const guildSettingsStore = createSqliteGuildSettingsStore(
       connection.database,
     );
+    const executeGuildOperation = createGuildOperationExecutor();
     const ticketProvisioningService = createTicketProvisioningService(
       guildSettingsStore,
       createSqliteTicketStore(connection.database),
       createTicketProvisioningDiscord(),
+      { executeGuildOperation },
     );
     const actions = createProdActionRuntime(logger, {
       textCommandPrefix: config.textCommandPrefix,
       guildSettingsStore,
       supportHubDiscord: createSupportHubDiscord(),
       ticketProvisioningService,
+      executeGuildOperation,
     });
     gateway =
       dependencies.gateway ??

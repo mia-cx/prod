@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "../src/database.js";
 import type { GuildSettingsStore } from "../src/guild-settings.js";
+import { createGuildOperationExecutor } from "../src/guild-operation.js";
 import { applyMigrations } from "../src/migrations.js";
 import {
   createTicketProvisioningDiscord,
@@ -75,6 +76,67 @@ const discordFixture = (
 });
 
 describe("ticket provisioning", () => {
+  it("reads the configured hub only after an in-flight hub move completes", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const executeGuildOperation = createGuildOperationExecutor();
+    let hubChannelId = "hub-old";
+    const movingSettings = {
+      get: async (guildId: string) => ({
+        guildId,
+        initialized: true,
+        hubChannelId,
+        assistantIdentity: "Prod",
+        tone: "friendly",
+      }),
+    } as GuildSettingsStore;
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(
+      movingSettings,
+      store,
+      discord,
+      {
+        createId: () => "ticket-after-move",
+        executeGuildOperation,
+      },
+    );
+    let finishMove = (): void => undefined;
+    let markMoveStarted = (): void => undefined;
+    const moveStarted = new Promise<void>((resolve) => {
+      markMoveStarted = resolve;
+    });
+    const moveGate = new Promise<void>((resolve) => {
+      finishMove = resolve;
+    });
+    const move = executeGuildOperation(guild.id, async () => {
+      markMoveStarted();
+      await moveGate;
+      hubChannelId = "hub-new";
+    });
+    await moveStarted;
+
+    const opening = service.open({
+      guild,
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    finishMove();
+    await move;
+
+    await expect(opening).resolves.toMatchObject({
+      id: "ticket-after-move",
+      hubChannelId: "hub-new",
+      status: "open",
+    });
+    expect(discord.grantReporterAccess).toHaveBeenCalledWith(
+      guild,
+      "hub-new",
+      reporter,
+    );
+    connection.close();
+  });
+
   it("requires support-hub setup before reserving a ticket", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);

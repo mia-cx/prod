@@ -20,6 +20,7 @@ import type {
   GuildSetupSettings,
 } from "../guild-settings.js";
 import { createGuildSetupService } from "../guild-setup.js";
+import type { ExecuteGuildOperation } from "../guild-operation.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
 import type { ProdActionContext } from "./runtime.js";
@@ -65,8 +66,14 @@ export function createGuildSetupSettingsConsumer(
   store: GuildSettingsStore,
   supportHub: SupportHubDiscord,
   ticketProvisioning: TicketProvisioningService,
+  executeGuildOperation?: ExecuteGuildOperation,
 ): GuildSetupSettingsConsumer {
-  const setup = createGuildSetupService(store, supportHub, ticketProvisioning);
+  const setup = createGuildSetupService(
+    store,
+    supportHub,
+    ticketProvisioning,
+    executeGuildOperation,
+  );
   const authorize = async (context: GuildSetupSettingsContext) => {
     if (context.guild === undefined) {
       return {
