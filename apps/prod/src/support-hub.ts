@@ -1,5 +1,6 @@
 import {
   ChannelType,
+  OverwriteType,
   PermissionFlagsBits,
   RESTJSONErrorCodes,
   type Guild,
@@ -137,7 +138,10 @@ const conflictingOverwriteIssue = (
       overwrite.id !== guild.roles.everyone.id &&
       overwrite.id !== botMember.id &&
       guild.roles.cache.get(overwrite.id)?.tags?.botId !== botMember.id &&
-      !isManagedReporterHubAccess(overwrite) &&
+      !(
+        overwrite.type === OverwriteType.Member &&
+        isManagedReporterHubAccess(overwrite)
+      ) &&
       HUB_PROTECTED_PERMISSION_NAMES.some((name) =>
         overwrite.allow.has(protectedPermissionBits[name]),
       ),

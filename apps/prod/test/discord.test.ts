@@ -254,7 +254,7 @@ describe("createDiscordGateway", () => {
     discordMock.messageHandler?.(message);
     await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledWith(message));
 
-    expect(discordMock.intents).toEqual([1, 8, 2, 4]);
+    expect(discordMock.intents).toEqual([1, 2, 4]);
     expect(handleError).not.toHaveBeenCalled();
   });
 
@@ -269,7 +269,7 @@ describe("createDiscordGateway", () => {
 
     await gateway.connect("development-token", new AbortController().signal);
 
-    expect(discordMock.intents).toEqual([1, 8]);
+    expect(discordMock.intents).toEqual([1]);
     expect(discordMock.messageHandler).toBeUndefined();
   });
 

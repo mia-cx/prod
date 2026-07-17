@@ -95,11 +95,10 @@ export const createDiscordGateway = (
     intents: handleMessage
       ? [
           GatewayIntentBits.Guilds,
-          GatewayIntentBits.GuildMembers,
           GatewayIntentBits.GuildMessages,
           GatewayIntentBits.MessageContent,
         ]
-      : [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+      : [GatewayIntentBits.Guilds],
   });
   let closed = false;
   let operatorRefreshTimer: NodeJS.Timeout | undefined;

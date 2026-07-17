@@ -1,6 +1,7 @@
 import {
   ChannelType,
   Collection,
+  OverwriteType,
   PermissionFlagsBits,
   PermissionsBitField,
   RESTJSONErrorCodes,
@@ -37,6 +38,7 @@ const fixture = (
     string,
     {
       id: string;
+      type: OverwriteType;
       allow: PermissionsBitField;
       deny: PermissionsBitField;
     }
@@ -49,6 +51,7 @@ const fixture = (
       const id = typeof target === "string" ? target : target.id;
       const overwrite = overwriteCache.get(id) ?? {
         id,
+        type: roleCache.has(id) ? OverwriteType.Role : OverwriteType.Member,
         allow: new PermissionsBitField(),
         deny: new PermissionsBitField(),
       };
@@ -160,6 +163,7 @@ const fixture = (
   ) => {
     overwriteCache.set(id, {
       id,
+      type: roleCache.has(id) ? OverwriteType.Role : OverwriteType.Member,
       allow: new PermissionsBitField(allow),
       deny: new PermissionsBitField(deny),
     });
@@ -287,6 +291,33 @@ describe("Discord support hub", () => {
       valid: true,
     });
     expect(REPORTER_TICKET_HUB_OVERWRITE.SendMessagesInThreads).toBe(true);
+  });
+
+  it("rejects the reporter permission shape when it belongs to a role", async () => {
+    const hub = createSupportHubDiscord();
+    const managedRole = fixture();
+    managedRole.roleCache.set("support-role", { id: "support-role" });
+    managedRole.addOverwrite(
+      "support-role",
+      [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.SendMessagesInThreads,
+        PermissionFlagsBits.UseApplicationCommands,
+      ],
+      [
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.CreatePublicThreads,
+        PermissionFlagsBits.CreatePrivateThreads,
+      ],
+    );
+
+    await expect(
+      hub.validateHub(managedRole.guild, "hub-1"),
+    ).resolves.toEqual({
+      valid: false,
+      issues: [expect.stringContaining("channel-specific role or member")],
+    });
   });
 
   it("accepts the bot's managed integration role overwrite", async () => {
