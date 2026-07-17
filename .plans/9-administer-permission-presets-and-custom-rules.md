@@ -17,7 +17,7 @@ Deliver Prod's Permissions settings category. Guild administrators can manage su
 ## TODOs
 
 - [x] Add app-owned permission-rule provenance persistence and migration coverage so preset removal can preserve independent custom rules.
-- [ ] Implement and test a permission administration service for preset expansion, custom allow/deny rules, inspection, removal, and audited mutations.
+- [x] Implement and test a permission administration service for preset expansion, custom allow/deny rules, inspection, removal, and audited mutations.
 - [ ] Compose and test the Permissions settings category with combined mentionables, explicit subject types, confirmation, previews, and pagination.
 - [ ] Wire current Discord-member authorization and the permission store into application startup, then run focused and repository-wide validation.
 
@@ -34,3 +34,4 @@ Deliver Prod's Permissions settings category. Guild administrators can manage su
 - 2026-07-17: Issue #9 requires a real-Discord HITL gate. The implementation PR must reference rather than close #9 until a human records a redacted passing result.
 - 2026-07-17: Ticket-specific scope means an exact ticket object ID inside the guild-only authorization context. Prod will continue rejecting and hiding category/channel context administration.
 - 2026-07-17: Added `permission_rule_origins` with identity-plus-source uniqueness and a SQLite provenance store. Preset, custom, and pre-existing independent ownership can coexist, be queried deterministically, and be removed separately. Generated migration `0003`; all 82 app tests, app typecheck, app lint, and the repository build pass.
+- 2026-07-17: Added the permission administration service with the canonical 9/11/13-rule preset expansions, user/role subjects, guild-wide and exact-ticket custom rules, object-specific verb validation, deterministic inspection pages, individual removal, provenance-aware preset clearing, and an injected authorization recheck before each effective mutation. The package audit store records every created, updated, and removed rule. All 89 app tests and 37 permissions-package tests pass with both packages' typecheck and lint clean.

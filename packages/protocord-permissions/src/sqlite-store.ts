@@ -126,7 +126,7 @@ const parseRule = (value: string | null): PermissionRule | null => {
 };
 
 export const createSqlitePermissionRuleStore = (
-  database: BetterSQLite3Database,
+  database: BetterSQLite3Database<Record<string, unknown>>,
   options: CreateSqlitePermissionRuleStoreOptions = {},
 ): SqlitePermissionRuleStore => {
   const createId = options.createId ?? randomUUID;
