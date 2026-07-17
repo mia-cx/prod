@@ -763,4 +763,36 @@ describe("Components v2 settings rendering", () => {
       4_000,
     );
   });
+
+  it("paginates only fields that are currently visible", async () => {
+    const renderer = createSettingsRenderer({
+      title: "Dynamic fields",
+      categories: [
+        {
+          id: "category",
+          label: "Category",
+          authorize: () => true,
+          subcategories: [
+            {
+              id: "subcategory",
+              label: "Subcategory",
+              fields: Array.from({ length: 12 }, (_, index) => ({
+                ...displayField(index),
+                visible: () => index < 2,
+              })),
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "category", subcategoryId: "subcategory" },
+      { userId: "admin" },
+    );
+
+    expect(rendered.location.pageCount).toBe(1);
+    expect(JSON.stringify(rendered.components)).toContain("Value 0");
+    expect(JSON.stringify(rendered.components)).not.toContain("Value 2");
+  });
 });

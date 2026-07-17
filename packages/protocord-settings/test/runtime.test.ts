@@ -902,6 +902,37 @@ describe("Discord settings runtime", () => {
     expect(modal.showModal).not.toHaveBeenCalled();
   });
 
+  it("rejects a field interaction after the field becomes hidden", async () => {
+    const category = definition.categories[0]!;
+    const subcategory = category.subcategories[0]!;
+    const hiddenRuntime = createSettingsRuntime({
+      definition: {
+        ...definition,
+        categories: [
+          {
+            ...category,
+            subcategories: [
+              {
+                ...subcategory,
+                fields: subcategory.fields.map((field) =>
+                  field.id === "increment"
+                    ? { ...field, visible: () => false }
+                    : field,
+                ),
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const button = mockInteraction("button", route("button", "increment"));
+
+    await expect(
+      hiddenRuntime.handle(button.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "stale" });
+    expect(state.count).toBe(0);
+  });
+
   it("ignores interactions outside the settings namespace", async () => {
     const unrelated = mockInteraction("button", "another.1.button");
 

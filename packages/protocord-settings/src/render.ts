@@ -235,8 +235,14 @@ async function renderSettingsView<Context>(
     category,
     request.subcategoryId ?? category.id,
   );
+  const visibleFields: SettingsField<Context>[] = [];
+  for (const field of subcategory.fields) {
+    if (field.visible === undefined || (await field.visible(context))) {
+      visibleFields.push(field);
+    }
+  }
   const fieldPages = paginateFields(
-    subcategory.fields,
+    visibleFields,
     fixedComponentCount(directCategory),
   );
   const requestedPage = request.page ?? 0;

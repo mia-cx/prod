@@ -33,14 +33,15 @@ export type SettingsFieldView = Readonly<{
   disabled?: boolean;
 }>;
 
-type SettingsFieldBase<Kind extends string> = Readonly<{
+type SettingsFieldBase<Kind extends string, Context> = Readonly<{
   kind: Kind;
   id: string;
   label: string;
   description?: string;
+  visible?(context: Context): Awaitable<boolean>;
 }>;
 
-export type SettingsDisplayField<Context> = SettingsFieldBase<"display"> &
+export type SettingsDisplayField<Context> = SettingsFieldBase<"display", Context> &
   Readonly<{
     load(context: Context): Awaitable<SettingsFieldView & { value: string }>;
   }>;
@@ -48,7 +49,7 @@ export type SettingsDisplayField<Context> = SettingsFieldBase<"display"> &
 export type SettingsButtonView = SettingsFieldView &
   Readonly<{ buttonLabel?: string }>;
 
-export type SettingsButtonField<Context> = SettingsFieldBase<"button"> &
+export type SettingsButtonField<Context> = SettingsFieldBase<"button", Context> &
   Readonly<{
     style?: Exclude<ButtonStyle, ButtonStyle.Link | ButtonStyle.Premium>;
     load(context: Context): Awaitable<SettingsButtonView>;
@@ -72,7 +73,7 @@ export type SettingsStringSelectView = SettingsFieldView &
   }>;
 
 export type SettingsStringSelectField<Context> =
-  SettingsFieldBase<"string-select"> &
+  SettingsFieldBase<"string-select", Context> &
     Readonly<{
       load(context: Context): Awaitable<SettingsStringSelectView>;
       validate?(
@@ -114,7 +115,7 @@ export type SettingsMentionableSelectView = SettingsFieldView &
   }>;
 
 export type SettingsMentionableSelectField<Context> =
-  SettingsFieldBase<"mentionable-select"> &
+  SettingsFieldBase<"mentionable-select", Context> &
     Readonly<{
       load(context: Context): Awaitable<SettingsMentionableSelectView>;
       validate?(
@@ -146,7 +147,7 @@ export type SettingsChannelSelectView = SettingsFieldView &
   }>;
 
 export type SettingsChannelSelectField<Context> =
-  SettingsFieldBase<"channel-select"> &
+  SettingsFieldBase<"channel-select", Context> &
     Readonly<{
       load(context: Context): Awaitable<SettingsChannelSelectView>;
       validate?(
@@ -180,7 +181,7 @@ export type SettingsModalPresentation =
   | Readonly<{ kind: "inline" }>
   | Readonly<{ kind: "preview"; maxLength: number }>;
 
-export type SettingsModalField<Context> = SettingsFieldBase<"modal"> &
+export type SettingsModalField<Context> = SettingsFieldBase<"modal", Context> &
   Readonly<{
     title: string;
     inputs: readonly SettingsModalInput[];

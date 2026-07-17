@@ -392,6 +392,7 @@ async function showSettingsModal<Context>(
   if (field?.kind !== "modal") {
     throw new SettingsViewError("stale", "settings modal is stale");
   }
+  await requireFieldVisible(field, context);
   const view = await beforeModalDeadline(() => field.load(context), deadline);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings modal is disabled");
@@ -486,6 +487,7 @@ async function mutateButton<Context>(
   if (field?.kind !== "button") {
     throw new SettingsViewError("stale", "settings button is stale");
   }
+  await requireFieldVisible(field, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings button is disabled");
@@ -505,6 +507,7 @@ async function mutateStringSelect<Context>(
   if (field?.kind !== "string-select") {
     throw new SettingsViewError("stale", "settings select is stale");
   }
+  await requireFieldVisible(field, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings select is disabled");
@@ -539,6 +542,7 @@ async function mutateMentionables<Context>(
   if (field?.kind !== "mentionable-select") {
     throw new SettingsViewError("stale", "settings mentionable select is stale");
   }
+  await requireFieldVisible(field, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError(
@@ -593,6 +597,7 @@ async function mutateChannels<Context>(
   if (field?.kind !== "channel-select") {
     throw new SettingsViewError("stale", "settings channel select is stale");
   }
+  await requireFieldVisible(field, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError(
@@ -655,6 +660,7 @@ async function submitModal<Context>(
   if (field?.kind !== "modal") {
     throw new SettingsViewError("stale", "settings modal is stale");
   }
+  await requireFieldVisible(field, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings modal is disabled");
@@ -791,6 +797,15 @@ async function requireAuthorization<Context>(
         ? "You are not authorized to change this setting."
         : reason,
     );
+  }
+}
+
+async function requireFieldVisible<Context>(
+  field: SettingsField<Context>,
+  context: Context,
+): Promise<void> {
+  if (field.visible !== undefined && !(await field.visible(context))) {
+    throw new SettingsViewError("stale", "settings field is no longer visible");
   }
 }
 
