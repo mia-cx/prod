@@ -20,6 +20,7 @@ import {
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import type { GuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
+import { createSqliteLabelTaxonomyStore } from "../src/label-taxonomy.js";
 import { createLogger } from "../src/logger.js";
 import { applyMigrations } from "../src/migrations.js";
 import { createPermissionAdministrationService } from "../src/permission-administration.js";
@@ -170,6 +171,7 @@ describe("permission settings integration", () => {
     const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
       textCommandPrefix: "",
       guildSettingsStore,
+      labelTaxonomyStore: createSqliteLabelTaxonomyStore(connection.database),
       supportHubDiscord,
       ticketProvisioningService,
       permissionAdministration: administration,

@@ -86,6 +86,53 @@ describe("SQLite guild label taxonomy", () => {
     ).resolves.toMatchObject({ id: bug.id });
   });
 
+  it("makes first-write initialization an atomic store invariant", async () => {
+    const { connection, store } = await setup();
+
+    await Promise.all([
+      store.create("guild-1", {
+        name: "custom-a",
+        description: "First concurrent custom label.",
+      }),
+      store.create("guild-1", {
+        name: "custom-b",
+        description: "Second concurrent custom label.",
+      }),
+    ]);
+    await expect(store.list("guild-1")).resolves.toHaveLength(7);
+
+    await expect(
+      store.create("guild-2", {
+        name: "bug",
+        description: "Conflicts with a seeded default.",
+      }),
+    ).rejects.toBeInstanceOf(DuplicateLabelNameError);
+    await expect(store.list("guild-2")).resolves.toHaveLength(5);
+
+    for (
+      let index = 0;
+      index < MAX_ACTIVE_LABELS - DEFAULT_LABELS.length;
+      index++
+    ) {
+      await store.create("guild-3", {
+        name: `custom-${String(index)}`,
+        description: `Custom label ${String(index)}.`,
+      });
+    }
+    await store.ensureDefaults("guild-3");
+    const restarted = createSqliteLabelTaxonomyStore(connection.database);
+    await restarted.ensureDefaults("guild-3");
+    await expect(restarted.list("guild-3")).resolves.toHaveLength(
+      MAX_ACTIVE_LABELS,
+    );
+    await expect(
+      restarted.create("guild-3", {
+        name: "overflow",
+        description: "This must not exceed the active bound.",
+      }),
+    ).rejects.toBeInstanceOf(LabelLimitError);
+  });
+
   it("creates and edits labels while enforcing normalized guild uniqueness", async () => {
     const { store } = await setup();
     await store.ensureDefaults("guild-1");

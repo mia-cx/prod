@@ -142,6 +142,8 @@ export type CreateSqliteLabelTaxonomyStoreOptions = Readonly<{
   createId?: () => string;
 }>;
 
+type TaxonomyInitializer = Pick<ProdDatabase, "insert">;
+
 export const createSqliteLabelTaxonomyStore = (
   database: ProdDatabase,
   options: CreateSqliteLabelTaxonomyStoreOptions = {},
@@ -149,38 +151,45 @@ export const createSqliteLabelTaxonomyStore = (
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? randomUUID;
 
+  const initializeDefaults = (
+    writer: TaxonomyInitializer,
+    guildId: string,
+    timestamp: string,
+  ): void => {
+    const initialized = writer
+      .insert(guildLabelTaxonomies)
+      .values({
+        guildId,
+        seedVersion: DEFAULT_LABEL_SEED_VERSION,
+        initializedAt: timestamp,
+      })
+      .onConflictDoNothing({ target: guildLabelTaxonomies.guildId })
+      .run();
+    if (initialized.changes === 0) return;
+    for (const label of DEFAULT_LABELS) {
+      writer
+        .insert(labels)
+        .values({
+          id: createId(),
+          guildId,
+          name: label.name,
+          normalizedName: normalizeLabelName(label.name),
+          description: label.description,
+          active: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .onConflictDoNothing({
+          target: [labels.guildId, labels.normalizedName],
+        })
+        .run();
+    }
+  };
+
   const ensureDefaults = (guildId: string): void => {
     assertId("guildId", guildId);
     database.transaction((transaction) => {
-      const timestamp = now();
-      const initialized = transaction
-        .insert(guildLabelTaxonomies)
-        .values({
-          guildId,
-          seedVersion: DEFAULT_LABEL_SEED_VERSION,
-          initializedAt: timestamp,
-        })
-        .onConflictDoNothing({ target: guildLabelTaxonomies.guildId })
-        .run();
-      if (initialized.changes === 0) return;
-      for (const label of DEFAULT_LABELS) {
-        transaction
-          .insert(labels)
-          .values({
-            id: createId(),
-            guildId,
-            name: label.name,
-            normalizedName: normalizeLabelName(label.name),
-            description: label.description,
-            active: true,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          })
-          .onConflictDoNothing({
-            target: [labels.guildId, labels.normalizedName],
-          })
-          .run();
-      }
+      initializeDefaults(transaction, guildId, now());
     });
   };
 
@@ -227,7 +236,8 @@ export const createSqliteLabelTaxonomyStore = (
       const name = cleanLabelName(input.name);
       const normalizedName = normalizeLabelName(name);
       const description = cleanDescription(input.description);
-      return database.transaction((transaction) => {
+      const result = database.transaction((transaction) => {
+        initializeDefaults(transaction, guildId, now());
         if (
           transaction
             .select({ id: labels.id })
@@ -240,7 +250,7 @@ export const createSqliteLabelTaxonomyStore = (
             )
             .get() !== undefined
         ) {
-          throw duplicate(normalizedName);
+          return { error: duplicate(normalizedName) } as const;
         }
         const activeCount = transaction
           .select({ value: count() })
@@ -248,9 +258,11 @@ export const createSqliteLabelTaxonomyStore = (
           .where(and(eq(labels.guildId, guildId), eq(labels.active, true)))
           .get()!.value;
         if (activeCount >= MAX_ACTIVE_LABELS) {
-          throw new LabelLimitError(
-            `A server may have at most ${String(MAX_ACTIVE_LABELS)} active labels. Deactivate one before creating another.`,
-          );
+          return {
+            error: new LabelLimitError(
+              `A server may have at most ${String(MAX_ACTIVE_LABELS)} active labels. Deactivate one before creating another.`,
+            ),
+          } as const;
         }
         const timestamp = now();
         const row = {
@@ -264,8 +276,10 @@ export const createSqliteLabelTaxonomyStore = (
           updatedAt: timestamp,
         };
         transaction.insert(labels).values(row).run();
-        return rowToLabel(row);
+        return { label: rowToLabel(row) } as const;
       });
+      if ("error" in result) throw result.error;
+      return result.label;
     },
     update: async (guildId, currentName, input) => {
       assertId("guildId", guildId);
