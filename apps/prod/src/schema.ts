@@ -128,6 +128,61 @@ export const reporterHubAccess = sqliteTable(
   ],
 );
 
+export const permissionRuleOrigins = sqliteTable(
+  "permission_rule_origins",
+  {
+    guildId: text("guild_id").notNull(),
+    subjectType: text("subject_type", { enum: ["user", "role"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    objectType: text("object_type", {
+      enum: ["ticket", "queue", "settings", "permissions"],
+    }).notNull(),
+    objectId: text("object_id").notNull(),
+    verb: text("verb", {
+      enum: [
+        "view",
+        "view_metadata",
+        "claim_self",
+        "unclaim_self",
+        "assign_other",
+        "unassign_other",
+        "label",
+        "pause_triage",
+        "resume_triage",
+        "close",
+        "reopen",
+        "suggest_assignee",
+        "complete_triage",
+        "manage",
+      ],
+    }).notNull(),
+    sourceType: text("source_type", {
+      enum: ["preset", "custom", "independent"],
+    }).notNull(),
+    sourceId: text("source_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.guildId,
+        table.subjectType,
+        table.subjectId,
+        table.objectType,
+        table.objectId,
+        table.verb,
+        table.sourceType,
+        table.sourceId,
+      ],
+    }),
+    index("permission_rule_origins_guild").on(table.guildId),
+    index("permission_rule_origins_source").on(
+      table.guildId,
+      table.sourceType,
+      table.sourceId,
+    ),
+  ],
+);
+
 export const schemaContributors = Object.freeze([
   permissionsSchemaOwner,
   modelSettingsSchemaOwner,

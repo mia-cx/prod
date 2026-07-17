@@ -30,6 +30,7 @@ describe("application-owned migration history", () => {
           "reporter_hub_access",
           "ticket_events",
           "tickets",
+          "permission_rule_origins",
         ]),
       );
       const duplicateRule = {
