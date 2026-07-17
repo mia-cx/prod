@@ -11,23 +11,23 @@ causes the selection to fail without writing one.
 
 ## Acceptance criteria
 
-- [ ] New guilds seed bug, account, gameplay, feedback, and other exactly once.
-- [ ] Names are normalized and unique per guild.
-- [ ] Descriptions are available for later AI use.
-- [ ] Deactivation removes labels from future choices without deleting history.
-- [ ] Settings interactions authorize, validate, persist, and rerender.
-- [ ] Concurrent deactivation and selection fail safely.
+- [x] New guilds seed bug, account, gameplay, feedback, and other exactly once.
+- [x] Names are normalized and unique per guild.
+- [x] Descriptions are available for later AI use.
+- [x] Deactivation removes labels from future choices without deleting history.
+- [x] Settings interactions authorize, validate, persist, and rerender.
+- [x] Concurrent deactivation and selection fail safely.
 
 ## TODOs
 
 - [x] Add the app-owned label and ticket-label schema, generated migration, and migration/schema coverage.
 - [x] Implement the SQLite taxonomy store with idempotent defaults, normalization, CRUD, soft deactivation, atomic active-label selection, and focused tests.
 - [x] Compose authorized create, edit, and deactivate label settings that persist and rerender, with integration coverage.
-- [ ] Run focused and repository-wide validation and document the remaining real-Discord HITL gate.
+- [x] Run focused and repository-wide validation and document the remaining real-Discord HITL gate.
 
 ## Human validation
 
-- [ ] Automated checks pass before requesting credentials or human action.
+- [x] Automated checks pass before requesting credentials or human action.
 - [ ] Provide development Discord credentials. Create, edit, and deactivate labels in the real settings UI, restart Prod to verify persistence, attempt normalized duplicates, and confirm deactivated labels disappear from new selections without deleting stored history.
 - [ ] Record the validation outcome without secrets, raw tokens, private ticket content, or unredacted diagnostics.
 
@@ -40,3 +40,4 @@ causes the selection to fail without writing one.
 - 2026-07-17: Added generated migration `0003` for the app-owned `labels` and `ticket_labels` tables, including per-guild normalized-name uniqueness and history-preserving restricted label deletion. All 81 app tests pass after schema and migration coverage updates.
 - 2026-07-17: The SQLite taxonomy store normalizes names with NFKC, collapsed whitespace, and case folding; seeds five described defaults idempotently; preserves stable IDs through edits; and soft-deactivates labels. Active-label validation and ticket association insertion share one transaction, so concurrent deactivation either follows a committed association or makes selection fail without history. App typecheck, lint, and all 86 tests pass.
 - 2026-07-17: Added the authorized Labels settings category with escaped persisted taxonomy rendering and create, edit, and deactivate modals. Domain failures return actionable validation notices; successful mutations rerender fresh state. Integration tests cover authorized seeding, normalized duplicates, all three flows, restart persistence, inactive filtering, and authorization rechecks. App typecheck, lint, and all 89 tests pass.
+- 2026-07-17: Final `corepack pnpm check` passes all 32 package-boundary, lint, typecheck, test, and build tasks; Prod has 89 passing tests. Final `corepack pnpm pack:check` passes all 15 build and package checks. The two real-Discord HITL items remain intentionally pending.
