@@ -22,7 +22,7 @@ import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js"
 import { createLogger } from "../src/logger.js";
 import { applyMigrations } from "../src/migrations.js";
 import { createPermissionAdministrationService } from "../src/permission-administration.js";
-import { createSqlitePermissionRuleProvenanceStore } from "../src/permission-rule-provenance.js";
+import { createPermissionContributionStore } from "../src/permission-contribution-store.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
 
 const guildId = "123456789012345670";
@@ -103,7 +103,7 @@ describe("permission settings integration", () => {
     const seedAuthorization = vi.fn(async () => undefined);
     const administration = createPermissionAdministrationService({
       rules: createProdPermissionRuleStore(sqliteRules),
-      provenance: createSqlitePermissionRuleProvenanceStore(connection.database),
+      contributions: createPermissionContributionStore(connection.database),
       authorize: seedAuthorization,
     });
 
@@ -117,8 +117,7 @@ describe("permission settings integration", () => {
       guild: guildRecord as DiscordMemberLike["guild"],
       roles: {
         cache: {
-          values: () =>
-            [...roleIds].map((id) => ({ id }))[Symbol.iterator](),
+          values: () => [...roleIds].map((id) => ({ id }))[Symbol.iterator](),
         },
       },
       permissions: { has: () => false },
@@ -130,9 +129,7 @@ describe("permission settings integration", () => {
     await administration.setPresetSubjects({
       guildId,
       preset: "configurator",
-      subjects: [
-        { subjectType: "role", subjectId: configuratorRoleId },
-      ],
+      subjects: [{ subjectType: "role", subjectId: configuratorRoleId }],
       actorUserId: "seed-admin",
     });
     seedAuthorization.mockClear();
@@ -153,11 +150,11 @@ describe("permission settings integration", () => {
       "Permissions",
     );
 
-    const supportStaff = mentionableInteraction(
-      guild,
-      "support_staff",
-      [targetUserId, targetRoleId],
-    );
+    const fetchesBeforeMutation = fetchMember.mock.calls.length;
+    const supportStaff = mentionableInteraction(guild, "support_staff", [
+      targetUserId,
+      targetRoleId,
+    ]);
     await runtime.handleInteraction(supportStaff as unknown as Interaction);
     await expect(
       administration.listPresetSubjects(guildId, "support_staff"),
@@ -165,7 +162,9 @@ describe("permission settings integration", () => {
       { subjectType: "role", subjectId: targetRoleId },
       { subjectType: "user", subjectId: targetUserId },
     ]);
-    expect(fetchMember.mock.calls.length).toBeGreaterThan(9);
+    expect(fetchMember.mock.calls.length).toBeGreaterThan(
+      fetchesBeforeMutation,
+    );
 
     roleIds.delete(configuratorRoleId);
     const assignmentManager = mentionableInteraction(
@@ -173,7 +172,9 @@ describe("permission settings integration", () => {
       "assignment_manager",
       [targetRoleId],
     );
-    await runtime.handleInteraction(assignmentManager as unknown as Interaction);
+    await runtime.handleInteraction(
+      assignmentManager as unknown as Interaction,
+    );
     await expect(
       administration.listPresetSubjects(guildId, "assignment_manager"),
     ).resolves.toEqual([]);

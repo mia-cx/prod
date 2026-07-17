@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createSqlitePermissionRuleStore } from "@protocord/permissions";
 
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
-import {
-  createSqlitePermissionRuleProvenanceStore,
-  type PermissionRuleIdentity,
+import { createPermissionContributionStore } from "../src/permission-contribution-store.js";
+import type {
+  PermissionRuleIdentity,
+  PermissionRuleOrigin,
 } from "../src/permission-rule-provenance.js";
 import { applyMigrations } from "../src/migrations.js";
 
@@ -20,43 +22,86 @@ const identity = (verb: PermissionRuleIdentity["verb"] = "close") => ({
   verb,
 });
 
-describe("permission rule provenance persistence", () => {
-  it("stores idempotent, independently removable origins for one rule identity", async () => {
+const custom: PermissionRuleOrigin = {
+  sourceType: "custom",
+  sourceId: "custom",
+};
+const preset: PermissionRuleOrigin = {
+  sourceType: "preset",
+  sourceId: "support_staff",
+};
+
+describe("permission contribution persistence", () => {
+  it("audits an origin removal even when the effective rule is unchanged", async () => {
     const connection = openDatabase(":memory:");
     connections.push(connection);
     await applyMigrations(connection.database);
-    const store = createSqlitePermissionRuleProvenanceStore(connection.database);
-    const preset = { sourceType: "preset" as const, sourceId: "support_staff" };
-    const custom = { sourceType: "custom" as const, sourceId: "custom" };
+    let nextId = 0;
+    const store = createPermissionContributionStore(connection.database, {
+      createId: () => `id-${String(++nextId)}`,
+      now: () => "2026-07-17T10:00:00.000Z",
+    });
 
-    await store.add(identity(), preset);
-    await store.add(identity(), preset);
-    await store.add(identity(), custom);
+    await store.apply({
+      actorUserId: "admin-1",
+      changes: [
+        { kind: "put", identity: identity(), origin: custom, permit: "allow" },
+        { kind: "put", identity: identity(), origin: preset, permit: "allow" },
+      ],
+    });
+    await store.apply({
+      actorUserId: "admin-2",
+      changes: [{ kind: "remove", identity: identity(), origin: preset }],
+    });
+
     await expect(store.list(identity())).resolves.toEqual([
-      custom,
-      preset,
+      { ...custom, permit: "allow" },
     ]);
-
-    await store.remove(identity(), preset);
-    await expect(store.list(identity())).resolves.toEqual([custom]);
+    expect((await store.listEvents()).at(-1)).toMatchObject({
+      identity: identity(),
+      origin: preset,
+      eventType: "removed",
+      actorUserId: "admin-2",
+      beforePermit: "allow",
+      afterPermit: null,
+    });
   });
 
-  it("lists complete identities by guild and source", async () => {
+  it("rolls back contributions, effective rules, and audits together", async () => {
     const connection = openDatabase(":memory:");
     connections.push(connection);
     await applyMigrations(connection.database);
-    const store = createSqlitePermissionRuleProvenanceStore(connection.database);
-    const source = {
-      sourceType: "preset" as const,
-      sourceId: "assignment_manager",
-    };
-    await store.add(identity("assign_other"), source);
-    await store.add(identity("unassign_other"), source);
+    const store = createPermissionContributionStore(connection.database, {
+      createId: () => "duplicate-id",
+    });
+    const rules = createSqlitePermissionRuleStore(connection.database);
 
-    await expect(store.listForSource("guild-1", source)).resolves.toEqual([
-      identity("assign_other"),
-      identity("unassign_other"),
-    ]);
-    await expect(store.listForSource("guild-2", source)).resolves.toEqual([]);
+    await expect(
+      store.apply({
+        actorUserId: "admin-1",
+        changes: [
+          {
+            kind: "put",
+            identity: identity("close"),
+            origin: custom,
+            permit: "allow",
+          },
+          {
+            kind: "put",
+            identity: identity("reopen"),
+            origin: custom,
+            permit: "allow",
+          },
+        ],
+      }),
+    ).rejects.toThrow();
+
+    await expect(store.list(identity("close"))).resolves.toEqual([]);
+    await expect(store.list(identity("reopen"))).resolves.toEqual([]);
+    await expect(store.listEvents()).resolves.toEqual([]);
+    await expect(rules.listForContext({ guildId: "guild-1" })).resolves.toEqual(
+      [],
+    );
+    await expect(rules.listEvents()).resolves.toEqual([]);
   });
 });

@@ -7,7 +7,7 @@ import {
   createPermissionAdministrationService,
   PERMISSION_PRESET_RULES,
 } from "../src/permission-administration.js";
-import { createSqlitePermissionRuleProvenanceStore } from "../src/permission-rule-provenance.js";
+import { createPermissionContributionStore } from "../src/permission-contribution-store.js";
 import { applyMigrations } from "../src/migrations.js";
 
 const connections: DatabaseConnection[] = [];
@@ -29,14 +29,17 @@ const setup = async () => {
   });
   const rules = createProdPermissionRuleStore(sqliteRules);
   const authorize = vi.fn(async () => undefined);
-  let nextRule = 0;
+  let nextContribution = 0;
+  const contributions = createPermissionContributionStore(connection.database, {
+    createId: () => `contribution-${String(++nextContribution)}`,
+    now: () => "2026-07-17T10:00:00.000Z",
+  });
   const service = createPermissionAdministrationService({
     rules,
-    provenance: createSqlitePermissionRuleProvenanceStore(connection.database),
+    contributions,
     authorize,
-    createId: () => `rule-${String(++nextRule)}`,
   });
-  return { service, rules, sqliteRules, authorize };
+  return { service, rules, sqliteRules, contributions, authorize };
 };
 
 const role = { subjectType: "role" as const, subjectId: "role-1" };
@@ -47,38 +50,42 @@ describe("permission administration", () => {
     "support_staff" as const,
     "assignment_manager" as const,
     "configurator" as const,
-  ])("expands the %s preset into individual audited allow rules", async (preset) => {
-    const { service, rules, sqliteRules, authorize } = await setup();
+  ])(
+    "expands the %s preset into individual audited allow rules",
+    async (preset) => {
+      const { service, rules, sqliteRules, authorize } = await setup();
 
-    await service.setPresetSubjects({
-      guildId: "guild-1",
-      preset,
-      subjects: [role],
-      actorUserId: "admin-1",
-    });
+      await service.setPresetSubjects({
+        guildId: "guild-1",
+        preset,
+        subjects: [role],
+        actorUserId: "admin-1",
+      });
 
-    const stored = await rules.listForContext({ guildId: "guild-1" });
-    expect(
-      stored.map(({ object, verb, permit }) => ({ object, verb, permit })),
-    ).toEqual(
-      PERMISSION_PRESET_RULES[preset].map(({ object, verb }) => ({
-        object,
-        verb,
-        permit: "allow",
-      })),
-    );
-    expect(await service.listPresetSubjects("guild-1", preset)).toEqual([
-      role,
-    ]);
-    expect(await sqliteRules.listEvents()).toHaveLength(stored.length);
-    expect(authorize).toHaveBeenCalledTimes(stored.length);
-  });
+      const stored = await rules.listForContext({ guildId: "guild-1" });
+      expect(
+        stored.map(({ object, verb, permit }) => ({ object, verb, permit })),
+      ).toEqual(
+        PERMISSION_PRESET_RULES[preset].map(({ object, verb }) => ({
+          object,
+          verb,
+          permit: "allow",
+        })),
+      );
+      expect(await service.listPresetSubjects("guild-1", preset)).toEqual([
+        role,
+      ]);
+      expect(await sqliteRules.listEvents()).toHaveLength(stored.length);
+      expect(authorize).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("preserves an independently configured rule when preset membership is removed", async () => {
     const { service, rules } = await setup();
     await service.applyCustomRules({
       guildId: "guild-1",
       subjects: [role],
+      scope: "guild",
       object: { objectType: "ticket", objectId: "*" },
       verbs: ["close"],
       permit: "allow",
@@ -108,11 +115,69 @@ describe("permission administration", () => {
     });
   });
 
+  it("preserves an independently configured deny across preset add and removal", async () => {
+    const { service, rules } = await setup();
+    await service.applyCustomRules({
+      guildId: "guild-1",
+      subjects: [role],
+      scope: "guild",
+      object: { objectType: "ticket", objectId: "*" },
+      verbs: ["close"],
+      permit: "deny",
+      actorUserId: "admin-1",
+    });
+    await service.setPresetSubjects({
+      guildId: "guild-1",
+      preset: "support_staff",
+      subjects: [role],
+      actorUserId: "admin-1",
+    });
+    expect(
+      (await rules.listForContext({ guildId: "guild-1" })).find(
+        ({ verb }) => verb === "close",
+      )?.permit,
+    ).toBe("deny");
+
+    await service.setPresetSubjects({
+      guildId: "guild-1",
+      preset: "support_staff",
+      subjects: [],
+      actorUserId: "admin-1",
+    });
+
+    expect(await rules.listForContext({ guildId: "guild-1" })).toEqual([
+      expect.objectContaining({ verb: "close", permit: "deny" }),
+    ]);
+  });
+
+  it("preserves concurrent preset additions from separate settings views", async () => {
+    const { service } = await setup();
+    await Promise.all([
+      service.addPresetSubjects({
+        guildId: "guild-1",
+        preset: "support_staff",
+        subjects: [role],
+        actorUserId: "admin-1",
+      }),
+      service.addPresetSubjects({
+        guildId: "guild-1",
+        preset: "support_staff",
+        subjects: [user],
+        actorUserId: "admin-2",
+      }),
+    ]);
+
+    await expect(
+      service.listPresetSubjects("guild-1", "support_staff"),
+    ).resolves.toEqual([role, user]);
+  });
+
   it("round-trips guild-wide and exact-ticket custom allow/deny rules", async () => {
     const { service } = await setup();
     await service.applyCustomRules({
       guildId: "guild-1",
       subjects: [user, role],
+      scope: "exact-ticket",
       object: { objectType: "ticket", objectId: "ticket-1" },
       verbs: ["label", "close"],
       permit: "deny",
@@ -121,6 +186,7 @@ describe("permission administration", () => {
     await service.applyCustomRules({
       guildId: "guild-1",
       subjects: [role],
+      scope: "guild",
       object: { objectType: "permissions", objectId: "*" },
       verbs: ["manage"],
       permit: "allow",
@@ -154,11 +220,45 @@ describe("permission administration", () => {
     );
   });
 
+  it("authorizes a self-revoking preset clear once before applying the whole batch", async () => {
+    const { service, rules } = await setup();
+    await service.setPresetSubjects({
+      guildId: "guild-1",
+      preset: "configurator",
+      subjects: [user],
+      actorUserId: user.subjectId,
+    });
+    const recheckAuthorization = vi.fn(async () => {
+      if (recheckAuthorization.mock.calls.length > 1) {
+        throw new Error("authorization was revoked mid-batch");
+      }
+    });
+
+    await expect(
+      service.setPresetSubjects({
+        guildId: "guild-1",
+        preset: "configurator",
+        subjects: [],
+        actorUserId: user.subjectId,
+        recheckAuthorization,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(recheckAuthorization).toHaveBeenCalledOnce();
+    await expect(
+      service.listPresetSubjects("guild-1", "configurator"),
+    ).resolves.toEqual([]);
+    await expect(rules.listForContext({ guildId: "guild-1" })).resolves.toEqual(
+      [],
+    );
+  });
+
   it("removes one inspected rule with an authorization recheck and audit event", async () => {
     const { service, sqliteRules, authorize } = await setup();
     await service.applyCustomRules({
       guildId: "guild-1",
       subjects: [user],
+      scope: "exact-ticket",
       object: { objectType: "ticket", objectId: "ticket-1" },
       verbs: ["close"],
       permit: "deny",
@@ -176,7 +276,7 @@ describe("permission administration", () => {
     await expect(
       service.listRules({ guildId: "guild-1" }),
     ).resolves.toMatchObject({ total: 0, items: [] });
-    expect(authorize).toHaveBeenCalledTimes(2);
+    expect(authorize).toHaveBeenCalledOnce();
     expect((await sqliteRules.listEvents()).at(-1)).toMatchObject({
       ruleId: rule!.id,
       eventType: "removed",
@@ -185,17 +285,38 @@ describe("permission administration", () => {
   });
 
   it("rejects invalid object/verb combinations before authorization", async () => {
+    const { service, rules, sqliteRules, authorize } = await setup();
+    await expect(
+      service.applyCustomRules({
+        guildId: "guild-1",
+        subjects: [user],
+        scope: "guild",
+        object: { objectType: "queue", objectId: "*" },
+        verbs: ["view", "close"],
+        permit: "allow",
+        actorUserId: "admin-1",
+      }),
+    ).rejects.toThrow("close is not valid for queue rules");
+    expect(authorize).not.toHaveBeenCalled();
+    await expect(rules.listForContext({ guildId: "guild-1" })).resolves.toEqual(
+      [],
+    );
+    await expect(sqliteRules.listEvents()).resolves.toEqual([]);
+  });
+
+  it("rejects a wildcard at the exact-ticket service boundary", async () => {
     const { service, authorize } = await setup();
     await expect(
       service.applyCustomRules({
         guildId: "guild-1",
         subjects: [user],
-        object: { objectType: "queue", objectId: "*" },
+        scope: "exact-ticket",
+        object: { objectType: "ticket", objectId: "*" },
         verbs: ["close"],
         permit: "allow",
         actorUserId: "admin-1",
       }),
-    ).rejects.toThrow("close is not valid for queue rules");
+    ).rejects.toThrow("non-wildcard ticket ID");
     expect(authorize).not.toHaveBeenCalled();
   });
 });

@@ -16,7 +16,7 @@ import { createDiscordGateway, type DiscordGateway } from "./discord.js";
 import { createSqliteGuildSettingsStore } from "./guild-settings.js";
 import { createGuildOperationExecutor } from "./guild-operation.js";
 import { createPermissionAdministrationService } from "./permission-administration.js";
-import { createSqlitePermissionRuleProvenanceStore } from "./permission-rule-provenance.js";
+import { createPermissionContributionStore } from "./permission-contribution-store.js";
 import { applyMigrations } from "./migrations.js";
 import { createSupportHubDiscord } from "./support-hub.js";
 import {
@@ -93,9 +93,7 @@ export const startProd = async (
     });
     const permissionAdministration = createPermissionAdministrationService({
       rules: createProdPermissionRuleStore(sqlitePermissionRules),
-      provenance: createSqlitePermissionRuleProvenanceStore(
-        connection.database,
-      ),
+      contributions: createPermissionContributionStore(connection.database),
       authorize: async () => {
         throw new Error(
           "Permission mutations require a live Discord authorization recheck",

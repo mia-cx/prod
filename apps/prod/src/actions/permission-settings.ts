@@ -56,15 +56,14 @@ const PRESET_DETAILS: Readonly<
   },
   configurator: {
     label: "Configurators",
-    description: "Assignment managers who may administer settings and permissions.",
+    description:
+      "Assignment managers who may administer settings and permissions.",
   },
 };
 
 const PRESETS = Object.keys(PRESET_DETAILS) as readonly PermissionPreset[];
 const SUBJECTS_PER_CONTROL = 25;
-const PRESET_REMOVAL_CONTROLS = 20;
 const RULES_PER_CONTROL = 25;
-const RULE_REMOVAL_CONTROLS = 20;
 const CLEAR_CONFIRMATION_MS = 2 * 60 * 1_000;
 
 const requireGuildId = (context: PermissionSettingsContext): string => {
@@ -86,15 +85,6 @@ const mentionableSubject = (
   subjectType: mentionable.kind,
   subjectId: mentionable.id,
 });
-
-const mergeSubjects = (
-  current: readonly PermissionSubject[],
-  additions: readonly PermissionSubject[],
-): readonly PermissionSubject[] => {
-  const merged = new Map(current.map((subject) => [subjectKey(subject), subject]));
-  for (const subject of additions) merged.set(subjectKey(subject), subject);
-  return [...merged.values()];
-};
 
 const invalid = (message: string): SettingsMutationResult => ({
   status: "invalid",
@@ -134,7 +124,10 @@ const ruleLabel = (rule: PermissionRule): string =>
   );
 
 const ruleDescription = (rule: PermissionRule): string =>
-  `${rule.object.objectType}/${rule.object.objectId}:${rule.verb}`.slice(0, 100);
+  `${rule.object.objectType}/${rule.object.objectId}:${rule.verb}`.slice(
+    0,
+    100,
+  );
 
 const draftObject = (draft: CustomRuleDraft): RuleObject | undefined => {
   if (draft.scope === "ticket") {
@@ -146,13 +139,22 @@ const draftObject = (draft: CustomRuleDraft): RuleObject | undefined => {
   return { objectType: draft.objectType, objectId: "*" };
 };
 
+const exactTicketIdIssue = (value: string | undefined): string | undefined => {
+  const ticketId = value?.trim();
+  if (!ticketId) return "Enter an exact ticket ID.";
+  if (ticketId === "*")
+    return 'Exact ticket scope cannot use the wildcard "*".';
+  return undefined;
+};
+
 const draftIssue = (draft: CustomRuleDraft): string | undefined => {
   if (draft.subjects.length === 0) return "Select at least one user or role.";
   if (draft.scope === "ticket" && draft.objectType !== "ticket") {
     return "Ticket-specific scope is available only for ticket rules.";
   }
-  if (draft.scope === "ticket" && !draft.ticketId?.trim()) {
-    return "Enter the exact ticket ID for ticket-specific scope.";
+  if (draft.scope === "ticket") {
+    const issue = exactTicketIdIssue(draft.ticketId);
+    if (issue !== undefined) return issue;
   }
   if (draft.verbs.length === 0) return "Select at least one verb.";
   return undefined;
@@ -178,6 +180,8 @@ export function createPermissionSettingsCategory<
   const now = options.now ?? Date.now;
   const clearConfirmations = new Map<string, number>();
   const drafts = new Map<string, CustomRuleDraft>();
+  const presetRemovalPages = new Map<string, number>();
+  const ruleRemovalPages = new Map<string, number>();
   const draftKey = (context: Context): string =>
     `${requireGuildId(context)}:${context.userId}`;
   const getDraft = (context: Context): CustomRuleDraft => {
@@ -225,7 +229,8 @@ export function createPermissionSettingsCategory<
         kind: "mentionable-select",
         id: "add",
         label: `Add ${details.label.toLowerCase()}`,
-        description: "Select users and roles together. Existing members remain configured.",
+        description:
+          "Select users and roles together. Existing members remain configured.",
         load: async (context) => ({
           value: `${String((await options.service.listPresetSubjects(requireGuildId(context), preset)).length)} configured`,
           placeholder: "Choose users and roles to add",
@@ -233,71 +238,118 @@ export function createPermissionSettingsCategory<
           maxValues: 25,
         }),
         mutate: async (values, context) => {
-          const guildId = requireGuildId(context);
-          const current = await options.service.listPresetSubjects(guildId, preset);
-          await options.service.setPresetSubjects({
-            guildId,
+          await options.service.addPresetSubjects({
+            guildId: requireGuildId(context),
             preset,
-            subjects: mergeSubjects(current, values.map(mentionableSubject)),
+            subjects: values.map(mentionableSubject),
             actorUserId: context.userId,
             recheckAuthorization: () => options.requireAuthorization(context),
           });
         },
       },
     ];
-    for (let chunk = 0; chunk < PRESET_REMOVAL_CONTROLS; chunk += 1) {
-      fields.push({
-        kind: "string-select",
-        id: `remove-${String(chunk + 1)}`,
-        label: `Remove subjects ${String(chunk * SUBJECTS_PER_CONTROL + 1)}–${String((chunk + 1) * SUBJECTS_PER_CONTROL)}`,
-        visible: async (context) =>
-          (await options.service.listPresetSubjects(
-            requireGuildId(context),
-            preset,
-          )).length >
-          chunk * SUBJECTS_PER_CONTROL,
+    const removalPageKey = (context: Context) =>
+      `${draftKey(context)}:${preset}`;
+    const getRemovalPage = (context: Context) =>
+      presetRemovalPages.get(removalPageKey(context)) ?? 0;
+    fields.push({
+      kind: "string-select",
+      id: "remove",
+      label: "Remove subjects on current page",
+      load: async (context) => {
+        const subjects = await options.service.listPresetSubjects(
+          requireGuildId(context),
+          preset,
+        );
+        const lastPage = Math.max(
+          0,
+          Math.ceil(subjects.length / SUBJECTS_PER_CONTROL) - 1,
+        );
+        const pageNumber = Math.min(getRemovalPage(context), lastPage);
+        presetRemovalPages.set(removalPageKey(context), pageNumber);
+        const page = subjects.slice(
+          pageNumber * SUBJECTS_PER_CONTROL,
+          (pageNumber + 1) * SUBJECTS_PER_CONTROL,
+        );
+        return {
+          value: `Page ${String(pageNumber + 1)} of ${String(lastPage + 1)} · ${String(subjects.length)} configured`,
+          options:
+            page.length === 0
+              ? emptyOption("No configured subjects")
+              : presetSubjectOptions(page),
+          minValues: 1,
+          maxValues: Math.max(1, page.length),
+          disabled: page.length === 0,
+        };
+      },
+      mutate: async (values, context) => {
+        const subjects = values
+          .filter((value) => value !== "none")
+          .map((value) => {
+            const [subjectType, subjectId] = value.split(":", 2);
+            return {
+              subjectType: subjectType as "user" | "role",
+              subjectId: subjectId!,
+            };
+          });
+        await options.service.removePresetSubjects({
+          guildId: requireGuildId(context),
+          preset,
+          subjects,
+          actorUserId: context.userId,
+          recheckAuthorization: () => options.requireAuthorization(context),
+        });
+      },
+    });
+    fields.push(
+      {
+        kind: "button",
+        id: "previous",
+        label: "Previous removal page",
+        load: (context) => ({
+          value: "Show the previous page of configured subjects.",
+          buttonLabel: "Previous",
+          disabled: getRemovalPage(context) === 0,
+        }),
+        mutate: (context) => {
+          presetRemovalPages.set(
+            removalPageKey(context),
+            Math.max(0, getRemovalPage(context) - 1),
+          );
+        },
+      },
+      {
+        kind: "button",
+        id: "next",
+        label: "Next removal page",
         load: async (context) => {
-          const subjects = await options.service.listPresetSubjects(
-            requireGuildId(context),
-            preset,
-          );
-          const page = subjects.slice(
-            chunk * SUBJECTS_PER_CONTROL,
-            (chunk + 1) * SUBJECTS_PER_CONTROL,
-          );
+          const count = (
+            await options.service.listPresetSubjects(
+              requireGuildId(context),
+              preset,
+            )
+          ).length;
           return {
-            value:
-              page.length === 0
-                ? "No configured subjects in this range."
-                : `${String(page.length)} removable ${page.length === 1 ? "subject" : "subjects"}`,
-            options:
-              page.length === 0
-                ? emptyOption("No subjects in this range")
-                : presetSubjectOptions(page),
-            minValues: 1,
-            maxValues: Math.max(1, page.length),
-            disabled: page.length === 0,
+            value: "Show the next page of configured subjects.",
+            buttonLabel: "Next",
+            disabled:
+              (getRemovalPage(context) + 1) * SUBJECTS_PER_CONTROL >= count,
           };
         },
-        mutate: async (values, context) => {
-          const guildId = requireGuildId(context);
-          const removed = new Set(values);
-          const current = await options.service.listPresetSubjects(guildId, preset);
-          await options.service.setPresetSubjects({
-            guildId,
-            preset,
-            subjects: current.filter((subject) => !removed.has(subjectKey(subject))),
-            actorUserId: context.userId,
-            recheckAuthorization: () => options.requireAuthorization(context),
-          });
+        mutate: (context) => {
+          presetRemovalPages.set(
+            removalPageKey(context),
+            getRemovalPage(context) + 1,
+          );
         },
-      });
-    }
+      },
+    );
     fields.push({
       kind: "button",
       id: "clear",
       label: `Clear ${details.label.toLowerCase()}`,
-      description: "Requires a second click and preserves rules with another origin.",
+      description:
+        "Requires a second click and preserves rules with another origin.",
       style: ButtonStyle.Danger,
       load: (context) => {
         const key = `${draftKey(context)}:${preset}`;
@@ -315,10 +367,9 @@ export function createPermissionSettingsCategory<
           clearConfirmations.set(key, now() + CLEAR_CONFIRMATION_MS);
           return;
         }
-        await options.service.setPresetSubjects({
+        await options.service.clearPreset({
           guildId: requireGuildId(context),
           preset,
-          subjects: [],
           actorUserId: context.userId,
           recheckAuthorization: () => options.requireAuthorization(context),
         });
@@ -371,7 +422,9 @@ export function createPermissionSettingsCategory<
         const allowed = PERMISSION_OBJECT_VERBS[objectType];
         updateDraft(context, {
           objectType,
-          verbs: getDraft(context).verbs.filter((verb) => allowed.includes(verb)),
+          verbs: getDraft(context).verbs.filter((verb) =>
+            allowed.includes(verb),
+          ),
         });
       },
     },
@@ -379,7 +432,8 @@ export function createPermissionSettingsCategory<
       kind: "string-select",
       id: "scope",
       label: "Scope",
-      description: "Prod offers guild-wide rules or an exact ticket object; category/channel contexts are unavailable.",
+      description:
+        "Prod offers guild-wide rules or an exact ticket object; category/channel contexts are unavailable.",
       load: (context) => ({
         value:
           getDraft(context).scope === "guild"
@@ -417,10 +471,12 @@ export function createPermissionSettingsCategory<
         values: { ticket: getDraft(context).ticketId ?? "" },
         disabled: getDraft(context).scope !== "ticket",
       }),
-      validate: (values) =>
-        values.ticket?.trim()
+      validate: (values) => {
+        const issue = exactTicketIdIssue(values.ticket);
+        return issue === undefined
           ? []
-          : [{ inputId: "ticket", message: "Enter an exact ticket ID." }],
+          : [{ inputId: "ticket", message: issue }];
+      },
       mutate: (values, context) => {
         updateDraft(context, { ticketId: values.ticket!.trim() });
       },
@@ -433,9 +489,13 @@ export function createPermissionSettingsCategory<
         const draft = getDraft(context);
         const verbs = PERMISSION_OBJECT_VERBS[draft.objectType];
         return {
-          value: draft.verbs.length === 0 ? "None selected" : draft.verbs.join(", "),
+          value:
+            draft.verbs.length === 0 ? "None selected" : draft.verbs.join(", "),
           selectedValues: draft.verbs,
-          options: verbs.map((verb) => ({ label: verbLabel(verb), value: verb })),
+          options: verbs.map((verb) => ({
+            label: verbLabel(verb),
+            value: verb,
+          })),
           minValues: 1,
           maxValues: verbs.length,
         };
@@ -486,6 +546,7 @@ export function createPermissionSettingsCategory<
         await options.service.applyCustomRules({
           guildId: requireGuildId(context),
           subjects: draft.subjects,
+          scope: draft.scope === "guild" ? "guild" : "exact-ticket",
           object,
           verbs: draft.verbs,
           permit: draft.permit,
@@ -506,7 +567,7 @@ export function createPermissionSettingsCategory<
       load: async (context) => {
         const page = await options.service.listRules({
           guildId: requireGuildId(context),
-          limit: RULES_PER_CONTROL * RULE_REMOVAL_CONTROLS,
+          limit: 1,
         });
         return {
           value: `${String(page.total)} active ${page.total === 1 ? "rule" : "rules"}. Rules are grouped into paginated removal controls below.`,
@@ -514,32 +575,33 @@ export function createPermissionSettingsCategory<
       },
     },
   ];
-  for (let chunk = 0; chunk < RULE_REMOVAL_CONTROLS; chunk += 1) {
-    inspectionFields.push({
+  const rulePageKey = (context: Context) => draftKey(context);
+  const getRulePage = (context: Context) =>
+    ruleRemovalPages.get(rulePageKey(context)) ?? 0;
+  inspectionFields.push(
+    {
       kind: "string-select",
-      id: `rules-${String(chunk + 1)}`,
-      label: `Inspect or remove rules ${String(chunk * RULES_PER_CONTROL + 1)}–${String((chunk + 1) * RULES_PER_CONTROL)}`,
-      visible: async (context) =>
-        (
-          await options.service.listRules({
-            guildId: requireGuildId(context),
-            offset: chunk * RULES_PER_CONTROL,
-            limit: 1,
-          })
-        ).items.length > 0,
+      id: "rules",
+      label: "Inspect or remove rules on current page",
       load: async (context) => {
+        const guildId = requireGuildId(context);
+        const summary = await options.service.listRules({ guildId, limit: 1 });
+        const lastPage = Math.max(
+          0,
+          Math.ceil(summary.total / RULES_PER_CONTROL) - 1,
+        );
+        const pageNumber = Math.min(getRulePage(context), lastPage);
+        ruleRemovalPages.set(rulePageKey(context), pageNumber);
         const page = await options.service.listRules({
           guildId: requireGuildId(context),
-          offset: chunk * RULES_PER_CONTROL,
+          offset: pageNumber * RULES_PER_CONTROL,
           limit: RULES_PER_CONTROL,
         });
         return {
           value:
             page.items.length === 0
               ? "No active rules in this range."
-              : page.items
-                  .map((rule) => `${ruleLabel(rule)} · ${ruleDescription(rule)}`)
-                  .join("\n"),
+              : `Page ${String(pageNumber + 1)} of ${String(lastPage + 1)}\n${page.items.map((rule) => `${ruleLabel(rule)} · ${ruleDescription(rule)}`).join("\n")}`,
           options:
             page.items.length === 0
               ? emptyOption("No rules in this range")
@@ -563,8 +625,44 @@ export function createPermissionSettingsCategory<
           recheckAuthorization: () => options.requireAuthorization(context),
         });
       },
-    });
-  }
+    },
+    {
+      kind: "button",
+      id: "rules-previous",
+      label: "Previous rule page",
+      load: (context) => ({
+        value: "Show the previous page of active rules.",
+        buttonLabel: "Previous",
+        disabled: getRulePage(context) === 0,
+      }),
+      mutate: (context) => {
+        ruleRemovalPages.set(
+          rulePageKey(context),
+          Math.max(0, getRulePage(context) - 1),
+        );
+      },
+    },
+    {
+      kind: "button",
+      id: "rules-next",
+      label: "Next rule page",
+      load: async (context) => {
+        const page = await options.service.listRules({
+          guildId: requireGuildId(context),
+          limit: 1,
+        });
+        return {
+          value: "Show the next page of active rules.",
+          buttonLabel: "Next",
+          disabled:
+            (getRulePage(context) + 1) * RULES_PER_CONTROL >= page.total,
+        };
+      },
+      mutate: (context) => {
+        ruleRemovalPages.set(rulePageKey(context), getRulePage(context) + 1);
+      },
+    },
+  );
 
   return {
     id: "permissions",
@@ -576,13 +674,15 @@ export function createPermissionSettingsCategory<
       {
         id: "advanced",
         label: "Advanced rules",
-        description: "Stage and preview guild-wide or exact-ticket allow/deny rules before persistence.",
+        description:
+          "Stage and preview guild-wide or exact-ticket allow/deny rules before persistence.",
         fields: advancedFields,
       },
       {
         id: "rules",
         label: "Inspect rules",
-        description: "Inspect active rules and remove one audited rule at a time.",
+        description:
+          "Inspect active rules and remove one audited rule at a time.",
         fields: inspectionFields,
       },
     ],
