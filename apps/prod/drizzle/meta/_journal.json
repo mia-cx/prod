@@ -15,6 +15,13 @@
       "when": 1784279660091,
       "tag": "0003_tired_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784282508052,
+      "tag": "0004_cold_stingray",
+      "breakpoints": true
     }
   ]
 }

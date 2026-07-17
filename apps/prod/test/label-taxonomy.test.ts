@@ -56,8 +56,38 @@ describe("SQLite guild label taxonomy", () => {
     ).resolves.toHaveLength(5);
   });
 
+  it("does not recreate an editable default after it is renamed", async () => {
+    const { connection, store } = await setup();
+    await store.ensureDefaults("guild-1");
+    const bug = (await store.findByName("guild-1", "bug"))!;
+
+    await store.update("guild-1", "bug", {
+      name: "defect",
+      description: "Unexpected behavior or broken functionality.",
+    });
+    await store.ensureDefaults("guild-1");
+
+    await expect(store.list("guild-1")).resolves.toEqual([
+      expect.objectContaining({ name: "account" }),
+      expect.objectContaining({ id: bug.id, name: "defect" }),
+      expect.objectContaining({ name: "feedback" }),
+      expect.objectContaining({ name: "gameplay" }),
+      expect.objectContaining({ name: "other" }),
+    ]);
+    await expect(store.findByName("guild-1", "bug")).resolves.toBeUndefined();
+
+    const restarted = createSqliteLabelTaxonomyStore(connection.database);
+    await restarted.ensureDefaults("guild-1");
+    await expect(restarted.list("guild-1")).resolves.toHaveLength(5);
+    await expect(
+      restarted.findByName("guild-1", "defect"),
+    ).resolves.toMatchObject({ id: bug.id });
+  });
+
   it("creates and edits labels while enforcing normalized guild uniqueness", async () => {
     const { store } = await setup();
+    await store.ensureDefaults("guild-1");
+    await store.ensureDefaults("guild-2");
     const created = await store.create("guild-1", {
       name: "  Connection   Issue ",
       description: "  Trouble connecting to a server.  ",

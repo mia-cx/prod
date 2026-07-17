@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 
 import type { ProdDatabase } from "./database.js";
-import { labels, ticketLabels } from "./schema.js";
+import { guildLabelTaxonomies, labels, ticketLabels } from "./schema.js";
+
+export const DEFAULT_LABEL_SEED_VERSION = 1;
 
 export const DEFAULT_LABELS = Object.freeze([
   {
@@ -146,6 +148,16 @@ export const createSqliteLabelTaxonomyStore = (
     assertId("guildId", guildId);
     database.transaction((transaction) => {
       const timestamp = now();
+      const initialized = transaction
+        .insert(guildLabelTaxonomies)
+        .values({
+          guildId,
+          seedVersion: DEFAULT_LABEL_SEED_VERSION,
+          initializedAt: timestamp,
+        })
+        .onConflictDoNothing({ target: guildLabelTaxonomies.guildId })
+        .run();
+      if (initialized.changes === 0) return;
       for (const label of DEFAULT_LABELS) {
         transaction
           .insert(labels)
@@ -188,7 +200,7 @@ export const createSqliteLabelTaxonomyStore = (
   const store: LabelTaxonomyStore = {
     ensureDefaults: async (guildId) => ensureDefaults(guildId),
     list: async (guildId, listOptions = {}) => {
-      ensureDefaults(guildId);
+      assertId("guildId", guildId);
       const rows = listOptions.includeInactive
         ? database
             .select()
@@ -207,7 +219,6 @@ export const createSqliteLabelTaxonomyStore = (
     findByName: async (guildId, name) => findByName(guildId, name),
     create: async (guildId, input) => {
       assertId("guildId", guildId);
-      ensureDefaults(guildId);
       const name = cleanLabelName(input.name);
       const normalizedName = normalizeLabelName(name);
       const description = cleanDescription(input.description);

@@ -3,6 +3,7 @@ import { getTableName } from "drizzle-orm";
 
 import {
   guildSettings,
+  guildLabelTaxonomies,
   labels,
   permissionRuleOrigins,
   permissionRuleEvents,
@@ -41,6 +42,7 @@ describe("Drizzle schema composition", () => {
   });
 
   it("includes the app-owned label taxonomy tables", () => {
+    expect(getTableName(guildLabelTaxonomies)).toBe("guild_label_taxonomies");
     expect(getTableName(labels)).toBe("labels");
     expect(getTableName(ticketLabels)).toBe("ticket_labels");
   });

@@ -239,6 +239,12 @@ export const labels = sqliteTable(
   ],
 );
 
+export const guildLabelTaxonomies = sqliteTable("guild_label_taxonomies", {
+  guildId: text("guild_id").primaryKey(),
+  seedVersion: integer("seed_version").notNull(),
+  initializedAt: text("initialized_at").notNull(),
+});
+
 export const ticketLabels = sqliteTable(
   "ticket_labels",
   {

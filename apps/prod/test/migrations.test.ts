@@ -27,6 +27,7 @@ describe("application-owned migration history", () => {
           "protocord_permission_rule_events",
           "protocord_permission_rules",
           "guild_settings",
+          "guild_label_taxonomies",
           "labels",
           "permission_rule_origins",
           "reporter_hub_access",
