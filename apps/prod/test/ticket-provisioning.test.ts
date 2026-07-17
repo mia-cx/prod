@@ -137,6 +137,122 @@ describe("ticket provisioning", () => {
     connection.close();
   });
 
+  it("fails stale provisioning recovery without re-granting the former hub", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const ticket = await store.create({
+      id: "ticket-former-hub",
+      guildId: guild.id,
+      hubChannelId: "hub-old",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    await store.beginReporterAccess(ticket, emptyAccessSnapshot);
+    const replacementSettings = {
+      get: async (guildId: string) => ({
+        guildId,
+        initialized: true,
+        hubChannelId: "hub-new",
+        assistantIdentity: "Prod",
+        tone: "friendly",
+      }),
+    } as GuildSettingsStore;
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(
+      replacementSettings,
+      store,
+      discord,
+    );
+    try {
+      await expect(service.recover(async () => guild)).resolves.toEqual({
+        recovered: 0,
+        failed: 1,
+      });
+
+      expect(discord.grantReporterAccess).not.toHaveBeenCalled();
+      expect(discord.createTicketThread).not.toHaveBeenCalled();
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-old",
+        "reporter-1",
+        emptyAccessSnapshot,
+      );
+      expect(await store.get(ticket.id)).toMatchObject({
+        status: "failed",
+        failureReason:
+          "The configured support hub changed before ticket recovery",
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("reasserts suspension when former-hub resumption waits behind a move", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const ticket = await store.create({
+      id: "ticket-resume-former-hub",
+      guildId: guild.id,
+      hubChannelId: "hub-old",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    await store.beginReporterAccess(ticket, emptyAccessSnapshot);
+    const executeGuildOperation = createGuildOperationExecutor();
+    let hubChannelId = "hub-old";
+    const movingSettings = {
+      get: async (guildId: string) => ({
+        guildId,
+        initialized: true,
+        hubChannelId,
+        assistantIdentity: "Prod",
+        tone: "friendly",
+      }),
+    } as GuildSettingsStore;
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(
+      movingSettings,
+      store,
+      discord,
+      { executeGuildOperation },
+    );
+    let finishMove = (): void => undefined;
+    let markMoveStarted = (): void => undefined;
+    const moveStarted = new Promise<void>((resolve) => {
+      markMoveStarted = resolve;
+    });
+    const moveGate = new Promise<void>((resolve) => {
+      finishMove = resolve;
+    });
+    const move = executeGuildOperation(guild.id, async () => {
+      markMoveStarted();
+      await moveGate;
+      hubChannelId = "hub-new";
+    });
+    await moveStarted;
+
+    const resumption = service.resumeHubAccess(guild, "hub-old");
+    finishMove();
+    await move;
+    try {
+      await expect(resumption).resolves.toBe(1);
+      expect(discord.grantReporterAccess).not.toHaveBeenCalled();
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-old",
+        "reporter-1",
+        emptyAccessSnapshot,
+      );
+      expect(await store.getReporterAccess(ticket)).toEqual(
+        emptyAccessSnapshot,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   it("requires support-hub setup before reserving a ticket", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);

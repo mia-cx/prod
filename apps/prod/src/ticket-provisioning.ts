@@ -529,6 +529,28 @@ export const createTicketProvisioningService = (
     }
     throw lastError;
   };
+  const suspendReporterAccess = async (
+    guild: Guild,
+    hubChannelId: string,
+  ): Promise<number> => {
+    const ownerships = await store.listReporterAccess(guild.id, hubChannelId);
+    const failures: unknown[] = [];
+    for (const ownership of ownerships) {
+      await restoreReporterAccess(
+        guild,
+        hubChannelId,
+        ownership.reporterUserId,
+        ownership.snapshot,
+      ).catch((error: unknown) => failures.push(error));
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        "Failed to suspend all reporter access for unsafe support hub",
+      );
+    }
+    return ownerships.length;
+  };
 
   const compensate = async (
     guild: Guild,
@@ -699,7 +721,22 @@ export const createTicketProvisioningService = (
         await executeGuildOperation(ticket.guildId, () =>
           execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
             try {
-              await provision(await resolveGuild(ticket.guildId), ticket, true);
+              const guild = await resolveGuild(ticket.guildId);
+              const state = await settings.get(ticket.guildId);
+              if (state.hubChannelId !== ticket.hubChannelId) {
+                await compensate(
+                  guild,
+                  ticket,
+                  undefined,
+                  (await store.getReporterAccess(ticket)) !== undefined,
+                  undefined,
+                  undefined,
+                  new Error(
+                    "The configured support hub changed before ticket recovery",
+                  ),
+                );
+              }
+              await provision(guild, ticket, true);
               recovered += 1;
             } catch {
               failed += 1;
@@ -710,31 +747,16 @@ export const createTicketProvisioningService = (
       return Object.freeze({ recovered, failed });
     },
     suspendHubAccess: async (guild, hubChannelId) =>
-      execute(`hub:${guild.id}:${hubChannelId}`, async () => {
-        const ownerships = await store.listReporterAccess(
-          guild.id,
-          hubChannelId,
-        );
-        const failures: unknown[] = [];
-        for (const ownership of ownerships) {
-          await restoreReporterAccess(
-            guild,
-            hubChannelId,
-            ownership.reporterUserId,
-            ownership.snapshot,
-          ).catch((error: unknown) => failures.push(error));
-        }
-        if (failures.length > 0) {
-          throw new AggregateError(
-            failures,
-            "Failed to suspend all reporter access for unsafe support hub",
-          );
-        }
-        return ownerships.length;
-      }),
+      execute(`hub:${guild.id}:${hubChannelId}`, () =>
+        suspendReporterAccess(guild, hubChannelId),
+      ),
     resumeHubAccess: async (guild, hubChannelId) =>
       executeGuildOperation(guild.id, () =>
         execute(`hub:${guild.id}:${hubChannelId}`, async () => {
+          const state = await settings.get(guild.id);
+          if (state.hubChannelId !== hubChannelId) {
+            return suspendReporterAccess(guild, hubChannelId);
+          }
           const ownerships = await store.listResumableReporterAccess(
             guild.id,
             hubChannelId,
