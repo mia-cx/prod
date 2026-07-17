@@ -27,6 +27,8 @@ describe("application-owned migration history", () => {
           "protocord_permission_rule_events",
           "protocord_permission_rules",
           "guild_settings",
+          "ticket_events",
+          "tickets",
         ]),
       );
       const duplicateRule = {

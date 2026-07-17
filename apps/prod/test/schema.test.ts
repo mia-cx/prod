@@ -6,6 +6,8 @@ import {
   permissionRuleEvents,
   permissionRules,
   schemaContributors,
+  ticketEvents,
+  tickets,
 } from "../src/schema.js";
 
 describe("Drizzle schema composition", () => {
@@ -26,5 +28,7 @@ describe("Drizzle schema composition", () => {
 
   it("includes the app-owned guild settings table", () => {
     expect(getTableName(guildSettings)).toBe("guild_settings");
+    expect(getTableName(tickets)).toBe("tickets");
+    expect(getTableName(ticketEvents)).toBe("ticket_events");
   });
 });
