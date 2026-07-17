@@ -269,6 +269,27 @@ describe("Discord support hub", () => {
     });
   });
 
+  it("rejects unrelated history but accepts Prod's managed information message", async () => {
+    const hub = createSupportHubDiscord();
+    const unsafe = fixture();
+    unsafe.addMessage("history-1", "Prior support details");
+
+    await expect(hub.validateHub(unsafe.guild, "hub-1")).resolves.toEqual({
+      valid: false,
+      issues: [expect.stringContaining("Remove all messages")],
+    });
+
+    const managed = fixture();
+    managed.addMessage(
+      "information-1",
+      `Prod information\n\n${SUPPORT_HUB_INFORMATION_MARKER}`,
+      managed.botMember.id,
+    );
+    await expect(hub.validateHub(managed.guild, "hub-1")).resolves.toEqual({
+      valid: true,
+    });
+  });
+
   it("rejects non-bot role and member allows that would bypass hub privacy", async () => {
     const hub = createSupportHubDiscord();
     for (const targetId of ["role-1", "reporter-1"]) {
@@ -327,9 +348,9 @@ describe("Discord support hub", () => {
       valid: false,
       issues: [expect.stringContaining("Remove public threads")],
     });
-    await expect(
-      hub.deletePublicThreads(state.guild, "hub-1"),
-    ).resolves.toBe(1);
+    await expect(hub.deletePublicThreads(state.guild, "hub-1")).resolves.toBe(
+      1,
+    );
     expect(remove).toHaveBeenCalledTimes(3);
   });
 
@@ -352,9 +373,7 @@ describe("Discord support hub", () => {
       ],
     );
 
-    await expect(
-      hub.validateHub(managedRole.guild, "hub-1"),
-    ).resolves.toEqual({
+    await expect(hub.validateHub(managedRole.guild, "hub-1")).resolves.toEqual({
       valid: false,
       issues: [expect.stringContaining("channel-specific role or member")],
     });
@@ -475,7 +494,7 @@ describe("Discord support hub", () => {
     });
   });
 
-  it("recovers an unpersisted managed message without touching unrelated messages", async () => {
+  it("refuses to add an information message while unrelated history exists", async () => {
     const hub = createSupportHubDiscord();
     const state = fixture();
     const unrelated = state.addMessage(
@@ -483,19 +502,15 @@ describe("Discord support hub", () => {
       "A different bot-authored message",
     );
 
-    const firstId = await hub.upsertInformationMessage({
-      guild: state.guild,
-      channelId: "hub-1",
-      assistantIdentity: "Prod",
-    });
-    const recoveredId = await hub.upsertInformationMessage({
-      guild: state.guild,
-      channelId: "hub-1",
-      assistantIdentity: "Prod",
-    });
+    await expect(
+      hub.upsertInformationMessage({
+        guild: state.guild,
+        channelId: "hub-1",
+        assistantIdentity: "Prod",
+      }),
+    ).rejects.toThrow("Remove all messages");
 
-    expect(recoveredId).toBe(firstId);
-    expect(state.send).toHaveBeenCalledOnce();
+    expect(state.send).not.toHaveBeenCalled();
     expect(state.messageCache.has("unrelated")).toBe(true);
     expect(unrelated.delete).not.toHaveBeenCalled();
   });

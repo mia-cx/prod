@@ -14,7 +14,10 @@ import {
 } from "discord.js";
 
 import type { GuildSettingsStore } from "./guild-settings.js";
-import { findPublicSupportHubThreads } from "./support-hub.js";
+import {
+  findPublicSupportHubThreads,
+  findUnmanagedSupportHubMessages,
+} from "./support-hub.js";
 import {
   captureReporterHubAccess,
   isEmptyPermissionOverwrite,
@@ -265,9 +268,19 @@ export const createTicketProvisioningDiscord =
       },
       grantReporterAccess: async (guild, hubChannelId, reporter) => {
         const hub = await requireHub(guild, hubChannelId);
-        if ((await findPublicSupportHubThreads(hub)).length > 0) {
+        const botMember = guild.members.me ?? (await guild.members.fetchMe());
+        const [publicThreads, unmanagedMessages] = await Promise.all([
+          findPublicSupportHubThreads(hub),
+          findUnmanagedSupportHubMessages(hub, botMember.id),
+        ]);
+        if (publicThreads.length > 0) {
           throw new Error(
             "The support hub contains a public thread and cannot safely grant reporter access",
+          );
+        }
+        if (unmanagedMessages.length > 0) {
+          throw new Error(
+            "The support hub contains unmanaged messages and cannot safely grant reporter access",
           );
         }
         await hub.permissionOverwrites.edit(
@@ -426,10 +439,12 @@ export const createTicketProvisioningDiscord =
             .catch((error: unknown) => rollbackErrors.push(error));
         }
         if (preparation.wasArchived) {
-          await thread.setArchived(
-            true,
-            `Roll back failed Prod ticket recovery ${ticket.id}`,
-          ).catch((error: unknown) => rollbackErrors.push(error));
+          await thread
+            .setArchived(
+              true,
+              `Roll back failed Prod ticket recovery ${ticket.id}`,
+            )
+            .catch((error: unknown) => rollbackErrors.push(error));
         }
         if (rollbackErrors.length > 0) {
           throw new AggregateError(
@@ -485,6 +500,28 @@ export const createTicketProvisioningService = (
 ): TicketProvisioningService => {
   const createId = options.createId ?? randomUUID;
   const execute = createKeyedExecutor();
+  const restoreReporterAccess = async (
+    guild: Guild,
+    hubChannelId: string,
+    reporterUserId: string,
+    snapshot: ReporterHubAccessSnapshot,
+  ): Promise<void> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await discord.restoreReporterAccess(
+          guild,
+          hubChannelId,
+          reporterUserId,
+          snapshot,
+        );
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
+  };
 
   const compensate = async (
     guild: Guild,
@@ -634,21 +671,18 @@ export const createTicketProvisioningService = (
         throw new TicketSetupRequiredError();
       }
       const hubChannelId = state.hubChannelId;
-      return execute(
-        `hub:${input.guild.id}:${hubChannelId}`,
-        async () => {
-          const summary = sanitizeTicketSummary(input.summary);
-          const ticket = await store.create({
-            id: createId(),
-            guildId: input.guild.id,
-            hubChannelId,
-            reporterUserId: input.reporterUserId,
-            originatingAlias: input.originatingAlias,
-            ...(summary === undefined ? {} : { summary }),
-          });
-          return provision(input.guild, ticket, false);
-        },
-      );
+      return execute(`hub:${input.guild.id}:${hubChannelId}`, async () => {
+        const summary = sanitizeTicketSummary(input.summary);
+        const ticket = await store.create({
+          id: createId(),
+          guildId: input.guild.id,
+          hubChannelId,
+          reporterUserId: input.reporterUserId,
+          originatingAlias: input.originatingAlias,
+          ...(summary === undefined ? {} : { summary }),
+        });
+        return provision(input.guild, ticket, false);
+      });
     },
     recover: async (resolveGuild) => {
       let recovered = 0;
@@ -676,14 +710,12 @@ export const createTicketProvisioningService = (
         );
         const failures: unknown[] = [];
         for (const ownership of ownerships) {
-          await discord
-            .restoreReporterAccess(
-              guild,
-              hubChannelId,
-              ownership.reporterUserId,
-              ownership.snapshot,
-            )
-            .catch((error: unknown) => failures.push(error));
+          await restoreReporterAccess(
+            guild,
+            hubChannelId,
+            ownership.reporterUserId,
+            ownership.snapshot,
+          ).catch((error: unknown) => failures.push(error));
         }
         if (failures.length > 0) {
           throw new AggregateError(
@@ -695,7 +727,7 @@ export const createTicketProvisioningService = (
       }),
     resumeHubAccess: async (guild, hubChannelId) =>
       execute(`hub:${guild.id}:${hubChannelId}`, async () => {
-        const ownerships = await store.listReporterAccess(
+        const ownerships = await store.listResumableReporterAccess(
           guild.id,
           hubChannelId,
         );

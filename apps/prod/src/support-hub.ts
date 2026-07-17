@@ -141,6 +141,39 @@ export const findPublicSupportHubThreads = async (
   throw new Error("Public support-hub thread scan exceeded its safe limit");
 };
 
+const isManagedInformationMessage = (
+  message: Message,
+  botUserId: string,
+): boolean =>
+  message.author.id === botUserId &&
+  message.content.includes(SUPPORT_HUB_INFORMATION_MARKER);
+
+export const findUnmanagedSupportHubMessages = async (
+  channel: TextChannel,
+  botUserId: string,
+): Promise<readonly Message[]> => {
+  const found: Message[] = [];
+  let before: string | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const messages = await channel.messages.fetch({
+      limit: 100,
+      ...(before === undefined ? {} : { before }),
+    });
+    found.push(
+      ...messages
+        .filter((message) => !isManagedInformationMessage(message, botUserId))
+        .values(),
+    );
+    if (messages.size < 100) return Object.freeze(found);
+    const oldest = messages.last();
+    if (oldest === undefined) {
+      throw new Error("Discord support-hub message pagination did not advance");
+    }
+    before = oldest.id;
+  }
+  throw new Error("Support-hub message scan exceeded its safe limit");
+};
+
 const PUBLIC_THREAD_DELETE_ATTEMPTS = 3;
 
 export const deletePublicSupportHubThread = async (
@@ -149,7 +182,9 @@ export const deletePublicSupportHubThread = async (
   let lastError: unknown;
   for (let attempt = 0; attempt < PUBLIC_THREAD_DELETE_ATTEMPTS; attempt += 1) {
     try {
-      await thread.delete("Public threads are not allowed in a Prod support hub");
+      await thread.delete(
+        "Public threads are not allowed in a Prod support hub",
+      );
       return;
     } catch (error) {
       lastError = error;
@@ -229,8 +264,13 @@ const resolveHub = async (
     .filter(([, permission]) => permissions?.has(permission) !== true)
     .map(([name]) => name);
   const conflict = conflictingOverwriteIssue(channel, guild, botMember);
-  const publicThreads =
-    missing.length === 0 ? await findPublicSupportHubThreads(channel) : [];
+  const [publicThreads, unmanagedMessages] =
+    missing.length === 0
+      ? await Promise.all([
+          findPublicSupportHubThreads(channel),
+          findUnmanagedSupportHubMessages(channel, botMember.id),
+        ])
+      : [[], []];
   const issues = [
     ...(missing.length === 0
       ? []
@@ -240,7 +280,14 @@ const resolveHub = async (
     ...(conflict === undefined ? [] : [conflict]),
     ...(publicThreads.length === 0
       ? []
-      : ["Remove public threads before using this channel as the support hub."]),
+      : [
+          "Remove public threads before using this channel as the support hub.",
+        ]),
+    ...(unmanagedMessages.length === 0
+      ? []
+      : [
+          "Remove all messages except Prod's managed information message before using this channel as the support hub.",
+        ]),
   ];
   return issues.length === 0
     ? { valid: true, channel, botMember }
@@ -344,13 +391,6 @@ const informationMessageContent = (assistantIdentity: string): string =>
     SUPPORT_HUB_INFORMATION_MARKER,
   ].join("\n\n");
 
-const isManagedInformationMessage = (
-  message: Message,
-  botMember: GuildMember,
-): boolean =>
-  message.author.id === botMember.id &&
-  message.content.includes(SUPPORT_HUB_INFORMATION_MARKER);
-
 const managedInformationMessages = async (
   channel: TextChannel,
   botMember: GuildMember,
@@ -358,7 +398,7 @@ const managedInformationMessages = async (
 ): Promise<Message[]> => {
   const recent = await channel.messages.fetch({ limit: 100 });
   const managed = [...recent.values()].filter((message) =>
-    isManagedInformationMessage(message, botMember),
+    isManagedInformationMessage(message, botMember.id),
   );
   if (
     storedMessageId !== undefined &&
@@ -366,7 +406,8 @@ const managedInformationMessages = async (
   ) {
     try {
       const stored = await channel.messages.fetch(storedMessageId);
-      if (isManagedInformationMessage(stored, botMember)) managed.push(stored);
+      if (isManagedInformationMessage(stored, botMember.id))
+        managed.push(stored);
     } catch (error) {
       if (!isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMessage)) {
         throw error;
@@ -547,9 +588,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
       const channel = await fetchTextChannel(guild, channelId, true);
       if (channel === undefined) return 0;
       const publicThreads = await findPublicSupportHubThreads(channel);
-      await Promise.all(
-        publicThreads.map(deletePublicSupportHubThread),
-      );
+      await Promise.all(publicThreads.map(deletePublicSupportHubThread));
       return publicThreads.length;
     },
     upsertInformationMessage: async (input: UpsertHubInformationInput) => {

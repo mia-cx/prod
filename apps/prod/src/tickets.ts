@@ -70,6 +70,15 @@ export interface TicketStore {
       snapshot: ReporterHubAccessSnapshot;
     }>[]
   >;
+  listResumableReporterAccess(
+    guildId: string,
+    hubChannelId: string,
+  ): Promise<
+    readonly Readonly<{
+      reporterUserId: string;
+      snapshot: ReporterHubAccessSnapshot;
+    }>[]
+  >;
   recordProgress(
     ticketId: string,
     eventType: TicketEventType,
@@ -390,6 +399,38 @@ export const createSqliteTicketStore = (
           and(
             eq(reporterHubAccess.guildId, guildId),
             eq(reporterHubAccess.hubChannelId, hubChannelId),
+          ),
+        )
+        .all()
+        .map((row) =>
+          Object.freeze({
+            reporterUserId: row.reporterUserId,
+            snapshot: parseReporterHubAccessSnapshot(row.snapshotJson),
+          }),
+        ),
+    listResumableReporterAccess: async (
+      guildId: string,
+      hubChannelId: string,
+    ) =>
+      database
+        .selectDistinct({
+          reporterUserId: reporterHubAccess.reporterUserId,
+          snapshotJson: reporterHubAccess.snapshotJson,
+        })
+        .from(reporterHubAccess)
+        .innerJoin(
+          tickets,
+          and(
+            eq(tickets.guildId, reporterHubAccess.guildId),
+            eq(tickets.hubChannelId, reporterHubAccess.hubChannelId),
+            eq(tickets.reporterUserId, reporterHubAccess.reporterUserId),
+          ),
+        )
+        .where(
+          and(
+            eq(reporterHubAccess.guildId, guildId),
+            eq(reporterHubAccess.hubChannelId, hubChannelId),
+            inArray(tickets.status, ["provisioning", "open"]),
           ),
         )
         .all()

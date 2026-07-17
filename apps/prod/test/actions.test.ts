@@ -614,6 +614,32 @@ describe("Prod action runtime", () => {
     expect(ticketProvisioningService.recover).not.toHaveBeenCalled();
   });
 
+  it("rolls back partial access resumption before startup recovery", async () => {
+    const resumeError = new Error("second reporter grant failed");
+    vi.mocked(supportHubDiscord.deletePublicThreads).mockResolvedValueOnce(0);
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockRejectedValueOnce(
+      resumeError,
+    );
+    vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
+    vi.mocked(ticketProvisioningService.recover).mockClear();
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const cachedGuild = { id: "guild-1" };
+    const client = {
+      guilds: { fetch: vi.fn(), cache: new Map([["guild-1", cachedGuild]]) },
+    } as unknown as Client<true>;
+
+    await expect(runtime.reconcile!(client)).rejects.toBe(resumeError);
+
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledWith(
+      cachedGuild,
+      "123456789012345678",
+    );
+    expect(ticketProvisioningService.recover).not.toHaveBeenCalled();
+  });
+
   it("deletes public thread drift only inside the configured support hub", async () => {
     vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
     vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
@@ -653,12 +679,17 @@ describe("Prod action runtime", () => {
   });
 
   it("suspends reporter access when live public drift cannot be deleted", async () => {
+    vi.useFakeTimers();
     vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
     vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
-    const runtime = createProdActionRuntime(
-      createLogger({ level: "fatal" }),
-      runtimeOptions,
-    );
+    vi.mocked(supportHubDiscord.deletePublicThreads)
+      .mockReset()
+      .mockRejectedValueOnce(new Error("cleanup still unavailable"))
+      .mockResolvedValue(0);
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      hubSafetyRetryMs: 10,
+    });
     const cleanupError = new Error("Discord unavailable");
     const threadGuild = { id: "guild-1" };
     const publicThread = {
@@ -679,6 +710,17 @@ describe("Prod action runtime", () => {
       "123456789012345678",
     );
     expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(supportHubDiscord.deletePublicThreads).toHaveBeenCalledOnce();
+    expect(ticketProvisioningService.suspendHubAccess).toHaveBeenCalledTimes(2);
+    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(supportHubDiscord.deletePublicThreads).toHaveBeenCalledTimes(2);
+    expect(ticketProvisioningService.resumeHubAccess).toHaveBeenCalledWith(
+      threadGuild,
+      "123456789012345678",
+    );
+    vi.useRealTimers();
   });
 
   it.each([

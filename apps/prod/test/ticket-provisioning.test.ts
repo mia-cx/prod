@@ -395,6 +395,12 @@ describe("ticket provisioning", () => {
       validateReporter: vi.fn(async (_guild, reporterUserId) =>
         Promise.resolve(reporters.get(reporterUserId)!),
       ),
+      restoreReporterAccess: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("transient restore failure one"))
+        .mockRejectedValueOnce(new Error("transient restore failure two"))
+        .mockResolvedValueOnce(undefined),
     });
     const service = createTicketProvisioningService(settings, store, discord);
     try {
@@ -411,6 +417,7 @@ describe("ticket provisioning", () => {
         "reporter-2",
         existingAccessSnapshot,
       );
+      expect(discord.restoreReporterAccess).toHaveBeenCalledTimes(4);
       expect(await store.getReporterAccess(first)).toEqual(emptyAccessSnapshot);
       expect(await store.getReporterAccess(second)).toEqual(
         existingAccessSnapshot,
@@ -426,6 +433,38 @@ describe("ticket provisioning", () => {
         guild,
         "hub-1",
         reporters.get("reporter-2"),
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("never resumes retained ownership for a failed ticket", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const failed = await store.create({
+      id: "ticket-failed-access",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-failed",
+      originatingAlias: "issue",
+    });
+    await store.beginReporterAccess(failed, emptyAccessSnapshot);
+    await store.markFailed(failed.id, "restore remained unavailable");
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord);
+    try {
+      await expect(service.resumeHubAccess(guild, "hub-1")).resolves.toBe(0);
+      expect(discord.validateReporter).not.toHaveBeenCalled();
+      expect(discord.grantReporterAccess).not.toHaveBeenCalled();
+
+      await expect(service.suspendHubAccess(guild, "hub-1")).resolves.toBe(1);
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        "reporter-failed",
+        emptyAccessSnapshot,
       );
     } finally {
       connection.close();
@@ -702,6 +741,7 @@ describe("Discord ticket privacy adapter", () => {
     const edit = vi.fn().mockResolvedValue(undefined);
     const send = vi.fn();
     const mockGuild = {
+      members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
           type: ChannelType.GuildText,
@@ -714,6 +754,9 @@ describe("Discord ticket privacy adapter", () => {
               threads: new Collection(),
               hasMore: false,
             }),
+          },
+          messages: {
+            fetch: vi.fn().mockResolvedValue(new Collection()),
           },
           send,
         }),
@@ -749,6 +792,7 @@ describe("Discord ticket privacy adapter", () => {
   it("refuses reporter access while the hub contains a public thread", async () => {
     const edit = vi.fn();
     const mockGuild = {
+      members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
           type: ChannelType.GuildText,
@@ -767,6 +811,9 @@ describe("Discord ticket privacy adapter", () => {
               hasMore: false,
             }),
           },
+          messages: {
+            fetch: vi.fn().mockResolvedValue(new Collection()),
+          },
         }),
       },
     } as unknown as Guild;
@@ -778,6 +825,51 @@ describe("Discord ticket privacy adapter", () => {
         reporter,
       ),
     ).rejects.toThrow("public thread");
+    expect(edit).not.toHaveBeenCalled();
+  });
+
+  it("refuses reporter access while the hub contains unmanaged history", async () => {
+    const edit = vi.fn();
+    const mockGuild = {
+      members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
+      channels: {
+        fetch: vi.fn().mockResolvedValue({
+          type: ChannelType.GuildText,
+          permissionOverwrites: { edit },
+          threads: {
+            fetchActive: vi.fn().mockResolvedValue({
+              threads: new Collection(),
+            }),
+            fetchArchived: vi.fn().mockResolvedValue({
+              threads: new Collection(),
+              hasMore: false,
+            }),
+          },
+          messages: {
+            fetch: vi.fn().mockResolvedValue(
+              new Collection([
+                [
+                  "history-1",
+                  {
+                    id: "history-1",
+                    author: { id: "staff-1" },
+                    content: "Prior support details",
+                  },
+                ],
+              ]),
+            ),
+          },
+        }),
+      },
+    } as unknown as Guild;
+
+    await expect(
+      createTicketProvisioningDiscord().grantReporterAccess(
+        mockGuild,
+        "hub-1",
+        reporter,
+      ),
+    ).rejects.toThrow("unmanaged messages");
     expect(edit).not.toHaveBeenCalled();
   });
 

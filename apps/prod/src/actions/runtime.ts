@@ -2,6 +2,7 @@ import {
   ChannelType,
   type AnyThreadChannel,
   type ApplicationCommandData,
+  type Guild,
   type Interaction,
   type Message,
 } from "discord.js";
@@ -62,6 +63,7 @@ export type ProdActionRuntimeOptions = Readonly<{
   guildSettingsStore: GuildSettingsStore;
   supportHubDiscord: SupportHubDiscord;
   ticketProvisioningService: TicketProvisioningService;
+  hubSafetyRetryMs?: number;
 }>;
 
 export const createProdActionRuntime = (
@@ -104,6 +106,56 @@ export const createProdActionRuntime = (
     createTicketAction(options.ticketProvisioningService),
   );
   registry.registerAction(settings.action);
+
+  const scheduledHubSafetyRetries = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  const reconcileHubSafety = async (
+    guild: Guild,
+    hubChannelId: string,
+  ): Promise<void> => {
+    await options.supportHubDiscord.deletePublicThreads(guild, hubChannelId);
+    await options.ticketProvisioningService.resumeHubAccess(
+      guild,
+      hubChannelId,
+    );
+  };
+  const suspendHubSafety = async (
+    guild: Guild,
+    hubChannelId: string,
+    error: unknown,
+  ): Promise<unknown> => {
+    try {
+      await options.ticketProvisioningService.suspendHubAccess(
+        guild,
+        hubChannelId,
+      );
+      return error;
+    } catch (suspensionError) {
+      return new AggregateError(
+        [error, suspensionError],
+        "Failed to make the support hub safe and suspend reporter access",
+      );
+    }
+  };
+  const scheduleHubSafetyRetry = (guild: Guild, hubChannelId: string): void => {
+    const key = `${guild.id}:${hubChannelId}`;
+    if (scheduledHubSafetyRetries.has(key)) return;
+    const timer = setTimeout(() => {
+      scheduledHubSafetyRetries.delete(key);
+      void reconcileHubSafety(guild, hubChannelId).catch(async (error) => {
+        const retryError = await suspendHubSafety(guild, hubChannelId, error);
+        logger.error(
+          { err: retryError, guildId: guild.id, hubChannelId },
+          "support hub remains unsafe; scheduling another reconciliation",
+        );
+        scheduleHubSafetyRetry(guild, hubChannelId);
+      });
+    }, options.hubSafetyRetryMs ?? 30_000);
+    timer.unref();
+    scheduledHubSafetyRetries.set(key, timer);
+  };
 
   const handleMessage = textProvider.prefix
     ? async (message: Message): Promise<boolean> => {
@@ -158,27 +210,9 @@ export const createProdActionRuntime = (
         const state = await options.guildSettingsStore.get(guild.id);
         if (state.hubChannelId !== undefined) {
           try {
-            await options.supportHubDiscord.deletePublicThreads(
-              guild,
-              state.hubChannelId,
-            );
-            await options.ticketProvisioningService.resumeHubAccess(
-              guild,
-              state.hubChannelId,
-            );
+            await reconcileHubSafety(guild, state.hubChannelId);
           } catch (error) {
-            try {
-              await options.ticketProvisioningService.suspendHubAccess(
-                guild,
-                state.hubChannelId,
-              );
-            } catch (suspensionError) {
-              throw new AggregateError(
-                [error, suspensionError],
-                "Failed to remove public support-hub threads and suspend reporter access",
-              );
-            }
-            throw error;
+            throw await suspendHubSafety(guild, state.hubChannelId, error);
           }
         }
       }
@@ -209,18 +243,13 @@ export const createProdActionRuntime = (
           state.hubChannelId,
         );
       } catch (error) {
-        try {
-          await options.ticketProvisioningService.suspendHubAccess(
-            thread.guild,
-            state.hubChannelId,
-          );
-        } catch (suspensionError) {
-          throw new AggregateError(
-            [error, suspensionError],
-            "Failed to remove a public support-hub thread and suspend reporter access",
-          );
-        }
-        throw error;
+        const unsafeError = await suspendHubSafety(
+          thread.guild,
+          state.hubChannelId,
+          error,
+        );
+        scheduleHubSafetyRetry(thread.guild, state.hubChannelId);
+        throw unsafeError;
       }
     },
     handleInteraction: async (interaction: Interaction) => {
