@@ -66,6 +66,7 @@ const PRESETS = Object.keys(PRESET_DETAILS) as readonly PermissionPreset[];
 const SUBJECTS_PER_CONTROL = 25;
 const RULES_PER_CONTROL = 25;
 const CLEAR_CONFIRMATION_MS = 2 * 60 * 1_000;
+const SESSION_STATE_LIMIT = 100;
 
 const requireGuildId = (context: PermissionSettingsContext): string => {
   if (context.guildId === undefined) {
@@ -183,8 +184,26 @@ export function createPermissionSettingsCategory<
   const drafts = new Map<string, CustomRuleDraft>();
   const presetRemovalPages = new Map<string, number>();
   const ruleRemovalPages = new Map<string, number>();
-  const draftKey = (context: Context): string =>
-    `${requireGuildId(context)}:${context.userId}:${context.settingsSessionId}`;
+  const sessions = new Map<string, true>();
+  const clearSessionState = (key: string): void => {
+    sessions.delete(key);
+    drafts.delete(key);
+    ruleRemovalPages.delete(key);
+    for (const preset of PRESETS) {
+      clearConfirmations.delete(`${key}:${preset}`);
+      presetRemovalPages.delete(`${key}:${preset}`);
+    }
+  };
+  const draftKey = (context: Context): string => {
+    const key = `${requireGuildId(context)}:${context.userId}:${context.settingsSessionId}`;
+    sessions.delete(key);
+    sessions.set(key, true);
+    if (sessions.size > SESSION_STATE_LIMIT) {
+      const oldest = sessions.keys().next().value as string | undefined;
+      if (oldest !== undefined) clearSessionState(oldest);
+    }
+    return key;
+  };
   const getDraft = (context: Context): CustomRuleDraft => {
     const key = draftKey(context);
     const existing = drafts.get(key);
@@ -554,7 +573,7 @@ export function createPermissionSettingsCategory<
           actorUserId: context.userId,
           recheckAuthorization: () => options.requireAuthorization(context),
         });
-        drafts.delete(draftKey(context));
+        clearSessionState(draftKey(context));
         return { status: "success" as const };
       },
     },

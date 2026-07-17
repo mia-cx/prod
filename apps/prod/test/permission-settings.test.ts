@@ -340,6 +340,31 @@ describe("permission settings category", () => {
     );
   });
 
+  it("evicts abandoned settings-session state at a fixed bound", async () => {
+    const { category, applyCustomRules } = setup();
+    const subjects = field(category, "advanced", "subjects");
+    const verbs = field(category, "advanced", "verbs");
+    const confirm = field(category, "advanced", "confirm");
+    if (
+      subjects.kind !== "mentionable-select" ||
+      verbs.kind !== "string-select" ||
+      confirm.kind !== "button"
+    ) {
+      throw new Error("Unexpected advanced field types");
+    }
+    await subjects.mutate([mentionables[0]!], context);
+    await verbs.mutate(["close"], context);
+    for (let index = 0; index < 100; index += 1) {
+      await subjects.mutate([mentionables[1]!], {
+        ...context,
+        settingsSessionId: `abandoned-${String(index)}`,
+      });
+    }
+
+    expect(await confirm.mutate(context)).toMatchObject({ status: "invalid" });
+    expect(applyCustomRules).not.toHaveBeenCalled();
+  });
+
   it.each(["*", "  *  "])(
     "rejects wildcard %j as an exact ticket ID",
     async (ticketId) => {

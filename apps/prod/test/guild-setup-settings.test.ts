@@ -10,15 +10,22 @@ import {
   type PermissionResolvable,
 } from "discord.js";
 import { encodeSettingsCustomId } from "@protocord/settings";
+import { createSqlitePermissionRuleStore } from "@protocord/permissions";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createProdActionRuntime } from "../src/actions/runtime.js";
+import {
+  createProdAuthorizationService,
+  createProdPermissionRuleStore,
+} from "../src/authorization.js";
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import type { HubTransition } from "../src/hub-transition.js";
 import { createLogger } from "../src/logger.js";
 import { applyMigrations } from "../src/migrations.js";
+import { createPermissionAdministrationService } from "../src/permission-administration.js";
+import { createPermissionContributionStore } from "../src/permission-contribution-store.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
 import type { TicketProvisioningService } from "../src/ticket-provisioning.js";
 
@@ -66,7 +73,10 @@ afterEach(() => {
   for (const connection of connections.splice(0)) connection.close();
 });
 
-const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
+const setup = async (
+  overrides: Partial<SupportHubDiscord> = {},
+  withPermissionSettings = false,
+) => {
   const connection = openDatabase(":memory:");
   connections.push(connection);
   await applyMigrations(connection.database);
@@ -88,19 +98,53 @@ const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
     deleteInformationMessage: vi.fn(async () => undefined),
     ...overrides,
   };
+  const sqliteRules = createSqlitePermissionRuleStore(connection.database);
+  const permissionAuthorization = createProdAuthorizationService({
+    store: sqliteRules,
+    validateResource: ({ object }) =>
+      (object.objectType === "settings" ||
+        object.objectType === "permissions") &&
+      object.objectId === "*",
+  });
+  const permissionAdministration = createPermissionAdministrationService({
+    rules: createProdPermissionRuleStore(sqliteRules),
+    contributions: createPermissionContributionStore(connection.database),
+    authorize: async () => undefined,
+  });
   const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
     textCommandPrefix: "",
     guildSettingsStore: store,
     supportHubDiscord: supportHub,
     ticketProvisioningService,
+    ...(withPermissionSettings
+      ? { permissionAdministration, permissionAuthorization }
+      : {}),
   });
   return { connection, store, supportHub, runtime };
 };
 
-const guild = {
+const guildRecord: Record<string, unknown> = {
   id: guildId,
   ownerId,
-} as Guild;
+};
+guildRecord.members = {
+  fetch: async (userId: string) => ({
+    id: userId,
+    guild: guildRecord,
+    roles: {
+      cache: {
+        values: () => [{ id: guildId }][Symbol.iterator](),
+      },
+    },
+    permissions: {
+      has: (permission: string | bigint) =>
+        userId === administratorId &&
+        (permission === "Administrator" ||
+          permission === PermissionFlagsBits.Administrator),
+    },
+  }),
+};
+const guild = guildRecord as unknown as Guild;
 
 const permissions = (...allowed: readonly PermissionResolvable[]) => ({
   has: (permission: PermissionResolvable) => allowed.includes(permission),
@@ -445,6 +489,18 @@ describe("guild setup settings integration", () => {
     expect(manager.editReply).toHaveBeenCalledWith(
       expect.objectContaining({ flags: MessageFlags.IsComponentsV2 }),
     );
+  });
+
+  it("refreshes the setup view after configuring the first hub with permission settings enabled", async () => {
+    const { runtime, store } = await setup({}, true);
+    const select = component("channel", hubRoute);
+
+    await runtime.handleInteraction(select as unknown as Interaction);
+
+    expect(await store.get(guildId)).toMatchObject({ hubChannelId });
+    const response = JSON.stringify(select.editReply.mock.calls.at(-1)?.[0]);
+    expect(response).not.toContain("could not refresh");
+    expect(response).toContain("Support hub");
   });
 
   it("shows hub validation failures without configuring the guild", async () => {

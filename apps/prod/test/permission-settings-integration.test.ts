@@ -1,6 +1,7 @@
 import {
   Collection,
   MessageFlags,
+  PermissionFlagsBits,
   type Guild,
   type Interaction,
 } from "discord.js";
@@ -142,6 +143,29 @@ describe("permission settings integration", () => {
       "Permissions",
     );
 
+    guildRecord.ownerId = "123456789012345698";
+    const revokedBootstrap = mentionableInteraction(guild, "configurator", [
+      configuratorRoleId,
+    ]);
+    revokedBootstrap.memberPermissions = {
+      has: (permission: unknown) =>
+        permission === PermissionFlagsBits.Administrator,
+    };
+    await runtime.handleInteraction(revokedBootstrap as unknown as Interaction);
+    await expect(
+      administration.listPresetSubjects(guildId, "configurator"),
+    ).resolves.toEqual([]);
+
+    await administration.applyCustomRules({
+      guildId,
+      subjects: [{ subjectType: "user", subjectId: targetUserId }],
+      scope: "guild",
+      object: { objectType: "permissions", objectId: "*" },
+      verbs: ["manage"],
+      permit: "deny",
+      actorUserId: "seed-admin",
+    });
+    guildRecord.ownerId = managerId;
     const bootstrap = mentionableInteraction(guild, "configurator", [
       configuratorRoleId,
     ]);
