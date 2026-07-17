@@ -14,6 +14,9 @@ const config: ProdConfig = {
   textCommandPrefix: "!",
   databaseUrl: ":memory:",
   logLevel: "debug",
+  apiKeyEncryptionKey: Buffer.alloc(32, 7).toString("base64"),
+  defaultTriageModel: "google/gemma-4-31b-it",
+  openRouterBaseUrl: "https://openrouter.ai/api/v1/",
 };
 
 const captureLogger = () => {

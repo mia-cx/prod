@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import { createSqlitePermissionRuleStore } from "@protocord/permissions";
+import { createSqliteModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 
 import type { ProdConfig } from "./config.js";
 import { createProdActionRuntime } from "./actions/runtime.js";
@@ -19,6 +20,7 @@ import { createSqliteLabelTaxonomyStore } from "./label-taxonomy.js";
 import { createPermissionAdministrationService } from "./permission-administration.js";
 import { createPermissionContributionStore } from "./permission-contribution-store.js";
 import { applyMigrations } from "./migrations.js";
+import { createOpenRouterCatalog } from "./openrouter.js";
 import { createSupportHubDiscord } from "./support-hub.js";
 import {
   createTicketProvisioningDiscord,
@@ -107,6 +109,20 @@ export const startProd = async (
       labelTaxonomyStore: createSqliteLabelTaxonomyStore(connection.database),
       supportHubDiscord: createSupportHubDiscord(),
       ticketProvisioningService,
+      modelConfigurationStore: createSqliteModelConfigurationStore(
+        connection.database,
+        {
+          encryptionKey: config.apiKeyEncryptionKey,
+          defaultModelId: config.defaultTriageModel,
+        },
+      ),
+      modelCatalog: createOpenRouterCatalog({
+        baseUrl: config.openRouterBaseUrl,
+        ...(config.openRouterApiKey === undefined
+          ? {}
+          : { apiKey: config.openRouterApiKey }),
+      }),
+      deploymentCredentialConfigured: config.openRouterApiKey !== undefined,
       executeGuildOperation,
       permissionAdministration,
       permissionAuthorization,

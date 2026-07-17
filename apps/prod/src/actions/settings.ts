@@ -11,6 +11,11 @@ import {
 } from "discord.js";
 import type { Logger } from "pino";
 import {
+  createModelSettingsCategory,
+  type ModelConfigurationStore,
+  type ProviderCatalog,
+} from "@mia-cx/protocord-model-settings";
+import {
   createSettingsRuntime,
   type SettingsDefinition,
   type SettingsDispatchResult,
@@ -128,6 +133,9 @@ export function createGuildSetupSettingsConsumer(
   labelStore: LabelTaxonomyStore,
   supportHub: SupportHubDiscord,
   ticketProvisioning: TicketProvisioningService,
+  modelConfigurationStore: ModelConfigurationStore,
+  modelCatalog: ProviderCatalog,
+  deploymentCredentialConfigured: boolean,
   executeGuildOperation?: ExecuteGuildOperation,
   permissionSettings?: PermissionSettingsDependencies,
 ): GuildSetupSettingsConsumer {
@@ -261,8 +269,7 @@ export function createGuildSetupSettingsConsumer(
     });
     if (labelSessions.size > LABEL_SESSION_LIMIT) {
       const oldestSessionId = labelSessions.keys().next().value as
-        | string
-        | undefined;
+        string | undefined;
       if (oldestSessionId !== undefined) labelSessions.delete(oldestSessionId);
     }
   };
@@ -285,7 +292,9 @@ export function createGuildSetupSettingsConsumer(
   const selectedLabel = async (
     context: GuildSetupSettingsContext,
   ): Promise<TicketLabel | undefined> => {
-    const labelId = readLabelSession(context.settingsSessionId)?.selectedLabelId;
+    const labelId = readLabelSession(
+      context.settingsSessionId,
+    )?.selectedLabelId;
     if (labelId === undefined) return undefined;
     const label = await labelStore.findById(requireGuild(context).id, labelId);
     if (label === undefined) {
@@ -302,6 +311,13 @@ export function createGuildSetupSettingsConsumer(
     }
     return label;
   };
+  const modelCategory = createModelSettingsCategory<GuildSetupSettingsContext>({
+    store: modelConfigurationStore,
+    catalog: modelCatalog,
+    authorize: authorizeSetup,
+    getGuildId: (context) => requireGuild(context).id,
+    deploymentCredentialConfigured,
+  });
   const definition: SettingsDefinition<GuildSetupSettingsContext> = {
     title: "Settings",
     accentColor: 0x5865f2,
@@ -690,8 +706,7 @@ export function createGuildSetupSettingsConsumer(
                     : { description: labelSummary(label.description) }),
                   default: label.id === selectedId,
                 })),
-                selectedValues:
-                  selectedId === undefined ? [] : [selectedId],
+                selectedValues: selectedId === undefined ? [] : [selectedId],
                 placeholder: "Choose a label",
                 minValues: 1,
                 maxValues: 1,
@@ -710,7 +725,8 @@ export function createGuildSetupSettingsConsumer(
             kind: "container",
             id: "label-editor",
             label: "Label editor",
-            visible: async (context) => (await selectedLabel(context)) !== undefined,
+            visible: async (context) =>
+              (await selectedLabel(context)) !== undefined,
             fields: [
               {
                 kind: "display",
@@ -828,7 +844,10 @@ export function createGuildSetupSettingsConsumer(
                         return invalid([issue("Delete confirmation expired.")]);
                       }
                       return labelMutation(async () => {
-                        await labelStore.delete(requireGuild(context).id, label.id);
+                        await labelStore.delete(
+                          requireGuild(context).id,
+                          label.id,
+                        );
                         labelSessions.delete(context.settingsSessionId);
                       });
                     },
@@ -839,6 +858,7 @@ export function createGuildSetupSettingsConsumer(
           },
         ],
       },
+      modelCategory,
     ],
   };
 

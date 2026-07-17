@@ -14,6 +14,7 @@ import {
   encodeSettingsCustomId,
 } from "@protocord/settings";
 import { createSqlitePermissionRuleStore } from "@protocord/permissions";
+import { createSqliteModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createProdActionRuntime } from "../src/actions/runtime.js";
@@ -125,6 +126,15 @@ const setup = async (
     labelTaxonomyStore: labelStore,
     supportHubDiscord: supportHub,
     ticketProvisioningService,
+    modelConfigurationStore: createSqliteModelConfigurationStore(
+      connection.database,
+      {
+        encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+        defaultModelId: "google/gemma-4-31b-it",
+      },
+    ),
+    modelCatalog: { listModels: async () => [] },
+    deploymentCredentialConfigured: false,
     ...(withPermissionSettings
       ? { permissionAdministration, permissionAuthorization }
       : {}),
@@ -305,9 +315,7 @@ const modalRoute = (
       : 0,
 });
 
-const labelModalRoute = (
-  fieldId: "label-create" | "label-edit",
-) => ({
+const labelModalRoute = (fieldId: "label-create" | "label-edit") => ({
   action: "modal-submit" as const,
   categoryId: "labels",
   subcategoryId: "labels",
@@ -400,9 +408,7 @@ describe("guild setup settings integration", () => {
     ] as const) {
       await expect(
         permissionAdministration.listPresetSubjects(bootstrapGuildId, preset),
-      ).resolves.toEqual([
-        { subjectType: "role", subjectId: managerRoleId },
-      ]);
+      ).resolves.toEqual([{ subjectType: "role", subjectId: managerRoleId }]);
     }
   });
 
@@ -428,7 +434,9 @@ describe("guild setup settings integration", () => {
       { selectedValues: ["setup"] },
     );
     await runtime.handleInteraction(setupCategory as unknown as Interaction);
-    const setupPage = JSON.stringify(setupCategory.editReply.mock.calls[0]?.[0]);
+    const setupPage = JSON.stringify(
+      setupCategory.editReply.mock.calls[0]?.[0],
+    );
     expect(setupPage).toContain("Configure basic setup for Prod.");
     expect(setupPage).toContain("## Support channel");
     expect(setupPage).toContain("Choose where Prod manages support threads.");
@@ -465,9 +473,7 @@ describe("guild setup settings integration", () => {
     expect(labelsPage).toContain("# Current labels");
     expect(labelsPage).not.toContain("**Current:**");
     expect(labelsPage).not.toContain("Label list");
-    expect(labelsPage).toContain(
-      '"content":"# Current labels"}],"accessory"',
-    );
+    expect(labelsPage).toContain('"content":"# Current labels"}],"accessory"');
     expect(labelsPage.indexOf("# Current labels")).toBeLessThan(
       labelsPage.indexOf("`account`:"),
     );
@@ -698,18 +704,16 @@ describe("guild setup settings integration", () => {
       { modalValue: "  help users complete their reports  " },
     );
     await runtime.handleInteraction(systemPrompt as unknown as Interaction);
-    expect(
-      JSON.stringify(systemPrompt.editReply.mock.calls[0]?.[0]),
-    ).toContain("help users complete their reports");
+    expect(JSON.stringify(systemPrompt.editReply.mock.calls[0]?.[0])).toContain(
+      "help users complete their reports",
+    );
 
     const productKnowledge = component(
       "modal",
       modalRoute("assistant-product"),
       { modalValue: "  poke works in messaging channels  " },
     );
-    await runtime.handleInteraction(
-      productKnowledge as unknown as Interaction,
-    );
+    await runtime.handleInteraction(productKnowledge as unknown as Interaction);
 
     const supportWorkflow = component(
       "modal",
@@ -718,11 +722,9 @@ describe("guild setup settings integration", () => {
     );
     await runtime.handleInteraction(supportWorkflow as unknown as Interaction);
 
-    const safety = component(
-      "modal",
-      modalRoute("assistant-safety"),
-      { modalValue: "  never request user secrets  " },
-    );
+    const safety = component("modal", modalRoute("assistant-safety"), {
+      modalValue: "  never request user secrets  ",
+    });
     await runtime.handleInteraction(safety as unknown as Interaction);
 
     const tone = component("modal", modalRoute("assistant-style-prompt"), {
@@ -864,9 +866,9 @@ describe("guild setup settings integration", () => {
       submitAccountEdit as unknown as Interaction,
     );
 
-    await expect(labelStore.findById(guildId, account.id)).resolves.toMatchObject(
-      { name: "account access" },
-    );
+    await expect(
+      labelStore.findById(guildId, account.id),
+    ).resolves.toMatchObject({ name: "account access" });
     await expect(labelStore.findById(guildId, bug.id)).resolves.toMatchObject({
       name: "bug",
     });
@@ -883,8 +885,7 @@ describe("guild setup settings integration", () => {
     await runtime.handleInteraction(select as unknown as Interaction);
 
     const response = select.editReply.mock.calls[0]?.[0] as
-      | { components?: readonly unknown[] }
-      | undefined;
+      { components?: readonly unknown[] } | undefined;
     expect(response?.components).toHaveLength(3);
     expect(JSON.stringify(response?.components?.[1])).not.toContain(
       '"label":"Edit"',
@@ -930,9 +931,9 @@ describe("guild setup settings integration", () => {
             "This settings control is outdated. Reopen settings and try again.",
         }),
       );
-      await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject(
-        { id: bug.id },
-      );
+      await expect(
+        labelStore.findByName(guildId, "bug"),
+      ).resolves.toMatchObject({ id: bug.id });
     } finally {
       vi.useRealTimers();
     }
@@ -975,14 +976,10 @@ describe("guild setup settings integration", () => {
       selectedValues: [bug.id],
     });
     await runtime.handleInteraction(select as unknown as Interaction);
-    const unauthorized = component(
-      "button",
-      labelDeleteRoute,
-      {
-        userId: "ordinary-member",
-        allowed: [],
-      },
-    );
+    const unauthorized = component("button", labelDeleteRoute, {
+      userId: "ordinary-member",
+      allowed: [],
+    });
 
     await runtime.handleInteraction(unauthorized as unknown as Interaction);
 
@@ -994,9 +991,9 @@ describe("guild setup settings integration", () => {
         flags: MessageFlags.Ephemeral,
       }),
     );
-    await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject(
-      { id: bug.id },
-    );
+    await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject({
+      id: bug.id,
+    });
   });
 
   it("keeps every supported label reachable within the Discord select", async () => {

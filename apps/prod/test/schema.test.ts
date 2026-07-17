@@ -5,6 +5,7 @@ import {
   guildSettings,
   guildLabelTaxonomies,
   labels,
+  modelConfigurations,
   permissionRuleOrigins,
   permissionRuleEvents,
   permissionRules,
@@ -36,14 +37,18 @@ describe("Drizzle schema composition", () => {
     expect(getTableName(tickets)).toBe("tickets");
     expect(getTableName(ticketEvents)).toBe("ticket_events");
     expect(getTableName(reporterHubAccess)).toBe("reporter_hub_access");
-    expect(getTableName(permissionRuleOrigins)).toBe(
-      "permission_rule_origins",
-    );
+    expect(getTableName(permissionRuleOrigins)).toBe("permission_rule_origins");
   });
 
   it("includes the app-owned label taxonomy tables", () => {
     expect(getTableName(guildLabelTaxonomies)).toBe("guild_label_taxonomies");
     expect(getTableName(labels)).toBe("labels");
     expect(getTableName(ticketLabels)).toBe("ticket_labels");
+  });
+
+  it("composes the package-owned model configuration table", () => {
+    expect(getTableName(modelConfigurations)).toBe(
+      "mia_cx_model_configurations",
+    );
   });
 });

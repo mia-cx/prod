@@ -58,7 +58,7 @@ const credentialColumns = (row: ModelConfigurationRow) => {
 };
 
 export const createSqliteModelConfigurationStore = (
-  database: BetterSQLite3Database,
+  database: BetterSQLite3Database<Record<string, unknown>>,
   options: CreateSqliteModelConfigurationStoreOptions,
 ): SqliteModelConfigurationStore => {
   assertIdentifier("defaultModelId", options.defaultModelId);

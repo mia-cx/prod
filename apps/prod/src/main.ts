@@ -38,7 +38,13 @@ const run = async (): Promise<void> => {
   const config = loadConfig(process.env);
   logger = createLogger({
     level: config.logLevel,
-    secrets: [config.discordToken],
+    secrets: [
+      config.discordToken,
+      config.apiKeyEncryptionKey,
+      ...(config.openRouterApiKey === undefined
+        ? []
+        : [config.openRouterApiKey]),
+    ],
   });
 
   try {

@@ -10,6 +10,10 @@ import {
   type Message,
 } from "discord.js";
 import type { Logger } from "pino";
+import type {
+  ModelConfigurationStore,
+  ProviderCatalog,
+} from "@mia-cx/protocord-model-settings";
 import type { DiscordInteractionHandleResult } from "protocord";
 import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
@@ -125,12 +129,29 @@ const labelTaxonomyStore: LabelTaxonomyStore = {
   selectForTicket: async () => undefined,
   listForTicket: async () => [],
 };
+const modelConfigurationStore: ModelConfigurationStore = {
+  get: async (guildId, purpose) => ({
+    guildId,
+    purpose,
+    provider: "openrouter",
+    modelId: "google/gemma-4-31b-it",
+  }),
+  setModel: async () => undefined,
+  setGuildApiKey: async () => undefined,
+  clearGuildApiKey: async () => undefined,
+};
+const modelCatalog: ProviderCatalog = {
+  listModels: async () => [],
+};
 const runtimeOptions = {
   textCommandPrefix: "!",
   guildSettingsStore,
   labelTaxonomyStore,
   supportHubDiscord,
   ticketProvisioningService,
+  modelConfigurationStore,
+  modelCatalog,
+  deploymentCredentialConfigured: false,
 };
 
 function componentWithCustomId(
@@ -323,6 +344,7 @@ describe("Prod action runtime", () => {
         expect.objectContaining({ value: "setup" }),
         expect.objectContaining({ value: "identity" }),
         expect.objectContaining({ value: "labels" }),
+        expect.objectContaining({ value: "model" }),
       ]),
     });
     expect(JSON.stringify(payload)).not.toContain("Support channel");
@@ -611,7 +633,9 @@ describe("Prod action runtime", () => {
     await runtime.reconcile!(client);
 
     expect(ticketProvisioningService.recover).toHaveBeenCalledOnce();
-    expect(ticketProvisioningService.discoverRecoveryThreads).toHaveBeenCalledOnce();
+    expect(
+      ticketProvisioningService.discoverRecoveryThreads,
+    ).toHaveBeenCalledOnce();
     expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
     expect(ticketProvisioningService.suspendHubAccess).not.toHaveBeenCalled();
     expect(fetchGuild).toHaveBeenCalledWith("guild-stale");
