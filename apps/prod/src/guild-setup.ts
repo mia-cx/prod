@@ -17,6 +17,10 @@ export interface GuildSetupService {
   setTone(guild: Guild, tone: string): Promise<void>;
 }
 
+export interface ReporterHubAccessSuspender {
+  suspendHubAccess(guild: Guild, hubChannelId: string): Promise<number>;
+}
+
 const createKeyedExecutor = () => {
   const tails = new Map<string, Promise<void>>();
   return async <Value>(
@@ -54,6 +58,7 @@ const throwTransitionFailure = (
 export const createGuildSetupService = (
   store: GuildSettingsStore,
   discord: SupportHubDiscord,
+  reporterAccess: ReporterHubAccessSuspender,
 ): GuildSetupService => {
   const execute = createKeyedExecutor();
 
@@ -112,6 +117,7 @@ export const createGuildSetupService = (
       previous.hubChannelId !== undefined &&
       previous.hubPermissionOwnership !== undefined
     ) {
+      await reporterAccess.suspendHubAccess(guild, previous.hubChannelId);
       await discord.deleteInformationMessage(
         guild,
         previous.hubChannelId,

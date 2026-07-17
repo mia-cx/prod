@@ -18,6 +18,7 @@ import { slashCommand, type Action } from "protocord";
 import type { GuildSettingsStore } from "../guild-settings.js";
 import { createGuildSetupService } from "../guild-setup.js";
 import type { SupportHubDiscord } from "../support-hub.js";
+import type { TicketProvisioningService } from "../ticket-provisioning.js";
 import type { ProdActionContext } from "./runtime.js";
 
 type GuildSetupSettingsContext = Readonly<{
@@ -59,8 +60,9 @@ export function createGuildSetupSettingsConsumer(
   isApplicationOperator: (userId: string) => boolean,
   store: GuildSettingsStore,
   supportHub: SupportHubDiscord,
+  ticketProvisioning: TicketProvisioningService,
 ): GuildSetupSettingsConsumer {
-  const setup = createGuildSetupService(store, supportHub);
+  const setup = createGuildSetupService(store, supportHub, ticketProvisioning);
   const authorize = async (context: GuildSetupSettingsContext) => {
     if (context.guild === undefined) {
       return {

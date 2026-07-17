@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
-import { createGuildSetupService } from "../src/guild-setup.js";
+import {
+  createGuildSetupService,
+  type ReporterHubAccessSuspender,
+} from "../src/guild-setup.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import type { HubTransition } from "../src/hub-transition.js";
 import { applyMigrations } from "../src/migrations.js";
@@ -57,10 +60,14 @@ const setup = async () => {
     ),
     deleteInformationMessage: vi.fn(async () => undefined),
   };
+  const reporterAccess: ReporterHubAccessSuspender = {
+    suspendHubAccess: vi.fn(async () => 0),
+  };
   return {
     store,
     discord,
-    service: createGuildSetupService(store, discord),
+    reporterAccess,
+    service: createGuildSetupService(store, discord, reporterAccess),
     guild: { id: "guild-1" } as Guild,
   };
 };
@@ -83,7 +90,7 @@ describe("guild setup lifecycle", () => {
   });
 
   it("promotes the secured replacement before releasing the former hub", async () => {
-    const { store, discord, service, guild } = await setup();
+    const { store, discord, reporterAccess, service, guild } = await setup();
     await service.configureHub(guild, "hub-a");
     await store.setHubInformationMessage(guild.id, "message-a");
     vi.mocked(discord.releaseFormerHub).mockImplementation(
@@ -109,6 +116,15 @@ describe("guild setup lifecycle", () => {
     expect(discord.releaseFormerHub).toHaveBeenCalledWith(
       guild,
       ownership("hub-a"),
+    );
+    expect(reporterAccess.suspendHubAccess).toHaveBeenCalledWith(
+      guild,
+      "hub-a",
+    );
+    expect(
+      vi.mocked(reporterAccess.suspendHubAccess).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(discord.releaseFormerHub).mock.invocationCallOrder[0]!,
     );
     await expect(store.get(guild.id)).resolves.toMatchObject({
       hubChannelId: "hub-b",
@@ -150,8 +166,31 @@ describe("guild setup lifecycle", () => {
     expect(discord.releaseFormerHub).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the former hub locked until reporter access suspension succeeds", async () => {
+    const { store, discord, reporterAccess, service, guild } = await setup();
+    await service.configureHub(guild, "hub-a");
+    vi.mocked(reporterAccess.suspendHubAccess).mockRejectedValueOnce(
+      new Error("reporter suspension failed"),
+    );
+
+    await expect(service.configureHub(guild, "hub-b")).rejects.toThrow(
+      "reporter suspension failed",
+    );
+
+    expect(discord.releaseFormerHub).not.toHaveBeenCalled();
+    await expect(store.getHubTransition(guild.id)).resolves.toMatchObject({
+      phase: "promoted",
+    });
+    await service.get(guild);
+    expect(reporterAccess.suspendHubAccess).toHaveBeenCalledTimes(2);
+    expect(discord.releaseFormerHub).toHaveBeenCalledWith(
+      guild,
+      ownership("hub-a"),
+    );
+  });
+
   it("resumes a durable transition after Discord side effects and process reconstruction", async () => {
-    const { store, discord, guild } = await setup();
+    const { store, discord, reporterAccess, guild } = await setup();
     await store.configureHub(guild.id, "hub-a", ownership("hub-a"));
     await store.setHubInformationMessage(guild.id, "message-a");
     const transition: HubTransition = {
@@ -171,7 +210,7 @@ describe("guild setup lifecycle", () => {
     await discord.deleteInformationMessage(guild, "hub-a", "message-a");
     await discord.releaseFormerHub(guild, ownership("hub-a"));
 
-    const restarted = createGuildSetupService(store, discord);
+    const restarted = createGuildSetupService(store, discord, reporterAccess);
     await expect(restarted.get(guild)).resolves.toMatchObject({
       hubChannelId: "hub-b",
       hubPermissionOwnership: ownership("hub-b"),

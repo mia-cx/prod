@@ -86,6 +86,7 @@ export const createProdActionRuntime = (
     isApplicationOperator,
     options.guildSettingsStore,
     options.supportHubDiscord,
+    options.ticketProvisioningService,
   );
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,
