@@ -339,9 +339,15 @@ export const createTicketProvisioningDiscord =
           throw new Error("Ticket thread does not belong to its stored hub");
         }
         const wasArchived = thread.archived === true;
-        const reporterWasMember = (
-          await thread.members.fetch()
-        ).has(ticket.reporterUserId);
+        const reporterWasMember = await thread.members
+          .fetch(ticket.reporterUserId)
+          .then(() => true)
+          .catch((error: unknown) => {
+            if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMember)) {
+              return false;
+            }
+            throw error;
+          });
         if (wasArchived) {
           await thread.setArchived(false, `Recover Prod ticket ${ticket.id}`);
         }
