@@ -110,6 +110,16 @@ export class TicketProvisioningError extends Error {
   }
 }
 
+export class TicketSetupRequiredError extends Error {
+  override readonly name = "TicketSetupRequiredError";
+
+  constructor() {
+    super(
+      "Support staff must configure a support hub before private tickets can be opened.",
+    );
+  }
+}
+
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -217,6 +227,11 @@ const findManagedOpening = async (
   thread: PrivateThreadChannel,
   ticket: Ticket,
 ): Promise<Message | undefined> => {
+  const marker = `ticket:${ticket.id}`;
+  const isOwnedOpening = (message: Message): boolean =>
+    message.author.id === thread.client.user?.id &&
+    message.editable &&
+    message.content.includes(marker);
   if (ticket.openingMessageId !== undefined) {
     const stored = await thread.messages
       .fetch(ticket.openingMessageId)
@@ -226,11 +241,10 @@ const findManagedOpening = async (
         }
         throw error;
       });
-    if (stored !== undefined) return stored;
+    if (stored !== undefined && isOwnedOpening(stored)) return stored;
   }
-  const marker = `ticket:${ticket.id}`;
   const recent = await thread.messages.fetch({ limit: 100 });
-  return recent.find((message) => message.content.includes(marker));
+  return recent.find(isOwnedOpening);
 };
 
 export const createTicketProvisioningDiscord =
@@ -594,7 +608,7 @@ export const createTicketProvisioningService = (
       execute(`${input.guild.id}:${input.reporterUserId}`, async () => {
         const state = await settings.get(input.guild.id);
         if (state.hubChannelId === undefined) {
-          throw new Error("This server has not configured a support hub yet.");
+          throw new TicketSetupRequiredError();
         }
         const summary = sanitizeTicketSummary(input.summary);
         const ticket = await store.create({

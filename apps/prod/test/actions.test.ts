@@ -20,7 +20,10 @@ import {
 } from "../src/actions/runtime.js";
 import { createLogger } from "../src/logger.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
-import type { TicketProvisioningService } from "../src/ticket-provisioning.js";
+import {
+  TicketSetupRequiredError,
+  type TicketProvisioningService,
+} from "../src/ticket-provisioning.js";
 import { TicketAdmissionError } from "../src/tickets.js";
 
 const noMentions = { parse: [], repliedUser: false };
@@ -468,6 +471,25 @@ describe("Prod action runtime", () => {
 
     expect(interaction.editReply).toHaveBeenCalledWith({
       content: "Please wait a minute before opening another private ticket.",
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it("tells ticket openers when support staff must configure the hub", async () => {
+    vi.mocked(ticketProvisioningService.open).mockRejectedValueOnce(
+      new TicketSetupRequiredError(),
+    );
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = ticketInteraction("issue", null);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content:
+        "Support staff must configure a support hub before private tickets can be opened.",
       allowedMentions: { parse: [] },
     });
   });

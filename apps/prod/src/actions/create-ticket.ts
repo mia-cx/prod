@@ -8,6 +8,7 @@ import {
 
 import {
   TicketProvisioningError,
+  TicketSetupRequiredError,
   type TicketProvisioningService,
 } from "../ticket-provisioning.js";
 import { TicketAdmissionError, type TicketAlias } from "../tickets.js";
@@ -42,7 +43,8 @@ const outcomeContent = (outcome: DispatchOutcome): string => {
   }
   if (
     outcome.status === "failed" &&
-    outcome.error instanceof TicketAdmissionError
+    (outcome.error instanceof TicketAdmissionError ||
+      outcome.error instanceof TicketSetupRequiredError)
   ) {
     return outcome.error.message;
   }

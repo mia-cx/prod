@@ -17,6 +17,7 @@ import {
   createTicketProvisioningService,
   REPORTER_TICKET_HUB_OVERWRITE,
   sanitizeTicketSummary,
+  TicketSetupRequiredError,
   ticketOpeningInstructions,
   type TicketProvisioningDiscord,
 } from "../src/ticket-provisioning.js";
@@ -72,6 +73,39 @@ const discordFixture = (
 });
 
 describe("ticket provisioning", () => {
+  it("requires support-hub setup before reserving a ticket", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const unconfiguredSettings = {
+      get: async (guildId: string) => ({
+        guildId,
+        initialized: false,
+        assistantIdentity: "Prod",
+        tone: "friendly",
+      }),
+    } as GuildSettingsStore;
+    const service = createTicketProvisioningService(
+      unconfiguredSettings,
+      store,
+      discord,
+    );
+    try {
+      await expect(
+        service.open({
+          guild,
+          reporterUserId: "reporter-1",
+          originatingAlias: "issue",
+        }),
+      ).rejects.toBeInstanceOf(TicketSetupRequiredError);
+      expect(discord.validateReporter).not.toHaveBeenCalled();
+      expect(await store.listProvisioning()).toEqual([]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("sanitizes the summary and opens only after every Discord resource succeeds", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -736,10 +770,21 @@ describe("Discord ticket privacy adapter", () => {
     const send = vi.fn();
     const messages = new Collection([
       [
+        "message-reporter",
+        {
+          id: "message-reporter",
+          content: "copied marker ticket:ticket-stale",
+          author: { id: "reporter-1" },
+          editable: false,
+        },
+      ],
+      [
         "message-existing",
         {
           id: "message-existing",
           content: "-# Managed by Prod · ticket:ticket-stale",
+          author: { id: "bot-1" },
+          editable: true,
           edit,
         },
       ],
@@ -748,6 +793,7 @@ describe("Discord ticket privacy adapter", () => {
       channels: {
         fetch: vi.fn().mockResolvedValue({
           type: ChannelType.PrivateThread,
+          client: { user: { id: "bot-1" } },
           messages: { fetch: vi.fn().mockResolvedValue(messages) },
           send,
         }),
