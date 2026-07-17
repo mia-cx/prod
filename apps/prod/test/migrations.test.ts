@@ -27,10 +27,12 @@ describe("application-owned migration history", () => {
           "protocord_permission_rule_events",
           "protocord_permission_rules",
           "guild_settings",
+          "labels",
+          "permission_rule_origins",
           "reporter_hub_access",
           "ticket_events",
+          "ticket_labels",
           "tickets",
-          "permission_rule_origins",
         ]),
       );
       const duplicateRule = {

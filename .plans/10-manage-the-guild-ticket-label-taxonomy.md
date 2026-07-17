@@ -20,7 +20,7 @@ causes the selection to fail without writing one.
 
 ## TODOs
 
-- [ ] Add the app-owned label and ticket-label schema, generated migration, and migration/schema coverage.
+- [x] Add the app-owned label and ticket-label schema, generated migration, and migration/schema coverage.
 - [ ] Implement the SQLite taxonomy store with idempotent defaults, normalization, CRUD, soft deactivation, atomic active-label selection, and focused tests.
 - [ ] Compose authorized create, edit, and deactivate label settings that persist and rerender, with integration coverage.
 - [ ] Run focused and repository-wide validation and document the remaining real-Discord HITL gate.
@@ -37,3 +37,4 @@ causes the selection to fail without writing one.
 - 2026-07-17: This T3-managed implementation worktree is clean on `t3code/fast-forward-main-1` and exactly aligned with `origin/main` at `73f94d2`.
 - 2026-07-17: Issue #10 is open and AFK-ready; blockers #5 and #6 are closed.
 - 2026-07-17: The mandatory real-Discord checklist remains HITL. The implementation PR must reference rather than close #10 until a human records a redacted passing result.
+- 2026-07-17: Added generated migration `0003` for the app-owned `labels` and `ticket_labels` tables, including per-guild normalized-name uniqueness and history-preserving restricted label deletion. All 81 app tests pass after schema and migration coverage updates.

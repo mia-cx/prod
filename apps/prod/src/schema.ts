@@ -218,6 +218,46 @@ export const permissionRuleOriginEvents = sqliteTable(
   ],
 );
 
+export const labels = sqliteTable(
+  "labels",
+  {
+    id: text().primaryKey(),
+    guildId: text("guild_id").notNull(),
+    name: text().notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    description: text().notNull(),
+    active: integer({ mode: "boolean" }).notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("labels_guild_normalized_name_unique").on(
+      table.guildId,
+      table.normalizedName,
+    ),
+    index("labels_guild_active").on(table.guildId, table.active),
+  ],
+);
+
+export const ticketLabels = sqliteTable(
+  "ticket_labels",
+  {
+    ticketId: text("ticket_id").notNull(),
+    labelId: text("label_id")
+      .notNull()
+      .references(() => labels.id, { onDelete: "restrict" }),
+    appliedByType: text("applied_by_type", {
+      enum: ["user", "service"],
+    }).notNull(),
+    appliedById: text("applied_by_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.ticketId, table.labelId] }),
+    index("ticket_labels_label").on(table.labelId),
+  ],
+);
+
 export const schemaContributors = Object.freeze([
   permissionsSchemaOwner,
   modelSettingsSchemaOwner,
