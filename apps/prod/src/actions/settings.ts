@@ -1,5 +1,6 @@
 import {
   ChannelType,
+  escapeMarkdown,
   PermissionFlagsBits,
   TextInputStyle,
   type ChatInputCommandInteraction,
@@ -25,9 +26,16 @@ import type {
   GuildSetupSettings,
 } from "../guild-settings.js";
 import { createGuildSetupService } from "../guild-setup.js";
+import { createProdAuthorizationContext } from "../authorization.js";
 import type { ExecuteGuildOperation } from "../guild-operation.js";
 import type { PermissionAdministrationService } from "../permission-administration.js";
-import { createProdAuthorizationContext } from "../authorization.js";
+import {
+  DuplicateLabelNameError,
+  LabelInactiveError,
+  LabelNotFoundError,
+  LabelValidationError,
+  type LabelTaxonomyStore,
+} from "../label-taxonomy.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
 import { createPermissionSettingsCategory } from "./permission-settings.js";
@@ -80,6 +88,7 @@ export function createGuildSetupSettingsConsumer(
   logger: Logger,
   isApplicationOperator: (userId: string) => boolean,
   store: GuildSettingsStore,
+  labelStore: LabelTaxonomyStore,
   supportHub: SupportHubDiscord,
   ticketProvisioning: TicketProvisioningService,
   executeGuildOperation?: ExecuteGuildOperation,
@@ -172,6 +181,32 @@ export function createGuildSetupSettingsConsumer(
           reason:
             "Manage Server permission or bot operator access is required for settings.",
         };
+  };
+  const authorizeLabels = async (context: GuildSetupSettingsContext) => {
+    const decision = await authorizeSetup(context);
+    if (decision.authorized && context.guild !== undefined) {
+      await labelStore.ensureDefaults(context.guild.id);
+    }
+    return decision;
+  };
+
+  const labelMutation = async (
+    mutation: () => Promise<unknown>,
+  ): Promise<SettingsMutationResult> => {
+    try {
+      await mutation();
+      return { status: "success" };
+    } catch (error) {
+      if (
+        error instanceof LabelValidationError ||
+        error instanceof DuplicateLabelNameError ||
+        error instanceof LabelNotFoundError ||
+        error instanceof LabelInactiveError
+      ) {
+        return invalid([issue(error.message)]);
+      }
+      throw error;
+    }
   };
 
   const definition: SettingsDefinition<GuildSetupSettingsContext> = {
@@ -472,13 +507,160 @@ export function createGuildSetupSettingsConsumer(
               },
             }),
           ]),
+      {
+        id: "labels",
+        label: "Labels",
+        description:
+          "Manage the internal ticket taxonomy used by staff and AI triage.",
+        authorize: authorizeLabels,
+        subcategories: [
+          {
+            id: "taxonomy",
+            label: "Ticket labels",
+            description:
+              "Names are unique after normalization. Deactivation removes future choices while preserving ticket history.",
+            fields: [
+              {
+                kind: "display",
+                id: "label-list",
+                label: "Current taxonomy",
+                load: async (context) => {
+                  const allLabels = await labelStore.list(
+                    requireGuild(context).id,
+                    { includeInactive: true },
+                  );
+                  const render = (active: boolean) => {
+                    const matching = allLabels.filter(
+                      (label) => label.active === active,
+                    );
+                    return matching.length === 0
+                      ? "None"
+                      : matching
+                          .map(
+                            (label) =>
+                              `**${escapeMarkdown(label.name)}** — ${escapeMarkdown(label.description)}`,
+                          )
+                          .join("\n");
+                  };
+                  return {
+                    value: `**Active**\n${render(true)}\n\n**Inactive**\n${render(false)}`,
+                  };
+                },
+              },
+              {
+                kind: "modal",
+                id: "label-create",
+                label: "Create label",
+                title: "Create ticket label",
+                inputs: [
+                  {
+                    id: "name",
+                    label: "Name",
+                    placeholder: "connection issue",
+                    minLength: 1,
+                    maxLength: 80,
+                  },
+                  {
+                    id: "description",
+                    label: "AI-facing description",
+                    style: TextInputStyle.Paragraph,
+                    placeholder: "When this label should be applied",
+                    minLength: 1,
+                    maxLength: 500,
+                  },
+                ],
+                load: () => ({
+                  value: "Add an active label with an AI-facing description.",
+                  buttonLabel: "Create",
+                }),
+                mutate: (values, context) =>
+                  labelMutation(() =>
+                    labelStore.create(requireGuild(context).id, {
+                      name: values.name ?? "",
+                      description: values.description ?? "",
+                    }),
+                  ),
+              },
+              {
+                kind: "modal",
+                id: "label-edit",
+                label: "Edit label",
+                title: "Edit ticket label",
+                inputs: [
+                  {
+                    id: "current-name",
+                    label: "Current name",
+                    minLength: 1,
+                    maxLength: 80,
+                  },
+                  {
+                    id: "name",
+                    label: "New name",
+                    minLength: 1,
+                    maxLength: 80,
+                  },
+                  {
+                    id: "description",
+                    label: "AI-facing description",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 1,
+                    maxLength: 500,
+                  },
+                ],
+                load: () => ({
+                  value:
+                    "Identify a label by its current name, then replace its display name and description.",
+                  buttonLabel: "Edit",
+                }),
+                mutate: (values, context) =>
+                  labelMutation(() =>
+                    labelStore.update(
+                      requireGuild(context).id,
+                      values["current-name"] ?? "",
+                      {
+                        name: values.name ?? "",
+                        description: values.description ?? "",
+                      },
+                    ),
+                  ),
+              },
+              {
+                kind: "modal",
+                id: "label-deactivate",
+                label: "Deactivate label",
+                title: "Deactivate ticket label",
+                inputs: [
+                  {
+                    id: "name",
+                    label: "Name",
+                    minLength: 1,
+                    maxLength: 80,
+                  },
+                ],
+                load: () => ({
+                  value:
+                    "Hide an active label from future choices without deleting ticket history.",
+                  buttonLabel: "Deactivate",
+                }),
+                mutate: (values, context) =>
+                  labelMutation(() =>
+                    labelStore.deactivate(
+                      requireGuild(context).id,
+                      values.name ?? "",
+                    ),
+                  ),
+              },
+            ],
+          },
+        ],
+      },
     ],
   };
 
   const runtime = createSettingsRuntime({
     definition,
     onError: (error) => {
-      logger.error({ err: error }, "guild setup settings interaction failed");
+      logger.error({ err: error }, "Prod settings interaction failed");
     },
   });
   const action: GuildSetupSettingsConsumer["action"] = {

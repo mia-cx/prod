@@ -15,6 +15,7 @@ import {
 import { createDiscordGateway, type DiscordGateway } from "./discord.js";
 import { createSqliteGuildSettingsStore } from "./guild-settings.js";
 import { createGuildOperationExecutor } from "./guild-operation.js";
+import { createSqliteLabelTaxonomyStore } from "./label-taxonomy.js";
 import { createPermissionAdministrationService } from "./permission-administration.js";
 import { createPermissionContributionStore } from "./permission-contribution-store.js";
 import { applyMigrations } from "./migrations.js";
@@ -103,6 +104,7 @@ export const startProd = async (
     const actions = createProdActionRuntime(logger, {
       textCommandPrefix: config.textCommandPrefix,
       guildSettingsStore,
+      labelTaxonomyStore: createSqliteLabelTaxonomyStore(connection.database),
       supportHubDiscord: createSupportHubDiscord(),
       ticketProvisioningService,
       executeGuildOperation,

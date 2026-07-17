@@ -20,6 +20,7 @@ import {
 } from "../src/authorization.js";
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
+import { createSqliteLabelTaxonomyStore } from "../src/label-taxonomy.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import type { HubTransition } from "../src/hub-transition.js";
 import { createLogger } from "../src/logger.js";
@@ -81,6 +82,7 @@ const setup = async (
   connections.push(connection);
   await applyMigrations(connection.database);
   const store = createSqliteGuildSettingsStore(connection.database);
+  const labelStore = createSqliteLabelTaxonomyStore(connection.database);
   const supportHub: SupportHubDiscord = {
     validateHub: vi.fn(async () => ({ valid: true as const })),
     prepareHub: vi.fn(async (_guild, channelId, existingOwnership) => ({
@@ -114,6 +116,7 @@ const setup = async (
   const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
     textCommandPrefix: "",
     guildSettingsStore: store,
+    labelTaxonomyStore: labelStore,
     supportHubDiscord: supportHub,
     ticketProvisioningService,
     ...(withPermissionSettings
@@ -123,6 +126,7 @@ const setup = async (
   return {
     connection,
     store,
+    labelStore,
     supportHub,
     runtime,
     permissionAdministration,
@@ -204,6 +208,7 @@ const component = (
     allowed?: readonly PermissionResolvable[];
     modalValue?: string;
     selectedValues?: readonly string[];
+    modalValues?: Readonly<Record<string, string>>;
   }> = {},
 ) => {
   const interaction: Record<string, unknown> = {
@@ -238,7 +243,8 @@ const component = (
       ],
     ]),
     fields: {
-      getTextInputValue: () => options.modalValue ?? "",
+      getTextInputValue: (inputId: string) =>
+        options.modalValues?.[inputId] ?? options.modalValue ?? "",
     },
     isFromMessage: () => true,
     isAutocomplete: () => false,
@@ -290,6 +296,16 @@ const modalRoute = (
     fieldId === "assistant-safety" || fieldId === "assistant-style-prompt"
       ? 1
       : 0,
+});
+
+const labelModalRoute = (
+  fieldId: "label-create" | "label-edit" | "label-deactivate",
+) => ({
+  action: "modal-submit" as const,
+  categoryId: "labels",
+  subcategoryId: "taxonomy",
+  fieldId,
+  page: 0,
 });
 
 describe("guild setup settings integration", () => {
@@ -655,6 +671,114 @@ describe("guild setup settings integration", () => {
       supportWorkflowPrompt: "collect exact reproduction steps",
       safetyPrompt: "never request user secrets",
       tone: "lowercase, direct, and concise",
+    });
+  });
+
+  it("seeds generic labels when authorized settings are opened", async () => {
+    const { runtime, labelStore } = await setup();
+
+    await runtime.handleInteraction(
+      command(administratorId, [
+        PermissionFlagsBits.Administrator,
+      ]) as unknown as Interaction,
+    );
+
+    await expect(labelStore.list(guildId)).resolves.toEqual([
+      expect.objectContaining({ name: "account", active: true }),
+      expect.objectContaining({ name: "bug", active: true }),
+      expect.objectContaining({ name: "feedback", active: true }),
+      expect.objectContaining({ name: "gameplay", active: true }),
+      expect.objectContaining({ name: "other", active: true }),
+    ]);
+  });
+
+  it("creates, edits, and deactivates labels with persisted rerenders", async () => {
+    const { connection, runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+
+    const create = component("modal", labelModalRoute("label-create"), {
+      modalValues: {
+        name: "Connection Issue",
+        description: "Problems connecting to a game server.",
+      },
+    });
+    await runtime.handleInteraction(create as unknown as Interaction);
+    expect(JSON.stringify(create.editReply.mock.calls[0]?.[0])).toContain(
+      "Connection Issue",
+    );
+
+    const duplicate = component("modal", labelModalRoute("label-create"), {
+      modalValues: {
+        name: "  ＣＯＮＮＥＣＴＩＯＮ   ISSUE ",
+        description: "A normalized duplicate.",
+      },
+    });
+    await runtime.handleInteraction(duplicate as unknown as Interaction);
+    expect(JSON.stringify(duplicate.editReply.mock.calls[0]?.[0])).toContain(
+      "already exists",
+    );
+
+    const edit = component("modal", labelModalRoute("label-edit"), {
+      modalValues: {
+        "current-name": "connection issue",
+        name: "Connectivity",
+        description: "Network and game-server connectivity problems.",
+      },
+    });
+    await runtime.handleInteraction(edit as unknown as Interaction);
+    expect(JSON.stringify(edit.editReply.mock.calls[0]?.[0])).toContain(
+      "Connectivity",
+    );
+
+    const deactivate = component("modal", labelModalRoute("label-deactivate"), {
+      modalValues: { name: "connectivity" },
+    });
+    await runtime.handleInteraction(deactivate as unknown as Interaction);
+    expect(JSON.stringify(deactivate.editReply.mock.calls[0]?.[0])).toContain(
+      "Inactive",
+    );
+
+    await expect(labelStore.list(guildId)).resolves.not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ normalizedName: "connectivity" }),
+      ]),
+    );
+    const restarted = createSqliteLabelTaxonomyStore(connection.database);
+    await expect(
+      restarted.findByName(guildId, "connectivity"),
+    ).resolves.toMatchObject({
+      name: "Connectivity",
+      description: "Network and game-server connectivity problems.",
+      active: false,
+    });
+  });
+
+  it("rechecks authorization before a label mutation", async () => {
+    const { runtime, store, labelStore } = await setup();
+    await store.configureHub(guildId, hubChannelId, ownership());
+    await labelStore.ensureDefaults(guildId);
+    const unauthorized = component(
+      "modal",
+      labelModalRoute("label-deactivate"),
+      {
+        userId: "ordinary-member",
+        allowed: [],
+        modalValues: { name: "bug" },
+      },
+    );
+
+    await runtime.handleInteraction(unauthorized as unknown as Interaction);
+
+    expect(unauthorized.editReply).not.toHaveBeenCalled();
+    expect(unauthorized.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "Manage Server permission or bot operator access is required for settings.",
+        flags: MessageFlags.Ephemeral,
+      }),
+    );
+    await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject({
+      active: true,
     });
   });
 });

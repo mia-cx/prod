@@ -22,7 +22,7 @@ causes the selection to fail without writing one.
 
 - [x] Add the app-owned label and ticket-label schema, generated migration, and migration/schema coverage.
 - [x] Implement the SQLite taxonomy store with idempotent defaults, normalization, CRUD, soft deactivation, atomic active-label selection, and focused tests.
-- [ ] Compose authorized create, edit, and deactivate label settings that persist and rerender, with integration coverage.
+- [x] Compose authorized create, edit, and deactivate label settings that persist and rerender, with integration coverage.
 - [ ] Run focused and repository-wide validation and document the remaining real-Discord HITL gate.
 
 ## Human validation
@@ -39,3 +39,4 @@ causes the selection to fail without writing one.
 - 2026-07-17: The mandatory real-Discord checklist remains HITL. The implementation PR must reference rather than close #10 until a human records a redacted passing result.
 - 2026-07-17: Added generated migration `0003` for the app-owned `labels` and `ticket_labels` tables, including per-guild normalized-name uniqueness and history-preserving restricted label deletion. All 81 app tests pass after schema and migration coverage updates.
 - 2026-07-17: The SQLite taxonomy store normalizes names with NFKC, collapsed whitespace, and case folding; seeds five described defaults idempotently; preserves stable IDs through edits; and soft-deactivates labels. Active-label validation and ticket association insertion share one transaction, so concurrent deactivation either follows a committed association or makes selection fail without history. App typecheck, lint, and all 86 tests pass.
+- 2026-07-17: Added the authorized Labels settings category with escaped persisted taxonomy rendering and create, edit, and deactivate modals. Domain failures return actionable validation notices; successful mutations rerender fresh state. Integration tests cover authorized seeding, normalized duplicates, all three flows, restart persistence, inactive filtering, and authorization rechecks. App typecheck, lint, and all 89 tests pass.
