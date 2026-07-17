@@ -409,14 +409,6 @@ export function createGuildSetupSettingsConsumer(
               service: permissionSettings.administration,
               authorize: async (context) => {
                 try {
-                  if (
-                    await canBootstrapPermissionAdministration(
-                      context,
-                      permissionSettings.administration,
-                    )
-                  ) {
-                    return { authorized: true as const };
-                  }
                   const decision = await permissionDecision(
                     context,
                     permissionSettings,
@@ -437,14 +429,6 @@ export function createGuildSetupSettingsConsumer(
                 }
               },
               requireAuthorization: async (context) => {
-                if (
-                  await canBootstrapPermissionAdministration(
-                    context,
-                    permissionSettings.administration,
-                  )
-                ) {
-                  return;
-                }
                 const input = await permissionCheck(
                   context,
                   permissionSettings,
@@ -530,23 +514,6 @@ function settingsContext(
     isApplicationOperator: isApplicationOperator(interaction.user.id),
     ...(guild === undefined ? {} : { guild }),
   };
-}
-
-async function canBootstrapPermissionAdministration(
-  context: GuildSetupSettingsContext,
-  administration: PermissionAdministrationService,
-): Promise<boolean> {
-  if (!context.isGuildOwner && !context.isAdministrator) return false;
-  const page = await administration.listRules({
-    guildId: requireGuild(context).id,
-    limit: Number.MAX_SAFE_INTEGER,
-  });
-  return !page.items.some(
-    ({ object, verb }) =>
-      object.objectType === "permissions" &&
-      object.objectId === "*" &&
-      verb === "manage",
-  );
 }
 
 async function permissionCheck(
