@@ -21,6 +21,8 @@ import {
 import type { DiscordActionSurface } from "../discord.js";
 import type { GuildSettingsStore } from "../guild-settings.js";
 import type { SupportHubDiscord } from "../support-hub.js";
+import type { TicketProvisioningService } from "../ticket-provisioning.js";
+import { createTicketAction } from "./create-ticket.js";
 import { pingAction } from "./ping.js";
 import { createGuildSetupSettingsConsumer } from "./settings.js";
 
@@ -31,7 +33,10 @@ export type ProdActionContext = Readonly<{
     member: DiscordMemberLike,
     context: AuthorizationContext,
   ) => UserAuthorizationSubject;
-  replyToTextCommand?: (content: string) => Promise<void>;
+  replyToTextCommand?: (
+    content: string,
+    deleteAfterMs?: number,
+  ) => Promise<void>;
 }>;
 
 export type ProdActionRuntime = DiscordActionSurface &
@@ -47,6 +52,7 @@ export type ProdActionRuntimeOptions = Readonly<{
   textCommandPrefix: string;
   guildSettingsStore: GuildSettingsStore;
   supportHubDiscord: SupportHubDiscord;
+  ticketProvisioningService: TicketProvisioningService;
 }>;
 
 export const createProdActionRuntime = (
@@ -85,6 +91,9 @@ export const createProdActionRuntime = (
     ],
   });
   registry.registerAction(pingAction);
+  registry.registerAction(
+    createTicketAction(options.ticketProvisioningService),
+  );
   registry.registerAction(settings.action);
 
   const handleMessage = textProvider.prefix
@@ -92,27 +101,29 @@ export const createProdActionRuntime = (
         const dispatched = await dispatchTextCommand({
           registry,
           provider: textProvider,
-          message: {
-            content: message.content,
-            author: {
-              id: message.author.id,
-              username: message.author.username,
-              globalName: message.author.globalName,
-              bot: message.author.bot,
-            },
-            webhookId: message.webhookId,
-            channelId: message.channelId,
-            guildId: message.guildId,
-          },
+          message,
           context: {
             logger,
             isApplicationOperator,
             createUserAuthorizationSubject,
-            replyToTextCommand: async (content) => {
-              await message.reply({
+            replyToTextCommand: async (content, deleteAfterMs) => {
+              const response = await message.reply({
                 content,
                 allowedMentions: { parse: [], repliedUser: false },
               });
+              if (deleteAfterMs !== undefined) {
+                const timer = setTimeout(() => {
+                  void response
+                    .delete()
+                    .catch((error: unknown) =>
+                      logger.error(
+                        { err: error },
+                        "failed to delete ticket text-command reply",
+                      ),
+                    );
+                }, deleteAfterMs);
+                timer.unref();
+              }
             },
           },
         });

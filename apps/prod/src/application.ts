@@ -11,6 +11,11 @@ import { createDiscordGateway, type DiscordGateway } from "./discord.js";
 import { createSqliteGuildSettingsStore } from "./guild-settings.js";
 import { applyMigrations } from "./migrations.js";
 import { createSupportHubDiscord } from "./support-hub.js";
+import {
+  createTicketProvisioningDiscord,
+  createTicketProvisioningService,
+} from "./ticket-provisioning.js";
+import { createSqliteTicketStore } from "./tickets.js";
 
 export type RunningProd = Readonly<{
   stop: (reason?: string) => Promise<void>;
@@ -58,10 +63,19 @@ export const startProd = async (
   let gateway: DiscordGateway | undefined;
 
   try {
+    const guildSettingsStore = createSqliteGuildSettingsStore(
+      connection.database,
+    );
+    const ticketProvisioningService = createTicketProvisioningService(
+      guildSettingsStore,
+      createSqliteTicketStore(connection.database),
+      createTicketProvisioningDiscord(),
+    );
     const actions = createProdActionRuntime(logger, {
       textCommandPrefix: config.textCommandPrefix,
-      guildSettingsStore: createSqliteGuildSettingsStore(connection.database),
+      guildSettingsStore,
       supportHubDiscord: createSupportHubDiscord(),
+      ticketProvisioningService,
     });
     gateway =
       dependencies.gateway ??

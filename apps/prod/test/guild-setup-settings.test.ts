@@ -17,6 +17,7 @@ import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js"
 import { createLogger } from "../src/logger.js";
 import { applyMigrations } from "../src/migrations.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
+import type { TicketProvisioningService } from "../src/ticket-provisioning.js";
 
 const guildId = "123456789012345670";
 const hubChannelId = "123456789012345671";
@@ -27,6 +28,10 @@ const managerId = "123456789012345675";
 const operatorId = "123456789012345676";
 
 const connections: DatabaseConnection[] = [];
+const ticketProvisioningService: TicketProvisioningService = {
+  open: vi.fn(),
+  recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
+};
 
 const ownership = (channelId = hubChannelId): HubPermissionOwnership => ({
   version: 1,
@@ -76,6 +81,7 @@ const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
     textCommandPrefix: "",
     guildSettingsStore: store,
     supportHubDiscord: supportHub,
+    ticketProvisioningService,
   });
   return { connection, store, supportHub, runtime };
 };

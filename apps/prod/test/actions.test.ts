@@ -1,4 +1,5 @@
 import {
+  ApplicationCommandOptionType,
   ApplicationCommandType,
   MessageFlags,
   type ChatInputCommandInteraction,
@@ -19,6 +20,7 @@ import {
 } from "../src/actions/runtime.js";
 import { createLogger } from "../src/logger.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
+import type { TicketProvisioningService } from "../src/ticket-provisioning.js";
 
 const noMentions = { parse: [], repliedUser: false };
 const permissionOwnership: HubPermissionOwnership = {
@@ -68,10 +70,27 @@ const supportHubDiscord: SupportHubDiscord = {
   upsertInformationMessage: async () => "message-1",
   deleteInformationMessage: async () => undefined,
 };
+const ticketProvisioningService: TicketProvisioningService = {
+  open: vi.fn().mockResolvedValue({
+    id: "ticket-1",
+    guildId: "guild-1",
+    hubChannelId: "channel-1",
+    reporterUserId: "user-1",
+    originatingAlias: "issue",
+    status: "open",
+    triageStatus: "collecting",
+    threadId: "thread-1",
+    openingMessageId: "message-1",
+    createdAt: "2026-07-17T10:00:00.000Z",
+    updatedAt: "2026-07-17T10:00:00.000Z",
+  }),
+  recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
+};
 const runtimeOptions = {
   textCommandPrefix: "!",
   guildSettingsStore,
   supportHubDiscord,
+  ticketProvisioningService,
 };
 
 function componentWithCustomId(
@@ -131,7 +150,7 @@ describe("Prod action runtime", () => {
       runtimeOptions,
     );
 
-    expect(runtime.actionCount).toBe(2);
+    expect(runtime.actionCount).toBe(3);
     expect(runtime.commands).toEqual([
       {
         type: ApplicationCommandType.ChatInput,
@@ -139,6 +158,20 @@ describe("Prod action runtime", () => {
         description: "Check whether Prod is responsive",
         options: [],
       },
+      ...(["issue", "report", "debugshare"] as const).map((name) => ({
+        type: ApplicationCommandType.ChatInput,
+        name,
+        description: "Open a private support ticket",
+        options: [
+          {
+            type: ApplicationCommandOptionType.String,
+            name: "summary",
+            description: "A short summary of the problem",
+            required: false,
+            maxLength: 200,
+          },
+        ],
+      })),
       {
         type: ApplicationCommandType.ChatInput,
         name: "settings",
@@ -389,6 +422,69 @@ describe("Prod action runtime", () => {
     });
   });
 
+  it.each(["issue", "report", "debugshare"] as const)(
+    "opens a private ticket ephemerally through /%s",
+    async (alias) => {
+      vi.mocked(ticketProvisioningService.open).mockClear();
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        runtimeOptions,
+      );
+      const interaction = ticketInteraction(alias, "Poke crashes");
+
+      await runtime.handleInteraction(interaction as unknown as Interaction);
+
+      expect(interaction.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
+      expect(ticketProvisioningService.open).toHaveBeenCalledWith({
+        guild: interaction.guild,
+        reporterUserId: "user-1",
+        originatingAlias: alias,
+        summary: "Poke crashes",
+      });
+      expect(interaction.editReply).toHaveBeenCalledWith({
+        content: "https://discord.com/channels/guild-1/thread-1",
+        allowedMentions: { parse: [] },
+      });
+    },
+  );
+
+  it("returns a minimal text-command link and deletes it after 30 seconds", async () => {
+    vi.useFakeTimers();
+    vi.mocked(ticketProvisioningService.open).mockClear();
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const deleteReply = vi.fn().mockResolvedValue(undefined);
+    const reply = vi.fn().mockResolvedValue({ delete: deleteReply });
+    const message = {
+      content: "!issue Poke crashes",
+      author: {
+        id: "user-1",
+        username: "reporter",
+        globalName: "Reporter",
+        bot: false,
+      },
+      webhookId: null,
+      channelId: "channel-1",
+      guildId: "guild-1",
+      guild: { id: "guild-1" },
+      reply,
+    } as unknown as Message;
+
+    await expect(runtime.handleMessage!(message)).resolves.toBe(true);
+    expect(reply).toHaveBeenCalledWith({
+      content: "https://discord.com/channels/guild-1/thread-1",
+      allowedMentions: { parse: [], repliedUser: false },
+    });
+    expect(deleteReply).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(deleteReply).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it("removes the text capability when the configured prefix is empty", () => {
     const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
       ...runtimeOptions,
@@ -396,7 +492,7 @@ describe("Prod action runtime", () => {
     });
 
     expect(runtime.handleMessage).toBeUndefined();
-    expect(runtime.commands).toHaveLength(4);
+    expect(runtime.commands).toHaveLength(7);
   });
 
   it.each([
@@ -482,6 +578,42 @@ const settingsCommand = (canManageGuild: boolean) => {
   return interaction as typeof interaction & {
     reply: ReturnType<typeof vi.fn>;
     followUp: ReturnType<typeof vi.fn>;
+    deferReply: ReturnType<typeof vi.fn>;
+    editReply: ReturnType<typeof vi.fn>;
+  };
+};
+
+const ticketInteraction = (
+  alias: "issue" | "report" | "debugshare",
+  summary: string | null,
+) => {
+  const interaction: Record<string, unknown> = {
+    commandName: alias,
+    channelId: "channel-1",
+    guildId: "guild-1",
+    guild: { id: "guild-1" },
+    user: { id: "user-1", username: "reporter", globalName: "Reporter" },
+    options: { getString: () => summary },
+    deferred: false,
+    replied: false,
+    isAutocomplete: () => false,
+    isChatInputCommand: () => true,
+    isMessageContextMenuCommand: () => false,
+    isUserContextMenuCommand: () => false,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
+    deferReply: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+    }),
+    editReply: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
+  };
+  return interaction as typeof interaction & {
+    guild: { id: string };
     deferReply: ReturnType<typeof vi.fn>;
     editReply: ReturnType<typeof vi.fn>;
   };

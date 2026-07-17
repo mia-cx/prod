@@ -24,7 +24,7 @@ and compensated, and startup reconciles interrupted provisioning idempotently.
 
 - [x] Add the application-owned ticket and event schema, migration, SQLite store, and persistence tests.
 - [x] Implement Discord ticket provisioning, sanitized deterministic instructions, compensation, and focused privacy/idempotency tests.
-- [ ] Register `/issue`, `/report`, `/debugshare` and prefix-text aliases with private/minimal link presentation and runtime tests.
+- [x] Register `/issue`, `/report`, `/debugshare` and prefix-text aliases with private/minimal link presentation and runtime tests.
 - [ ] Reconcile stale provisioning tickets after Discord startup, run the full automated checks, and document the pending human validation gate.
 
 ## Notes
@@ -37,3 +37,4 @@ and compensated, and startup reconciles interrupted provisioning idempotently.
 - The issue must remain open until the mandatory real-Discord checklist is completed by a human; the PR will explicitly call out that gate.
 - Persistence validation: `corepack pnpm build`, focused app tests (the app runner executed all 82 tests), app typecheck, and app lint passed.
 - Provisioning validation: app tests (89 total), app typecheck, and app lint passed. Tests assert exact reporter overwrites, invite-only thread creation without hub content, multi-ticket-safe compensation, and marker-based recovery without duplicate instructions.
+- Command validation: all 93 app tests, app typecheck, lint, and build passed. Each slash alias is ephemeral; prefix-text replies contain only the private link and self-delete after 30 seconds.
