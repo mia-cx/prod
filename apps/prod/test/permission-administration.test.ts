@@ -43,6 +43,7 @@ const setup = async () => {
 };
 
 const role = { subjectType: "role" as const, subjectId: "role-1" };
+const otherRole = { subjectType: "role" as const, subjectId: "role-2" };
 const user = { subjectType: "user" as const, subjectId: "user-1" };
 
 describe("permission administration", () => {
@@ -148,6 +149,71 @@ describe("permission administration", () => {
     expect(await rules.listForContext({ guildId: "guild-1" })).toEqual([
       expect.objectContaining({ verb: "close", permit: "deny" }),
     ]);
+  });
+
+  it("merges concurrent selector deltas from separate settings views", async () => {
+    const { service } = await setup();
+    await service.setPresetSubjects({
+      guildId: "guild-1",
+      preset: "support_staff",
+      subjects: [role],
+      actorUserId: "admin-1",
+    });
+
+    await Promise.all([
+      service.updatePresetSubjects({
+        guildId: "guild-1",
+        preset: "support_staff",
+        add: [user],
+        remove: [],
+        actorUserId: "admin-1",
+      }),
+      service.updatePresetSubjects({
+        guildId: "guild-1",
+        preset: "support_staff",
+        add: [otherRole],
+        remove: [],
+        actorUserId: "admin-2",
+      }),
+    ]);
+
+    await expect(
+      service.listPresetSubjects("guild-1", "support_staff"),
+    ).resolves.toEqual([role, otherRole, user]);
+  });
+
+  it("serializes full source replacements without producing a union", async () => {
+    const { service } = await setup();
+    await service.setPresetSubjects({
+      guildId: "guild-1",
+      preset: "support_staff",
+      subjects: [role],
+      actorUserId: "admin-1",
+    });
+
+    await Promise.all([
+      service.setPresetSubjects({
+        guildId: "guild-1",
+        preset: "support_staff",
+        subjects: [role, user],
+        actorUserId: "admin-1",
+      }),
+      service.setPresetSubjects({
+        guildId: "guild-1",
+        preset: "support_staff",
+        subjects: [role, otherRole],
+        actorUserId: "admin-2",
+      }),
+    ]);
+
+    const subjects = await service.listPresetSubjects(
+      "guild-1",
+      "support_staff",
+    );
+    expect([
+      [role, user],
+      [role, otherRole],
+    ]).toContainEqual(subjects);
   });
 
   it("round-trips guild-wide and exact-ticket custom allow/deny rules", async () => {

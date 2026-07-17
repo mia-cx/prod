@@ -62,6 +62,7 @@ const PRESET_DETAILS: Readonly<
 };
 
 const PRESETS = Object.keys(PRESET_DETAILS) as readonly PermissionPreset[];
+const PRESET_SELECTOR_LIMIT = 25;
 const RULES_PER_CONTROL = 25;
 const SESSION_STATE_LIMIT = 100;
 
@@ -165,12 +166,19 @@ export function createPermissionSettingsCategory<
   options: CreatePermissionSettingsCategoryOptions<Context>,
 ): SettingsCategory<Context> {
   const drafts = new Map<string, CustomRuleDraft>();
+  const presetSubjectBaselines = new Map<
+    string,
+    readonly PermissionSubject[]
+  >();
   const ruleRemovalPages = new Map<string, number>();
   const sessions = new Map<string, true>();
   const clearSessionState = (key: string): void => {
     sessions.delete(key);
     drafts.delete(key);
     ruleRemovalPages.delete(key);
+    for (const preset of PRESETS) {
+      presetSubjectBaselines.delete(`${key}:${preset}`);
+    }
   };
   const draftKey = (context: Context): string => {
     const key = `${requireGuildId(context)}:${context.userId}:${context.settingsSessionId}`;
@@ -205,6 +213,8 @@ export function createPermissionSettingsCategory<
 
   const presetSubcategory = (preset: PermissionPreset) => {
     const details = PRESET_DETAILS[preset];
+    const baselineKey = (context: Context) =>
+      `${draftKey(context)}:${preset}`;
     const fields: SettingsField<Context>[] = [
       {
         kind: "display",
@@ -228,30 +238,55 @@ export function createPermissionSettingsCategory<
         id: "subjects",
         label: details.label,
         description: "Select every user and role that belongs to this preset.",
-        load: async (context) => {
+        load: async (context, purpose = "render") => {
           const subjects = await options.service.listPresetSubjects(
             requireGuildId(context),
             preset,
           );
+          const visibleSubjects = subjects.slice(0, PRESET_SELECTOR_LIMIT);
+          if (purpose === "render") {
+            presetSubjectBaselines.set(baselineKey(context), visibleSubjects);
+          }
           return {
             value: `${String(subjects.length)} configured`,
-            defaults: subjects.map((subject) => ({
+            defaults: visibleSubjects.map((subject) => ({
               kind: subject.subjectType,
               id: subject.subjectId,
             })),
             placeholder: "Choose users and roles",
             minValues: 0,
-            maxValues: 25,
+            maxValues: PRESET_SELECTOR_LIMIT,
           };
         },
         mutate: async (values, context) => {
-          await options.service.setPresetSubjects({
+          const key = baselineKey(context);
+          const baseline = presetSubjectBaselines.get(key) ?? [];
+          const selected = values.map(mentionableSubject);
+          const baselineByKey = new Map(
+            baseline.map((subject) => [
+              `${subject.subjectType}:${subject.subjectId}`,
+              subject,
+            ]),
+          );
+          const selectedByKey = new Map(
+            selected.map((subject) => [
+              `${subject.subjectType}:${subject.subjectId}`,
+              subject,
+            ]),
+          );
+          await options.service.updatePresetSubjects({
             guildId: requireGuildId(context),
             preset,
-            subjects: values.map(mentionableSubject),
+            add: [...selectedByKey]
+              .filter(([subjectKey]) => !baselineByKey.has(subjectKey))
+              .map(([, subject]) => subject),
+            remove: [...baselineByKey]
+              .filter(([subjectKey]) => !selectedByKey.has(subjectKey))
+              .map(([, subject]) => subject),
             actorUserId: context.userId,
             recheckAuthorization: () => options.requireAuthorization(context),
           });
+          presetSubjectBaselines.set(key, selected);
         },
       },
     ];

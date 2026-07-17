@@ -114,10 +114,15 @@ export type SettingsMentionableSelectView = SettingsFieldView &
     maxValues?: number;
   }>;
 
+export type SettingsFieldLoadPurpose = "render" | "mutation";
+
 export type SettingsMentionableSelectField<Context> =
   SettingsFieldBase<"mentionable-select", Context> &
     Readonly<{
-      load(context: Context): Awaitable<SettingsMentionableSelectView>;
+      load(
+        context: Context,
+        purpose?: SettingsFieldLoadPurpose,
+      ): Awaitable<SettingsMentionableSelectView>;
       validate?(
         values: readonly SettingsMentionable[],
         context: Context,

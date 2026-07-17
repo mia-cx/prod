@@ -53,6 +53,15 @@ export type PermissionContributionChange =
       kind: "clear-source";
       guildId: string;
       origin: PermissionRuleOrigin;
+    }>
+  | Readonly<{
+      kind: "replace-source";
+      guildId: string;
+      origin: PermissionRuleOrigin;
+      contributions: readonly Readonly<{
+        identity: PermissionRuleIdentity;
+        permit: "allow" | "deny";
+      }>[];
     }>;
 
 export type PermissionOriginEvent = Readonly<{
@@ -346,6 +355,88 @@ export const createPermissionContributionStore = (
           affected.set(identityKey(identity), identity);
         };
         for (const change of changes) {
+          if (change.kind === "replace-source") {
+            const desired = new Map(
+              change.contributions.map((contribution) => {
+                if (contribution.identity.guildId !== change.guildId) {
+                  throw new TypeError(
+                    "replacement contribution guild must match its source guild",
+                  );
+                }
+                return [identityKey(contribution.identity), contribution];
+              }),
+            );
+            const rows = transaction
+              .select()
+              .from(permissionRuleOrigins)
+              .where(
+                and(
+                  eq(permissionRuleOrigins.guildId, change.guildId),
+                  eq(
+                    permissionRuleOrigins.sourceType,
+                    change.origin.sourceType,
+                  ),
+                  eq(permissionRuleOrigins.sourceId, change.origin.sourceId),
+                ),
+              )
+              .all();
+            const existingKeys = new Set(
+              rows.map((row) => identityKey(toIdentity(row))),
+            );
+            for (const row of rows) {
+              const identity = toIdentity(row);
+              const key = identityKey(identity);
+              const replacement = desired.get(key);
+              if (replacement?.permit === row.permit) {
+                desired.delete(key);
+                continue;
+              }
+              transaction
+                .delete(permissionRuleOrigins)
+                .where(
+                  and(
+                    ...identityConditions(identity),
+                    eq(permissionRuleOrigins.sourceType, row.sourceType),
+                    eq(permissionRuleOrigins.sourceId, row.sourceId),
+                  ),
+                )
+                .run();
+              writeOriginEvent(
+                transaction,
+                identity,
+                change.origin,
+                "removed",
+                actorUserId,
+                row.permit,
+                null,
+              );
+              affect(identity);
+            }
+            for (const { identity, permit } of desired.values()) {
+              if (!existingKeys.has(identityKey(identity))) {
+                ensureIndependentContribution(
+                  transaction,
+                  identity,
+                  actorUserId,
+                );
+              }
+              transaction
+                .insert(permissionRuleOrigins)
+                .values(originRow(identity, change.origin, permit))
+                .run();
+              writeOriginEvent(
+                transaction,
+                identity,
+                change.origin,
+                "added",
+                actorUserId,
+                null,
+                permit,
+              );
+              affect(identity);
+            }
+            continue;
+          }
           if (change.kind === "clear-source") {
             const rows = transaction
               .select()

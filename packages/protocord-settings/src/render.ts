@@ -418,7 +418,11 @@ async function renderField<Context>(
     case "string-select":
       return renderStringSelect(field, location, await field.load(context));
     case "mentionable-select":
-      return renderMentionableSelect(field, location, await field.load(context));
+      return renderMentionableSelect(
+        field,
+        location,
+        await field.load(context, "render"),
+      );
     case "channel-select":
       return renderChannelSelect(field, location, await field.load(context));
   }

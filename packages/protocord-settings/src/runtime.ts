@@ -549,7 +549,7 @@ async function mutateMentionables<Context>(
     );
   }
   await requireFieldVisible(field, context);
-  const view = await field.load(context);
+  const view = await field.load(context, "mutation");
   if (view.disabled === true) {
     throw new SettingsViewError(
       "stale",
