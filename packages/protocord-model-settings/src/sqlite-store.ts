@@ -54,6 +54,7 @@ const credentialColumns = (row: ModelConfigurationRow) => {
     nonce: row.apiKeyNonce!,
     authTag: row.apiKeyAuthTag!,
     hint: row.apiKeyHint!,
+    envelopeVersion: row.apiKeyEnvelopeVersion,
   };
 };
 
@@ -133,6 +134,11 @@ export const createSqliteModelConfigurationStore = (
       const encrypted = encryptApiKey(
         input.apiKey,
         encryptionKey,
+        {
+          guildId: input.guildId,
+          purpose: input.purpose,
+          provider: "openrouter",
+        },
         options.createNonce,
       );
       ensure(input.guildId, input.purpose);
@@ -143,6 +149,7 @@ export const createSqliteModelConfigurationStore = (
           apiKeyNonce: encrypted.nonce,
           apiKeyAuthTag: encrypted.authTag,
           apiKeyHint: encrypted.hint,
+          apiKeyEnvelopeVersion: encrypted.envelopeVersion,
           updatedAt: now(),
         })
         .where(
@@ -163,6 +170,7 @@ export const createSqliteModelConfigurationStore = (
           apiKeyNonce: null,
           apiKeyAuthTag: null,
           apiKeyHint: null,
+          apiKeyEnvelopeVersion: 1,
           updatedAt: now(),
         })
         .where(
@@ -185,7 +193,16 @@ export const createSqliteModelConfigurationStore = (
           available: true as const,
           provider: row.provider,
           modelId: row.modelId,
-          apiKey: decryptApiKey(encrypted, encryptionKey),
+          apiKey: decryptApiKey(
+            encrypted,
+            encryptionKey,
+            {
+              guildId: row.guildId,
+              purpose: row.purpose,
+              provider: row.provider,
+            },
+            encrypted.envelopeVersion,
+          ),
           credentialSource: "guild" as const,
         });
       }

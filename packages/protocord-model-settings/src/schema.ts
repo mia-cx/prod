@@ -1,4 +1,9 @@
-import { primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+} from "drizzle-orm/sqlite-core";
 
 export const modelSettingsSchemaOwner =
   "@mia-cx/protocord-model-settings" as const;
@@ -14,6 +19,9 @@ export const modelConfigurations = sqliteTable(
     apiKeyHint: text("api_key_hint"),
     apiKeyNonce: text("api_key_nonce"),
     apiKeyAuthTag: text("api_key_auth_tag"),
+    apiKeyEnvelopeVersion: integer("api_key_envelope_version")
+      .notNull()
+      .default(0),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

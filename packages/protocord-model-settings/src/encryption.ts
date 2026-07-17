@@ -10,12 +10,20 @@ import { ModelCredentialError } from "./contracts.js";
 const KEY_BYTES = 32;
 const NONCE_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
+const API_KEY_ENVELOPE_VERSION = 1 as const;
+
+export type ApiKeyEncryptionContext = Readonly<{
+  guildId: string;
+  purpose: string;
+  provider: string;
+}>;
 
 export type EncryptedApiKey = Readonly<{
   ciphertext: string;
   nonce: string;
   authTag: string;
   hint: string;
+  envelopeVersion: typeof API_KEY_ENVELOPE_VERSION;
 }>;
 
 export class InvalidEncryptionKeyError extends Error {
@@ -40,9 +48,22 @@ export const decodeEncryptionKey = (encoded: string): Buffer => {
 const keyHint = (apiKey: string): string =>
   apiKey.length < 8 ? "Configured" : `••••${apiKey.slice(-4)}`;
 
+const associatedData = (context: ApiKeyEncryptionContext): Buffer =>
+  Buffer.from(
+    JSON.stringify([
+      "@mia-cx/protocord-model-settings/api-key",
+      API_KEY_ENVELOPE_VERSION,
+      context.guildId,
+      context.purpose,
+      context.provider,
+    ]),
+    "utf8",
+  );
+
 export const encryptApiKey = (
   apiKey: string,
   encryptionKey: BinaryLike,
+  context: ApiKeyEncryptionContext,
   createNonce: () => Buffer = () => randomBytes(NONCE_BYTES),
 ): EncryptedApiKey => {
   if (apiKey.trim().length === 0) {
@@ -55,6 +76,7 @@ export const encryptApiKey = (
   const cipher = createCipheriv("aes-256-gcm", encryptionKey, nonce, {
     authTagLength: AUTH_TAG_BYTES,
   });
+  cipher.setAAD(associatedData(context));
   const ciphertext = Buffer.concat([
     cipher.update(apiKey, "utf8"),
     cipher.final(),
@@ -64,6 +86,7 @@ export const encryptApiKey = (
     nonce: nonce.toString("base64"),
     authTag: cipher.getAuthTag().toString("base64"),
     hint: keyHint(apiKey),
+    envelopeVersion: API_KEY_ENVELOPE_VERSION,
   });
 };
 
@@ -82,14 +105,20 @@ const decodePart = (value: string, expectedLength?: number): Buffer => {
 export const decryptApiKey = (
   encrypted: Pick<EncryptedApiKey, "ciphertext" | "nonce" | "authTag">,
   encryptionKey: BinaryLike,
+  context: ApiKeyEncryptionContext,
+  envelopeVersion: number,
 ): string => {
   try {
+    if (envelopeVersion !== API_KEY_ENVELOPE_VERSION) {
+      throw new ModelCredentialError();
+    }
     const decipher = createDecipheriv(
       "aes-256-gcm",
       encryptionKey,
       decodePart(encrypted.nonce, NONCE_BYTES),
       { authTagLength: AUTH_TAG_BYTES },
     );
+    decipher.setAAD(associatedData(context));
     decipher.setAuthTag(decodePart(encrypted.authTag, AUTH_TAG_BYTES));
     return Buffer.concat([
       decipher.update(decodePart(encrypted.ciphertext)),

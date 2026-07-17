@@ -28,6 +28,7 @@ describe("SQLite model configuration store", () => {
         api_key_hint text,
         api_key_nonce text,
         api_key_auth_tag text,
+        api_key_envelope_version integer DEFAULT 0 NOT NULL,
         created_at text NOT NULL,
         updated_at text NOT NULL,
         PRIMARY KEY (guild_id, purpose)
@@ -132,5 +133,54 @@ describe("SQLite model configuration store", () => {
     await expect(store.resolve(guildId, "triage")).rejects.toThrow(
       ModelCredentialError,
     );
+  });
+
+  it("binds encrypted credentials to their guild and purpose row", async () => {
+    const store = createStore();
+    const otherGuildId = "223456789012345678";
+    await store.setGuildApiKey({ guildId, purpose: "triage", apiKey });
+    await store.get(otherGuildId, "triage");
+    sqlite
+      .prepare(`
+        UPDATE mia_cx_model_configurations
+        SET encrypted_api_key = source.encrypted_api_key,
+            api_key_hint = source.api_key_hint,
+            api_key_nonce = source.api_key_nonce,
+            api_key_auth_tag = source.api_key_auth_tag,
+            api_key_envelope_version = source.api_key_envelope_version
+        FROM mia_cx_model_configurations AS source
+        WHERE mia_cx_model_configurations.guild_id = ?
+          AND source.guild_id = ?
+      `)
+      .run(otherGuildId, guildId);
+
+    await expect(store.resolve(otherGuildId, "triage")).rejects.toThrow(
+      ModelCredentialError,
+    );
+    await expect(store.resolve(guildId, "triage")).resolves.toMatchObject({
+      available: true,
+      apiKey,
+    });
+  });
+
+  it("fails closed for pre-versioned credential envelopes", async () => {
+    const store = createStore();
+    await store.setGuildApiKey({ guildId, purpose: "triage", apiKey });
+    sqlite
+      .prepare(
+        "UPDATE mia_cx_model_configurations SET api_key_envelope_version = 0",
+      )
+      .run();
+
+    await expect(store.resolve(guildId, "triage")).rejects.toThrow(
+      ModelCredentialError,
+    );
+    await store.clearGuildApiKey(guildId, "triage");
+    await expect(
+      store.resolve(guildId, "triage", "deployment-secret"),
+    ).resolves.toMatchObject({
+      available: true,
+      credentialSource: "deployment",
+    });
   });
 });
