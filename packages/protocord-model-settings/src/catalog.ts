@@ -11,7 +11,7 @@ const MAX_DESCRIPTION_LENGTH = 100;
 
 const validModelId = (value: string): boolean =>
   value.length > 0 &&
-  value.length <= 200 &&
+  value.length <= 100 &&
   !/\s/u.test(value) &&
   !value.includes("://");
 

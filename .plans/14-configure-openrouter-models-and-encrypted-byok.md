@@ -22,7 +22,7 @@ schema into its application-owned migration history.
 
 - [x] Add the package-owned model schema and SQLite store with AES-256-GCM credential persistence and adversarial tests.
 - [x] Define injected provider catalog access and secure guild/deployment resolution semantics with focused tests.
-- [ ] Export and test a complete reusable model settings category with catalog suggestions, manual entry, masked status, key replacement, and clearing.
+- [x] Export and test a complete reusable model settings category with catalog suggestions, manual entry, masked status, key replacement, and clearing.
 - [ ] Compose the package into Prod configuration, OpenRouter catalog access, settings authorization, and the application-owned migration; then run repository validation.
 
 ## Human validation
@@ -39,3 +39,4 @@ schema into its application-owned migration history.
 - 2026-07-17: The mandatory Discord/OpenRouter validation is HITL. The implementation PR must reference rather than close #14 until a human records a redacted passing result.
 - 2026-07-17: Added the package-prefixed model configuration schema and SQLite store. Credentials use validated 32-byte base64 master keys, fresh 12-byte nonces, separate ciphertext/auth-tag/nonce/hint columns, authenticated decryption, guild-first resolution, and atomic credential clearing. The package has 6 passing tests; focused test, typecheck, lint, and build commands pass.
 - 2026-07-17: Added an injected provider-catalog boundary with bounded, deduplicated model suggestions and deliberately detail-free failure results so catalog outages never disable manual entry or leak adapter errors. Secure resolution now has a public contract for guild-first, deployment-fallback, and unavailable outcomes. All 9 package tests, typecheck, lint, and build pass.
+- 2026-07-17: Exported the complete `Model` category with fixed OpenRouter provider status, catalog selection, independent manual model entry, BYOK replacement and clearing, masked credential source, caller-supplied authorization, and no secret prefill. Catalog outages render a safe keep-current selector while manual entry continues to mutate normally. All 14 package tests, typecheck, lint, and build pass.
