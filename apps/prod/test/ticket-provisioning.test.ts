@@ -57,9 +57,16 @@ const discordFixture = (
   restoreReporterAccess: vi.fn().mockResolvedValue(undefined),
   findTicketThread: vi.fn().mockResolvedValue(undefined),
   createTicketThread: vi.fn().mockResolvedValue("thread-1"),
-  prepareTicketThread: vi.fn().mockResolvedValue(undefined),
+  prepareTicketThread: vi.fn().mockResolvedValue({
+    wasArchived: false,
+    reporterWasMember: false,
+  }),
   addReporter: vi.fn().mockResolvedValue(undefined),
-  upsertOpeningInstructions: vi.fn().mockResolvedValue("message-1"),
+  upsertOpeningInstructions: vi.fn().mockResolvedValue({
+    messageId: "message-1",
+    created: true,
+  }),
+  rollbackTicketThread: vi.fn().mockResolvedValue(undefined),
   deleteTicketThread: vi.fn().mockResolvedValue(undefined),
   ...overrides,
 });
@@ -215,6 +222,41 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("fails an admitted ticket before access ownership without restoring unknown state", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture({
+      validateReporter: vi
+        .fn()
+        .mockRejectedValue(new Error("reporter left the guild")),
+    });
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-invalid-reporter",
+    });
+    try {
+      await expect(
+        service.open({
+          guild,
+          reporterUserId: "reporter-1",
+          originatingAlias: "issue",
+        }),
+      ).rejects.toMatchObject({ name: "TicketProvisioningError" });
+
+      expect(discord.captureReporterAccess).not.toHaveBeenCalled();
+      expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
+      expect(await store.get("ticket-invalid-reporter")).toMatchObject({
+        status: "failed",
+        failureReason: "reporter left the guild",
+      });
+      expect(
+        (await store.listEvents("ticket-invalid-reporter")).at(-1)?.eventType,
+      ).toBe("compensation_completed");
+    } finally {
+      connection.close();
+    }
+  });
+
   it("recovers a known thread idempotently without creating another thread", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -233,7 +275,11 @@ describe("ticket provisioning", () => {
       { threadId: "thread-existing" },
     );
     const discord = discordFixture({
-      upsertOpeningInstructions: vi.fn().mockResolvedValue("message-existing"),
+      upsertOpeningInstructions: vi.fn().mockResolvedValue({
+        messageId: "message-existing",
+        created: false,
+        previousContent: "existing instructions",
+      }),
     });
     const service = createTicketProvisioningService(settings, store, discord);
     try {
@@ -293,6 +339,69 @@ describe("ticket provisioning", () => {
         failed: 1,
       });
       expect(discord.deleteTicketThread).not.toHaveBeenCalled();
+      expect(discord.rollbackTicketThread).toHaveBeenCalledWith(
+        guild,
+        "thread-existing",
+        expect.objectContaining({ id: ticket.id }),
+        { wasArchived: false, reporterWasMember: false },
+        undefined,
+      );
+      expect(await store.get(ticket.id)).toMatchObject({ status: "failed" });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("rolls back owned mutations when finalizing a recovered thread fails", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const ticket = await store.create({
+      id: "ticket-recovery-rollback",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    await store.recordProgress(
+      ticket.id,
+      "thread_created",
+      {},
+      { threadId: "thread-existing" },
+    );
+    const opening = {
+      messageId: "message-existing",
+      created: false,
+      previousContent: "previous instructions",
+    } as const;
+    const discord = discordFixture({
+      prepareTicketThread: vi.fn().mockResolvedValue({
+        wasArchived: true,
+        reporterWasMember: false,
+      }),
+      upsertOpeningInstructions: vi.fn().mockResolvedValue(opening),
+    });
+    const failingStore = {
+      ...store,
+      markOpen: vi.fn().mockRejectedValue(new Error("database unavailable")),
+    };
+    const service = createTicketProvisioningService(
+      settings,
+      failingStore,
+      discord,
+    );
+    try {
+      await expect(service.recover(async () => guild)).resolves.toEqual({
+        recovered: 0,
+        failed: 1,
+      });
+      expect(discord.rollbackTicketThread).toHaveBeenCalledWith(
+        guild,
+        "thread-existing",
+        expect.objectContaining({ id: ticket.id }),
+        { wasArchived: true, reporterWasMember: false },
+        opening,
+      );
       expect(await store.get(ticket.id)).toMatchObject({ status: "failed" });
     } finally {
       connection.close();
@@ -392,6 +501,8 @@ describe("ticket provisioning", () => {
       });
       expect(discord.grantReporterAccess).toHaveBeenCalledOnce();
       expect(discord.createTicketThread).toHaveBeenCalledOnce();
+      expect(discord.validateReporter).toHaveBeenCalledOnce();
+      expect(discord.captureReporterAccess).toHaveBeenCalledOnce();
       expect(await store.get("ticket-2")).toBeUndefined();
     } finally {
       connection.close();
@@ -553,6 +664,7 @@ describe("Discord ticket privacy adapter", () => {
       parentId: "hub-1",
       archived: true,
       setArchived,
+      members: { fetch: vi.fn().mockResolvedValue(new Collection()) },
     };
     const fetch = vi.fn(async (id: string) => (id === "hub-1" ? hub : thread));
     const mockGuild = { channels: { fetch } } as unknown as Guild;
@@ -575,7 +687,9 @@ describe("Discord ticket privacy adapter", () => {
     expect(fetchArchived).toHaveBeenLastCalledWith(
       expect.objectContaining({ before: oldest, fetchAll: true }),
     );
-    await adapter.prepareTicketThread(mockGuild, "thread-match", ticket);
+    await expect(
+      adapter.prepareTicketThread(mockGuild, "thread-match", ticket),
+    ).resolves.toEqual({ wasArchived: true, reporterWasMember: false });
     expect(setArchived).toHaveBeenCalledWith(
       false,
       "Recover Prod ticket ticket-stale",
@@ -653,9 +767,64 @@ describe("Discord ticket privacy adapter", () => {
         createdAt: "2026-07-17T10:00:00.000Z",
         updatedAt: "2026-07-17T10:00:00.000Z",
       }),
-    ).resolves.toBe("message-existing");
+    ).resolves.toEqual({
+      messageId: "message-existing",
+      created: false,
+      previousContent: "-# Managed by Prod · ticket:ticket-stale",
+    });
     expect(edit).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("rolls back only mutations owned by a failed thread recovery", async () => {
+    const edit = vi.fn().mockResolvedValue(undefined);
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const setArchived = vi.fn().mockResolvedValue(undefined);
+    const message = { id: "message-existing", edit };
+    const thread = {
+      type: ChannelType.PrivateThread,
+      parentId: "hub-1",
+      messages: { fetch: vi.fn().mockResolvedValue(message) },
+      members: { remove },
+      setArchived,
+    };
+    const mockGuild = {
+      channels: { fetch: vi.fn().mockResolvedValue(thread) },
+    } as unknown as Guild;
+    const ticket = {
+      id: "ticket-stale",
+      guildId: "guild-1",
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+      status: "provisioning",
+      triageStatus: "collecting",
+      threadId: "thread-existing",
+      createdAt: "2026-07-17T10:00:00.000Z",
+      updatedAt: "2026-07-17T10:00:00.000Z",
+    } as const;
+
+    await createTicketProvisioningDiscord().rollbackTicketThread(
+      mockGuild,
+      "thread-existing",
+      ticket,
+      { wasArchived: true, reporterWasMember: false },
+      {
+        messageId: "message-existing",
+        created: false,
+        previousContent: "previous instructions",
+      },
+    );
+
+    expect(edit).toHaveBeenCalledWith({
+      content: "previous instructions",
+      allowedMentions: { parse: [] },
+    });
+    expect(remove).toHaveBeenCalledWith("reporter-1");
+    expect(setArchived).toHaveBeenCalledWith(
+      true,
+      "Roll back failed Prod ticket recovery ticket-stale",
+    );
   });
 
   it("removes control characters, neutralizes mentions, and caps summaries", () => {

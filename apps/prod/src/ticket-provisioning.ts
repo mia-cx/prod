@@ -31,6 +31,17 @@ export type OpenTicketInput = Readonly<{
   summary?: string;
 }>;
 
+export type TicketThreadPreparation = Readonly<{
+  wasArchived: boolean;
+  reporterWasMember: boolean;
+}>;
+
+export type OpeningInstructionsMutation = Readonly<{
+  messageId: string;
+  created: boolean;
+  previousContent?: string;
+}>;
+
 export interface TicketProvisioningDiscord {
   validateReporter(guild: Guild, reporterUserId: string): Promise<GuildMember>;
   captureReporterAccess(
@@ -55,13 +66,23 @@ export interface TicketProvisioningDiscord {
     guild: Guild,
     threadId: string,
     ticket: Ticket,
-  ): Promise<void>;
+  ): Promise<TicketThreadPreparation>;
   addReporter(
     guild: Guild,
     threadId: string,
     reporterUserId: string,
   ): Promise<void>;
-  upsertOpeningInstructions(guild: Guild, ticket: Ticket): Promise<string>;
+  upsertOpeningInstructions(
+    guild: Guild,
+    ticket: Ticket,
+  ): Promise<OpeningInstructionsMutation>;
+  rollbackTicketThread(
+    guild: Guild,
+    threadId: string,
+    ticket: Ticket,
+    preparation: TicketThreadPreparation,
+    opening?: OpeningInstructionsMutation,
+  ): Promise<void>;
   deleteTicketThread(guild: Guild, threadId: string): Promise<void>;
 }
 
@@ -303,9 +324,14 @@ export const createTicketProvisioningDiscord =
         if (thread.parentId !== ticket.hubChannelId) {
           throw new Error("Ticket thread does not belong to its stored hub");
         }
-        if (thread.archived) {
+        const wasArchived = thread.archived === true;
+        const reporterWasMember = (
+          await thread.members.fetch()
+        ).has(ticket.reporterUserId);
+        if (wasArchived) {
           await thread.setArchived(false, `Recover Prod ticket ${ticket.id}`);
         }
+        return Object.freeze({ wasArchived, reporterWasMember });
       },
       addReporter: async (guild, threadId, reporterUserId) => {
         const thread = await requirePrivateThread(guild, threadId);
@@ -318,11 +344,70 @@ export const createTicketProvisioningDiscord =
         const content = ticketOpeningInstructions(ticket);
         const existing = await findManagedOpening(thread, ticket);
         const payload = { content, allowedMentions: { parse: [] as const } };
-        const message =
-          existing === undefined
-            ? await thread.send(payload)
-            : await existing.edit(payload);
-        return message.id;
+        if (existing === undefined) {
+          const message = await thread.send(payload);
+          return Object.freeze({ messageId: message.id, created: true });
+        }
+        const previousContent = existing.content;
+        const message = await existing.edit(payload);
+        return Object.freeze({
+          messageId: message.id,
+          created: false,
+          previousContent,
+        });
+      },
+      rollbackTicketThread: async (
+        guild,
+        threadId,
+        ticket,
+        preparation,
+        opening,
+      ) => {
+        const thread = await requirePrivateThread(guild, threadId);
+        const rollbackErrors: unknown[] = [];
+        if (opening !== undefined) {
+          try {
+            const message = await thread.messages
+              .fetch(opening.messageId)
+              .catch((error: unknown) => {
+                if (
+                  isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMessage)
+                ) {
+                  return undefined;
+                }
+                throw error;
+              });
+            if (message !== undefined) {
+              if (opening.created) {
+                await message.delete();
+              } else if (opening.previousContent !== undefined) {
+                await message.edit({
+                  content: opening.previousContent,
+                  allowedMentions: { parse: [] },
+                });
+              }
+            }
+          } catch (error) {
+            rollbackErrors.push(error);
+          }
+        }
+        if (!preparation.reporterWasMember) {
+          await thread.members
+            .remove(ticket.reporterUserId)
+            .catch((error: unknown) => rollbackErrors.push(error));
+        }
+        if (preparation.wasArchived) {
+          await thread.setArchived(
+            true,
+            `Roll back failed Prod ticket recovery ${ticket.id}`,
+          ).catch((error: unknown) => rollbackErrors.push(error));
+        }
+        if (rollbackErrors.length > 0) {
+          throw new AggregateError(
+            rollbackErrors,
+            "Failed to fully roll back recovered ticket thread",
+          );
+        }
       },
       deleteTicketThread: async (guild, threadId) => {
         const thread = await guild.channels.fetch(threadId).catch(() => null);
@@ -369,6 +454,9 @@ export const createTicketProvisioningService = (
     guild: Guild,
     ticket: Ticket,
     createdThreadId: string | undefined,
+    accessOwnershipStarted: boolean,
+    preparation: TicketThreadPreparation | undefined,
+    opening: OpeningInstructionsMutation | undefined,
     cause: unknown,
   ): Promise<never> => {
     const compensationErrors: unknown[] = [];
@@ -376,9 +464,22 @@ export const createTicketProvisioningService = (
       await discord
         .deleteTicketThread(guild, createdThreadId)
         .catch((error: unknown) => compensationErrors.push(error));
+    } else if (ticket.threadId !== undefined && preparation !== undefined) {
+      await discord
+        .rollbackTicketThread(
+          guild,
+          ticket.threadId,
+          ticket,
+          preparation,
+          opening,
+        )
+        .catch((error: unknown) => compensationErrors.push(error));
     }
     try {
-      if (!(await store.hasOtherActiveTicket(ticket))) {
+      if (
+        accessOwnershipStarted &&
+        !(await store.hasOtherActiveTicket(ticket))
+      ) {
         const snapshot = await store.getReporterAccess(ticket);
         if (snapshot === undefined) {
           throw new Error("Reporter hub access ownership is missing");
@@ -423,29 +524,28 @@ export const createTicketProvisioningService = (
     guild: Guild,
     initial: Ticket,
     recovering: boolean,
-    preparedAccess?: Readonly<{
-      reporter: GuildMember;
-      snapshot: ReporterHubAccessSnapshot;
-    }>,
   ): Promise<Ticket> => {
     let ticket = initial;
     let threadId = ticket.threadId;
     let createdThreadId: string | undefined;
+    let accessOwnershipStarted = false;
+    let preparation: TicketThreadPreparation | undefined;
+    let opening: OpeningInstructionsMutation | undefined;
     try {
       if (recovering) {
         await store.recordEvent(ticket.id, "recovery_started");
       }
-      const reporter =
-        preparedAccess?.reporter ??
-        (await discord.validateReporter(guild, ticket.reporterUserId));
-      const snapshot =
-        preparedAccess?.snapshot ??
-        (await discord.captureReporterAccess(
-          guild,
-          ticket.hubChannelId,
-          ticket.reporterUserId,
-        ));
+      const reporter = await discord.validateReporter(
+        guild,
+        ticket.reporterUserId,
+      );
+      const snapshot = await discord.captureReporterAccess(
+        guild,
+        ticket.hubChannelId,
+        ticket.reporterUserId,
+      );
       await store.beginReporterAccess(ticket, snapshot);
+      accessOwnershipStarted = true;
       await discord.grantReporterAccess(guild, ticket.hubChannelId, reporter);
       await store.recordProgress(ticket.id, "reporter_access_granted");
       threadId ??= await discord.findTicketThread(guild, ticket);
@@ -462,25 +562,30 @@ export const createTicketProvisioningService = (
         );
         ticket = (await store.get(ticket.id))!;
       }
-      await discord.prepareTicketThread(guild, threadId, ticket);
+      preparation = await discord.prepareTicketThread(guild, threadId, ticket);
       await discord.addReporter(guild, threadId, ticket.reporterUserId);
       await store.recordProgress(ticket.id, "reporter_added");
-      const openingMessageId = await discord.upsertOpeningInstructions(
-        guild,
-        ticket,
-      );
-      if (ticket.openingMessageId !== openingMessageId) {
+      opening = await discord.upsertOpeningInstructions(guild, ticket);
+      if (ticket.openingMessageId !== opening.messageId) {
         await store.recordProgress(
           ticket.id,
           "instructions_posted",
           { recovered: recovering },
-          { openingMessageId },
+          { openingMessageId: opening.messageId },
         );
       }
       await store.markOpen(ticket.id);
       return (await store.get(ticket.id))!;
     } catch (error) {
-      return compensate(guild, ticket, createdThreadId, error);
+      return compensate(
+        guild,
+        ticket,
+        createdThreadId,
+        accessOwnershipStarted,
+        preparation,
+        opening,
+        error,
+      );
     }
   };
 
@@ -491,15 +596,6 @@ export const createTicketProvisioningService = (
         if (state.hubChannelId === undefined) {
           throw new Error("This server has not configured a support hub yet.");
         }
-        const reporter = await discord.validateReporter(
-          input.guild,
-          input.reporterUserId,
-        );
-        const snapshot = await discord.captureReporterAccess(
-          input.guild,
-          state.hubChannelId,
-          input.reporterUserId,
-        );
         const summary = sanitizeTicketSummary(input.summary);
         const ticket = await store.create({
           id: createId(),
@@ -509,7 +605,7 @@ export const createTicketProvisioningService = (
           originatingAlias: input.originatingAlias,
           ...(summary === undefined ? {} : { summary }),
         });
-        return provision(input.guild, ticket, false, { reporter, snapshot });
+        return provision(input.guild, ticket, false);
       }),
     recover: async (resolveGuild) => {
       let recovered = 0;
