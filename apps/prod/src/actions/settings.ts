@@ -109,7 +109,7 @@ export function createGuildSetupSettingsConsumer(
       {
         id: "setup",
         label: "Setup",
-        description: "Choose the channel Prod uses for support.",
+        description: "Choose where Prod manages support threads.",
         authorize,
         fields: [
           {
