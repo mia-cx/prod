@@ -109,7 +109,7 @@ export function createGuildSetupSettingsConsumer(
     categories: [
       {
         id: "setup",
-        label: "Setup",
+        label: "⚙️ Setup",
         description: "Configure basic setup for Prod.",
         authorize,
         fields: [
@@ -155,7 +155,7 @@ export function createGuildSetupSettingsConsumer(
       },
       {
         id: "identity",
-        label: "Identity",
+        label: "🪪 Identity",
         description: "Configure Prod's personality and knowledge.",
         authorize,
         subcategories: [

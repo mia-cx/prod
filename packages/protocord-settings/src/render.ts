@@ -130,13 +130,6 @@ async function renderSettingsView<Context>(
   }
   const homeChildren: APIComponentInContainer[] = [
     textDisplay(`# ${definition.title}\nChoose a category`),
-    categoryNavigation(
-      authorizedCategories,
-      request.categoryId,
-      routeCategory.id,
-      routeSubcategory.id,
-    ),
-    separator(),
     textDisplay(categorySummaryList(homeCategories)),
   ];
   if (homePageCount > 1) {
@@ -149,6 +142,15 @@ async function renderSettingsView<Context>(
       ),
     );
   }
+  homeChildren.push(
+    separator(),
+    categoryNavigation(
+      authorizedCategories,
+      request.categoryId,
+      routeCategory.id,
+      routeSubcategory.id,
+    ),
+  );
   if (request.categoryId === undefined) {
     const components = [
       container("home", homeChildren, definition.accentColor),
@@ -830,17 +832,12 @@ function categorySummaryList<Context>(
   return [
     "## Categories",
     ...categories.map((category) =>
-      [
-        `**${category.label}**`,
-        category.description === undefined
-          ? undefined
-          : truncate(
-              category.description,
-              SETTINGS_LIMITS.categorySummaryCharacters,
-            ),
-      ]
-        .filter((part) => part !== undefined)
-        .join("\n"),
+      category.description === undefined
+        ? `**${category.label}**`
+        : `**${category.label}:** ${truncate(
+            category.description,
+            SETTINGS_LIMITS.categorySummaryCharacters,
+          )}`,
     ),
   ].join("\n\n");
 }

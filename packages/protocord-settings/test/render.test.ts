@@ -121,6 +121,21 @@ describe("Components v2 settings rendering", () => {
     expect(JSON.stringify(home)).toContain("Choose a category");
     expect(JSON.stringify(home)).toContain("## Categories");
     expect(JSON.stringify(home)).toContain("Configure the synthetic consumer.");
+    expect(JSON.stringify(home)).toContain(
+      "**Setup:** Configure the synthetic consumer.",
+    );
+    expect(home).toMatchObject({
+      type: ComponentType.Container,
+      components: [
+        { type: ComponentType.TextDisplay },
+        { type: ComponentType.TextDisplay },
+        { type: ComponentType.Separator },
+        {
+          type: ComponentType.ActionRow,
+          components: [{ type: ComponentType.StringSelect }],
+        },
+      ],
+    });
     expect(JSON.stringify(home)).toContain("Labels");
     expect(JSON.stringify(home)).not.toContain("Private");
     expect(JSON.stringify(home)).not.toContain("Refresh");

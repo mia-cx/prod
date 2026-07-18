@@ -294,7 +294,7 @@ describe("Discord settings runtime", () => {
     ).resolves.toEqual({ matched: true, status: "viewed" });
 
     const payload = JSON.stringify(next.editReply.mock.calls[0]?.[0]);
-    expect(payload).toContain("**Category 10**\\nSummary 10");
+    expect(payload).toContain("**Category 10:** Summary 10");
     expect(payload).not.toContain("**Category 0**");
   });
 
