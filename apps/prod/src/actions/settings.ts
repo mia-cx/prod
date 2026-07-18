@@ -166,7 +166,47 @@ export function createGuildSetupSettingsConsumer(
             fields: [
               {
                 kind: "modal",
-                id: "assistant-tone",
+                id: "assistant-system-prompt",
+                label: "System prompt",
+                title: "Edit system prompt",
+                presentation: { kind: "preview", maxLength: 300 },
+                inputs: [
+                  {
+                    id: "system-prompt",
+                    label: "System prompt",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 3,
+                    maxLength: 4_000,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context)))
+                    .systemPrompt;
+                  return {
+                    value,
+                    values: { "system-prompt": value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values["system-prompt"]?.trim().length ?? 0) < 3
+                    ? [
+                        {
+                          inputId: "system-prompt",
+                          message: "Use at least three visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setSystemPrompt(
+                    requireGuild(context),
+                    values["system-prompt"]!,
+                  );
+                },
+              },
+              {
+                kind: "modal",
+                id: "assistant-style-prompt",
                 label: "Style prompt",
                 title: "Edit style prompt",
                 presentation: { kind: "preview", maxLength: 300 },
@@ -177,7 +217,7 @@ export function createGuildSetupSettingsConsumer(
                     style: TextInputStyle.Paragraph,
                     placeholder: "friendly, patient, and concise",
                     minLength: 3,
-                    maxLength: 500,
+                    maxLength: 4_000,
                   },
                 ],
                 load: async (context) => {

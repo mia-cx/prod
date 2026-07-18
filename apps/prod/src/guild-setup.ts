@@ -18,6 +18,7 @@ export interface GuildSetupService {
   configureHub(guild: Guild, channelId: string): Promise<SupportHubValidation>;
   refreshInformationMessage(guild: Guild): Promise<SupportHubValidation>;
   setAssistantIdentity(guild: Guild, identity: string): Promise<void>;
+  setSystemPrompt(guild: Guild, prompt: string): Promise<void>;
   setTone(guild: Guild, tone: string): Promise<void>;
 }
 
@@ -250,6 +251,11 @@ export const createGuildSetupService = (
       execute(guild.id, async () => {
         await recoverPendingTransition(guild);
         await store.setTone(guild.id, tone);
+      }),
+    setSystemPrompt: (guild: Guild, prompt: string) =>
+      execute(guild.id, async () => {
+        await recoverPendingTransition(guild);
+        await store.setSystemPrompt(guild.id, prompt);
       }),
   });
 };

@@ -26,6 +26,7 @@ export const guildSettings = sqliteTable(
         "hub_permission_ownership",
         "hub_transition",
         "assistant_identity",
+        "system_prompt",
         "tone",
       ],
     }).notNull(),

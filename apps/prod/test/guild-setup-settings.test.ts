@@ -218,11 +218,13 @@ const hubRoute = {
   page: 0,
 } as const;
 
-const modalRoute = () => ({
+const modalRoute = (
+  fieldId: "assistant-system-prompt" | "assistant-style-prompt",
+) => ({
   action: "modal-submit" as const,
   categoryId: "identity",
   subcategoryId: "personality",
-  fieldId: "assistant-tone",
+  fieldId,
   page: 0,
 });
 
@@ -299,7 +301,11 @@ describe("guild setup settings integration", () => {
       personality.editReply.mock.calls[0]?.[0],
     );
     expect(personalityPage).toContain("**Style prompt**");
-    expect(personalityPage).toContain("friendly, patient, and concise");
+    expect(personalityPage).toContain("**System prompt**");
+    expect(personalityPage).toContain(
+      "you are an automated support agent for poke",
+    );
+    expect(personalityPage).toContain("write responses in lowercase only");
     expect(personalityPage).toContain(
       "Configure how Prod communicates with users.",
     );
@@ -311,7 +317,7 @@ describe("guild setup settings integration", () => {
       action: "modal",
       categoryId: "identity",
       subcategoryId: "personality",
-      fieldId: "assistant-tone",
+      fieldId: "assistant-style-prompt",
       page: 0,
     });
     await runtime.handleInteraction(styleButton as unknown as Interaction);
@@ -439,22 +445,33 @@ describe("guild setup settings integration", () => {
     );
   });
 
-  it("persists and rerenders the style prompt", async () => {
+  it("persists and rerenders system and style prompts separately", async () => {
     const { connection, runtime, store } = await setup();
     await store.configureHub(guildId, hubChannelId, ownership());
 
-    const tone = component("modal", modalRoute(), {
-      modalValue: "  warm, direct, and concise  ",
+    const systemPrompt = component(
+      "modal",
+      modalRoute("assistant-system-prompt"),
+      { modalValue: "  help users complete their reports  " },
+    );
+    await runtime.handleInteraction(systemPrompt as unknown as Interaction);
+    expect(
+      JSON.stringify(systemPrompt.editReply.mock.calls[0]?.[0]),
+    ).toContain("help users complete their reports");
+
+    const tone = component("modal", modalRoute("assistant-style-prompt"), {
+      modalValue: "  lowercase, direct, and concise  ",
     });
     await runtime.handleInteraction(tone as unknown as Interaction);
     expect(JSON.stringify(tone.editReply.mock.calls[0]?.[0])).toContain(
-      "warm, direct, and concise",
+      "lowercase, direct, and concise",
     );
 
     const restartedStore = createSqliteGuildSettingsStore(connection.database);
     await expect(restartedStore.get(guildId)).resolves.toMatchObject({
       assistantIdentity: "Prod",
-      tone: "warm, direct, and concise",
+      systemPrompt: "help users complete their reports",
+      tone: "lowercase, direct, and concise",
     });
   });
 });

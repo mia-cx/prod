@@ -9,12 +9,16 @@ import { parseHubTransition, type HubTransition } from "./hub-transition.js";
 import { guildSettings } from "./schema.js";
 
 export const DEFAULT_ASSISTANT_IDENTITY = "Prod";
-export const DEFAULT_ASSISTANT_TONE = "friendly, patient, and concise";
+export const DEFAULT_SYSTEM_PROMPT =
+  "you are an automated support agent for poke, a personal assistant that lives in the user's messages. you are responsible for fleshing out user stories and ensuring they are complete. collect missing context, expected behavior, reproduction steps, constraints, and acceptance criteria. ask only necessary follow-up questions and never invent details.";
+export const DEFAULT_ASSISTANT_TONE =
+  "write responses in lowercase only. never use emoji. strongly prefer the shortest complete answer without repetition.";
 
 export type GuildSetupSettings = Readonly<{
   guildId: string;
   initialized: boolean;
   assistantIdentity: string;
+  systemPrompt: string;
   tone: string;
   hubChannelId?: string;
   hubInformationMessageId?: string;
@@ -31,6 +35,7 @@ export interface GuildSettingsStore {
   ): Promise<void>;
   setHubInformationMessage(guildId: string, messageId: string): Promise<void>;
   setAssistantIdentity(guildId: string, identity: string): Promise<void>;
+  setSystemPrompt(guildId: string, prompt: string): Promise<void>;
   setTone(guildId: string, tone: string): Promise<void>;
   getHubTransition(guildId: string): Promise<HubTransition | undefined>;
   beginHubTransition(guildId: string, transition: HubTransition): Promise<void>;
@@ -72,6 +77,12 @@ const insertDefaultRows = (
     .insert(guildSettings)
     .values([
       { guildId, key: "initialized", value: "1", updatedAt },
+      {
+        guildId,
+        key: "system_prompt",
+        value: DEFAULT_SYSTEM_PROMPT,
+        updatedAt,
+      },
       {
         guildId,
         key: "assistant_identity",
@@ -172,6 +183,7 @@ export const createSqliteGuildSettingsStore = (
         initialized: values.get("initialized") === "1",
         assistantIdentity:
           values.get("assistant_identity") ?? DEFAULT_ASSISTANT_IDENTITY,
+        systemPrompt: values.get("system_prompt") ?? DEFAULT_SYSTEM_PROMPT,
         tone: values.get("tone") ?? DEFAULT_ASSISTANT_TONE,
         ...(hubChannelId === undefined ? {} : { hubChannelId }),
         ...(hubInformationMessageId === undefined
@@ -292,6 +304,22 @@ export const createSqliteGuildSettingsStore = (
         const timestamp = now();
         insertDefaultRows(transaction, guildId, timestamp);
         upsert(transaction, guildId, "tone", normalized, timestamp);
+      });
+    },
+    setSystemPrompt: async (guildId: string, prompt: string): Promise<void> => {
+      assertId("guildId", guildId);
+      const normalized = prompt.trim();
+      assertId("system prompt", normalized);
+      database.transaction((transaction) => {
+        const timestamp = now();
+        insertDefaultRows(transaction, guildId, timestamp);
+        upsert(
+          transaction,
+          guildId,
+          "system_prompt",
+          normalized,
+          timestamp,
+        );
       });
     },
     getHubTransition: async (

@@ -5,6 +5,7 @@ import {
   createSqliteGuildSettingsStore,
   DEFAULT_ASSISTANT_IDENTITY,
   DEFAULT_ASSISTANT_TONE,
+  DEFAULT_SYSTEM_PROMPT,
   GuildNotConfiguredError,
 } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
@@ -48,6 +49,7 @@ describe("SQLite guild settings", () => {
         guildId: "guild-1",
         initialized: false,
         assistantIdentity: DEFAULT_ASSISTANT_IDENTITY,
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
         tone: DEFAULT_ASSISTANT_TONE,
       });
     } finally {
@@ -66,6 +68,7 @@ describe("SQLite guild settings", () => {
         guildId: "guild-1",
         initialized: true,
         assistantIdentity: "Helper",
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
         tone: DEFAULT_ASSISTANT_TONE,
       });
     } finally {
@@ -73,12 +76,13 @@ describe("SQLite guild settings", () => {
     }
   });
 
-  it("persists the hub, message, identity, and tone across store instances", async () => {
+  it("persists the hub, message, identity, and prompts across store instances", async () => {
     const { connection, store } = await createStore();
     try {
       await store.configureHub("guild-1", "channel-1", ownership("channel-1"));
       await store.setHubInformationMessage("guild-1", "message-1");
       await store.setAssistantIdentity("guild-1", "Support Guide");
+      await store.setSystemPrompt("guild-1", "Help users solve problems");
       await store.setTone("guild-1", "Warm, direct, and brief");
 
       const restartedStore = createSqliteGuildSettingsStore(
@@ -91,6 +95,7 @@ describe("SQLite guild settings", () => {
         hubInformationMessageId: "message-1",
         hubPermissionOwnership: ownership("channel-1"),
         assistantIdentity: "Support Guide",
+        systemPrompt: "Help users solve problems",
         tone: "Warm, direct, and brief",
       });
     } finally {
