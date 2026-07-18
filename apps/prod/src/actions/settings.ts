@@ -109,6 +109,7 @@ export function createGuildSetupSettingsConsumer(
       {
         id: "setup",
         label: "Setup",
+        description: "Choose the channel Prod uses for support.",
         authorize,
         fields: [
           {
@@ -153,6 +154,7 @@ export function createGuildSetupSettingsConsumer(
       {
         id: "identity",
         label: "Identity",
+        description: "Configure Prod's personality and knowledge.",
         authorize,
         subcategories: [
           {

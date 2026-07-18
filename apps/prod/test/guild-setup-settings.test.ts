@@ -246,6 +246,7 @@ describe("guild setup settings integration", () => {
     );
     await runtime.handleInteraction(setupCategory as unknown as Interaction);
     const setupPage = JSON.stringify(setupCategory.editReply.mock.calls[0]?.[0]);
+    expect(setupPage).toContain("Choose the channel Prod uses for support.");
     expect(setupPage).toContain("Support channel");
     expect(setupPage).not.toContain("Choose a settings page");
     expect(setupPage).not.toContain("**Current:**");
@@ -264,6 +265,9 @@ describe("guild setup settings integration", () => {
     await runtime.handleInteraction(identityCategory as unknown as Interaction);
     const identityPage = JSON.stringify(
       identityCategory.editReply.mock.calls[0]?.[0],
+    );
+    expect(identityPage).toContain(
+      "Configure Prod's personality and knowledge.",
     );
     expect(identityPage).toContain("Personality");
     expect(identityPage).toContain("Knowledge base");
