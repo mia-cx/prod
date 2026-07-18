@@ -2,6 +2,7 @@ import {
   ApplicationCommandOptionType,
   ApplicationCommandType,
   ChannelType,
+  Collection,
   MessageFlags,
   RESTJSONErrorCodes,
   type ChatInputCommandInteraction,
@@ -282,16 +283,19 @@ describe("Prod action runtime", () => {
         encodeSettingsCustomId({
           action: "category",
           categoryId: "setup",
-          subcategoryId: "hub",
+          subcategoryId: "setup",
           page: 0,
         }),
       ),
     ).toMatchObject({
       min_values: 1,
       max_values: 1,
-      options: [expect.objectContaining({ value: "setup" })],
+      options: expect.arrayContaining([
+        expect.objectContaining({ value: "setup" }),
+        expect.objectContaining({ value: "identity" }),
+      ]),
     });
-    expect(JSON.stringify(payload)).not.toContain("Support hub channel");
+    expect(JSON.stringify(payload)).not.toContain("Support channel");
     expect(JSON.stringify(payload)).not.toContain('"default":true');
   });
 
@@ -300,13 +304,13 @@ describe("Prod action runtime", () => {
       createLogger({ level: "fatal" }),
       runtimeOptions,
     );
-    const interaction = settingsButton(true);
+    const interaction = settingsChannelSelect(true);
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
     expect(interaction.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
-      "Hub information message",
+      "Support channel",
     );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
@@ -325,15 +329,15 @@ describe("Prod action runtime", () => {
       "Prod settings",
     );
 
-    const mutation = settingsButton(false);
+    const mutation = settingsChannelSelect(false);
     await runtime.handleInteraction(mutation as unknown as Interaction);
     expect(mutation.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(mutation.editReply.mock.calls[0]?.[0])).toContain(
-      "Hub information message",
+      "Support channel",
     );
 
     runtime.setApplicationOperatorUserIds([]);
-    const expiredMutation = settingsButton(false);
+    const expiredMutation = settingsChannelSelect(false);
     await runtime.handleInteraction(expiredMutation as unknown as Interaction);
     expect(expiredMutation.editReply).not.toHaveBeenCalled();
     expect(expiredMutation.followUp).toHaveBeenCalledWith(
@@ -365,7 +369,7 @@ describe("Prod action runtime", () => {
       createLogger({ level: "fatal" }),
       runtimeOptions,
     );
-    const interaction = settingsButton(false);
+    const interaction = settingsChannelSelect(false);
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
@@ -989,15 +993,15 @@ const ticketInteraction = (
   };
 };
 
-const settingsButton = (canManageGuild: boolean) => {
+const settingsChannelSelect = (canManageGuild: boolean) => {
   const reply = vi.fn().mockResolvedValue(undefined);
   const update = vi.fn().mockResolvedValue(undefined);
   const interaction: Record<string, unknown> = {
     customId: encodeSettingsCustomId({
-      action: "button",
+      action: "channel-select",
       categoryId: "setup",
-      subcategoryId: "hub",
-      fieldId: "hub-information",
+      subcategoryId: "setup",
+      fieldId: "hub-channel",
       page: 0,
     }),
     guildId: "guild-1",
@@ -1006,10 +1010,21 @@ const settingsButton = (canManageGuild: boolean) => {
     memberPermissions: { has: () => canManageGuild },
     deferred: false,
     replied: false,
-    isButton: () => true,
+    values: ["123456789012345678"],
+    channels: new Collection([
+      [
+        "123456789012345678",
+        {
+          id: "123456789012345678",
+          name: "support",
+          type: ChannelType.GuildText,
+        },
+      ],
+    ]),
+    isButton: () => false,
     isStringSelectMenu: () => false,
     isMentionableSelectMenu: () => false,
-    isChannelSelectMenu: () => false,
+    isChannelSelectMenu: () => true,
     isModalSubmit: () => false,
     reply,
     followUp: vi.fn().mockResolvedValue(undefined),

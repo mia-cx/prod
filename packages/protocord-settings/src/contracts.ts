@@ -211,7 +211,8 @@ export type SettingsCategory<Context> = Readonly<{
   label: string;
   description?: string;
   authorize: SettingsAuthorization<Context>;
-  subcategories: readonly SettingsSubcategory<Context>[];
+  fields?: readonly SettingsField<Context>[];
+  subcategories?: readonly SettingsSubcategory<Context>[];
 }>;
 
 export type SettingsDefinition<Context> = Readonly<{

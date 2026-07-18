@@ -109,117 +109,65 @@ export function createGuildSetupSettingsConsumer(
       {
         id: "setup",
         label: "Setup",
-        description:
-          "Configure this server's private support hub and assistant.",
+        authorize,
+        fields: [
+          {
+            kind: "channel-select",
+            id: "hub-channel",
+            label: "Support channel",
+            load: async (context) => {
+              const state = await setup.get(requireGuild(context));
+              return {
+                channelTypes: [ChannelType.GuildText],
+                minValues: 1,
+                maxValues: 1,
+                ...(state.hubChannelId === undefined
+                  ? {}
+                  : { defaultChannelIds: [state.hubChannelId] }),
+              };
+            },
+            validate: async (values, context) => {
+              const selected = values[0];
+              if (selected === undefined) {
+                return [issue("Select one support channel.")];
+              }
+              const result = await setup.validateHub(
+                requireGuild(context),
+                selected.id,
+              );
+              return result.valid ? [] : result.issues.map(issue);
+            },
+            mutate: async (values, context) => {
+              const selected = values[0];
+              if (selected === undefined) {
+                return invalid([issue("Select one support channel.")]);
+              }
+              const guild = requireGuild(context);
+              const result = await setup.configureHub(guild, selected.id);
+              if (!result.valid) return invalid(result.issues.map(issue));
+              return { status: "success" as const };
+            },
+          },
+        ],
+      },
+      {
+        id: "identity",
+        label: "Identity",
         authorize,
         subcategories: [
           {
-            id: "hub",
-            label: "Support hub",
-            description:
-              "Choose the locked text channel that owns private support threads.",
-            fields: [
-              {
-                kind: "channel-select",
-                id: "hub-channel",
-                label: "Support hub channel",
-                description:
-                  "Prod validates its effective permissions before applying the empty-hub privacy boundary.",
-                load: async (context) => {
-                  const state = await setup.get(requireGuild(context));
-                  return {
-                    value:
-                      state.hubChannelId === undefined
-                        ? "Not configured"
-                        : `<#${state.hubChannelId}>`,
-                    channelTypes: [ChannelType.GuildText],
-                    minValues: 1,
-                    maxValues: 1,
-                    ...(state.hubChannelId === undefined
-                      ? {}
-                      : { defaultChannelIds: [state.hubChannelId] }),
-                  };
-                },
-                validate: async (values, context) => {
-                  const selected = values[0];
-                  if (selected === undefined) {
-                    return [issue("Select one support hub text channel.")];
-                  }
-                  const result = await setup.validateHub(
-                    requireGuild(context),
-                    selected.id,
-                  );
-                  return result.valid ? [] : result.issues.map(issue);
-                },
-                mutate: async (values, context) => {
-                  const selected = values[0];
-                  if (selected === undefined) {
-                    return invalid([
-                      issue("Select one support hub text channel."),
-                    ]);
-                  }
-                  const guild = requireGuild(context);
-                  const result = await setup.configureHub(guild, selected.id);
-                  if (!result.valid) return invalid(result.issues.map(issue));
-                  return { status: "success" as const };
-                },
-              },
-              {
-                kind: "button",
-                id: "hub-information",
-                label: "Hub information message",
-                description:
-                  "Post the support instructions once, or refresh the existing bot-managed message.",
-                load: async (context) => {
-                  const state = await setup.get(requireGuild(context));
-                  return {
-                    value:
-                      state.hubInformationMessageId === undefined
-                        ? "Not posted"
-                        : `[Open message](https://discord.com/channels/${state.guildId}/${state.hubChannelId!}/${state.hubInformationMessageId})`,
-                    buttonLabel:
-                      state.hubInformationMessageId === undefined
-                        ? "Post information"
-                        : "Refresh information",
-                    disabled: state.hubChannelId === undefined,
-                  };
-                },
-                mutate: async (context) => {
-                  const guild = requireGuild(context);
-                  const configured =
-                    await setup.refreshInformationMessage(guild);
-                  if (!configured.valid) {
-                    return invalid(configured.issues.map(issue));
-                  }
-                  return { status: "success" as const };
-                },
-              },
-              {
-                kind: "display",
-                id: "privacy",
-                label: "Empty-hub privacy",
-                load: () => ({
-                  value:
-                    "Reporters cannot send hub messages, send in threads, or create public/private threads. Ticket provisioning grants private-thread participation per reporter.",
-                }),
-              },
-            ],
-          },
-          {
-            id: "assistant",
-            label: "Assistant",
-            description:
-              "Configure the identity and tone used in support messages.",
+            id: "personality",
+            label: "Personality",
             fields: [
               {
                 kind: "modal",
                 id: "assistant-identity",
-                label: "Assistant identity",
-                title: "Edit assistant identity",
+                label: "Name",
+                title: "Edit name",
                 inputs: [
                   {
                     id: "identity",
-                    label: "Display identity",
+                    label: "Name",
                     placeholder: "Prod",
                     minLength: 2,
                     maxLength: 32,
@@ -253,12 +201,12 @@ export function createGuildSetupSettingsConsumer(
               {
                 kind: "modal",
                 id: "assistant-tone",
-                label: "Assistant tone",
-                title: "Edit assistant tone",
+                label: "Style prompt",
+                title: "Edit style prompt",
                 inputs: [
                   {
                     id: "tone",
-                    label: "Tone instruction",
+                    label: "Style prompt",
                     placeholder: "friendly, patient, and concise",
                     minLength: 3,
                     maxLength: 500,
@@ -286,6 +234,11 @@ export function createGuildSetupSettingsConsumer(
                 },
               },
             ],
+          },
+          {
+            id: "knowledge-base",
+            label: "Knowledge base",
+            fields: [],
           },
         ],
       },

@@ -162,6 +162,52 @@ describe("Components v2 settings rendering", () => {
     });
   });
 
+  it("renders direct category fields without redundant navigation or select state text", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Direct settings",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "string-select",
+              id: "mode",
+              label: "Mode",
+              load: () => ({
+                value: "Friendly",
+                selectedValues: ["friendly"],
+                options: [
+                  { label: "Friendly", value: "friendly" },
+                  { label: "Direct", value: "direct" },
+                ],
+              }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const payload = JSON.stringify(view.components);
+
+    expect(view.components).toHaveLength(2);
+    expect(view.location).toEqual({
+      categoryId: "setup",
+      subcategoryId: "setup",
+      page: 0,
+      pageCount: 1,
+    });
+    expect(payload).not.toContain("Choose a settings page");
+    expect(payload).not.toContain("**Current:** Friendly");
+    expect(payload).toContain('"value":"friendly","default":true');
+  });
+
   it("falls back to field labels for empty dynamic button labels", async () => {
     const renderer = createSettingsRenderer({
       title: "Button labels",
@@ -350,7 +396,7 @@ describe("Components v2 settings rendering", () => {
   it("enforces dynamic select-option limits", async () => {
     const value = definition();
     const setup = value.categories[0]!;
-    const general = setup.subcategories[0]!;
+    const general = setup.subcategories![0]!;
     const oversized: SettingsDefinition<Context> = {
       ...value,
       categories: [
@@ -390,7 +436,7 @@ describe("Components v2 settings rendering", () => {
   it("rejects select payloads that Discord would reject", async () => {
     const value = definition();
     const setup = value.categories[0]!;
-    const general = setup.subcategories[0]!;
+    const general = setup.subcategories![0]!;
     const withField = (
       field: SettingsField<Context>,
     ): SettingsDefinition<Context> => ({
@@ -446,7 +492,7 @@ describe("Components v2 settings rendering", () => {
   it("omits semantically empty defaults for an optional select", async () => {
     const value = definition();
     const setup = value.categories[0]!;
-    const general = setup.subcategories[0]!;
+    const general = setup.subcategories![0]!;
     const renderer = createSettingsRenderer({
       ...value,
       categories: [

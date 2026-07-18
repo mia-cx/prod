@@ -64,21 +64,33 @@ export function validateSettingsDefinition<Context>(
       category.description,
       4_000,
     );
-    if (category.subcategories.length === 0) {
+    const hasFields = category.fields !== undefined;
+    const hasSubcategories = category.subcategories !== undefined;
+    if (hasFields === hasSubcategories) {
+      fail(
+        `category ${category.id} must define either direct fields or subcategories`,
+      );
+    }
+    if (hasFields) {
+      validateFields(category.fields!, `category ${category.id}`);
+      continue;
+    }
+    const subcategories = category.subcategories!;
+    if (subcategories.length === 0) {
       fail(`category ${category.id} must define at least one subcategory`);
     }
     if (
-      category.subcategories.length > SETTINGS_LIMITS.subcategoriesPerCategory
+      subcategories.length > SETTINGS_LIMITS.subcategoriesPerCategory
     ) {
       fail(
         `category ${category.id} may define at most ${SETTINGS_LIMITS.subcategoriesPerCategory} subcategories`,
       );
     }
     assertUnique(
-      category.subcategories.map(({ id }) => id),
+      subcategories.map(({ id }) => id),
       `subcategory in category ${category.id}`,
     );
-    for (const subcategory of category.subcategories) {
+    for (const subcategory of subcategories) {
       assertStableId("subcategory", subcategory.id);
       assertText(
         `subcategory ${subcategory.id} label`,
@@ -91,21 +103,26 @@ export function validateSettingsDefinition<Context>(
         subcategory.description,
         4_000,
       );
-      if (
-        subcategory.fields.length > SETTINGS_LIMITS.fieldsPerSubcategory
-      ) {
-        fail(
-          `subcategory ${subcategory.id} may define at most ${SETTINGS_LIMITS.fieldsPerSubcategory} fields`,
-        );
-      }
-      assertUnique(
-        subcategory.fields.map(({ id }) => id),
-        `field in subcategory ${subcategory.id}`,
-      );
-      for (const field of subcategory.fields) {
-        validateField(field, subcategory.id);
-      }
+      validateFields(subcategory.fields, `subcategory ${subcategory.id}`);
     }
+  }
+}
+
+function validateFields<Context>(
+  fields: readonly SettingsField<Context>[],
+  owner: string,
+): void {
+  if (fields.length > SETTINGS_LIMITS.fieldsPerSubcategory) {
+    fail(
+      `${owner} may define at most ${SETTINGS_LIMITS.fieldsPerSubcategory} fields`,
+    );
+  }
+  assertUnique(
+    fields.map(({ id }) => id),
+    `field in ${owner}`,
+  );
+  for (const field of fields) {
+    validateField(field, owner);
   }
 }
 

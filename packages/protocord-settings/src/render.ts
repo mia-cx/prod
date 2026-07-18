@@ -26,6 +26,10 @@ import type {
   SettingsStringSelectField,
   SettingsSubcategory,
 } from "./contracts.js";
+import {
+  categoryPages,
+  isDirectSettingsCategory,
+} from "./category-layout.js";
 import { SETTINGS_LIMITS, validateSettingsDefinition } from "./definition.js";
 import { encodeSettingsCustomId } from "./routes.js";
 import {
@@ -109,7 +113,7 @@ async function renderSettingsView<Context>(
   }
 
   const routeCategory = authorizedCategories[0]!;
-  const routeSubcategory = routeCategory.subcategories[0]!;
+  const routeSubcategory = categoryPages(routeCategory)[0]!;
   const homeChildren: APIComponentInContainer[] = [
     textDisplay(`# ${definition.title}\n## Settings`),
     categoryNavigation(
@@ -146,11 +150,16 @@ async function renderSettingsView<Context>(
     );
   }
 
+  const directCategory = isDirectSettingsCategory(category);
   const categoryChildren: APIComponentInContainer[] = [
     textDisplay(nodeHeading(category.label, category.description)),
-    subcategoryNavigation(category, request.subcategoryId),
   ];
-  if (request.subcategoryId === undefined) {
+  if (!directCategory) {
+    categoryChildren.push(
+      subcategoryNavigation(category, request.subcategoryId),
+    );
+  }
+  if (!directCategory && request.subcategoryId === undefined) {
     const components = [
       container("home", homeChildren, definition.accentColor),
       container("category", categoryChildren, definition.accentColor),
@@ -162,7 +171,10 @@ async function renderSettingsView<Context>(
     };
   }
 
-  const subcategory = selectSubcategory(category, request.subcategoryId);
+  const subcategory = selectSubcategory(
+    category,
+    request.subcategoryId ?? category.id,
+  );
   const fieldPages = paginateFields(subcategory.fields, fixedComponentCount());
   const requestedPage = request.page ?? 0;
   const fields = fieldPages[requestedPage];
@@ -193,8 +205,16 @@ async function renderSettingsView<Context>(
   }
   const components: APIMessageTopLevelComponent[] = [
     container("home", homeChildren, definition.accentColor),
-    container("category", categoryChildren, definition.accentColor),
-    container("subcategory", subcategoryChildren, definition.accentColor),
+    ...(directCategory
+      ? [container("category", subcategoryChildren, definition.accentColor)]
+      : [
+          container("category", categoryChildren, definition.accentColor),
+          container(
+            "subcategory",
+            subcategoryChildren,
+            definition.accentColor,
+          ),
+        ]),
   ];
   constrainTextDisplays(components);
   return {
@@ -228,7 +248,9 @@ function selectSubcategory<Context>(
   category: SettingsCategory<Context>,
   requestedId: string,
 ): SettingsSubcategory<Context> {
-  const subcategory = category.subcategories.find(({ id }) => id === requestedId);
+  const subcategory = categoryPages(category).find(
+    ({ id }) => id === requestedId,
+  );
   if (subcategory === undefined) {
     throw stale("subcategory", requestedId);
   }
@@ -519,7 +541,8 @@ function subcategoryNavigation<Context>(
   category: SettingsCategory<Context>,
   selectedSubcategoryId: string | undefined,
 ): APIActionRowComponent<APIStringSelectComponent> {
-  const routeSubcategory = category.subcategories[0]!;
+  const subcategories = categoryPages(category);
+  const routeSubcategory = subcategories[0]!;
   return actionRow({
     type: ComponentType.StringSelect,
     custom_id: encodeSettingsCustomId({
@@ -531,7 +554,7 @@ function subcategoryNavigation<Context>(
     placeholder: "Choose a settings page",
     min_values: 1,
     max_values: 1,
-    options: category.subcategories.map((subcategory) => ({
+    options: subcategories.map((subcategory) => ({
       label: subcategory.label,
       value: subcategory.id,
       ...(subcategory.description === undefined
@@ -705,9 +728,15 @@ function fieldText<Context>(
   field: SettingsField<Context>,
   value: string | undefined,
 ): string {
+  const stateIsRenderedByControl =
+    field.kind === "string-select" ||
+    field.kind === "mentionable-select" ||
+    field.kind === "channel-select";
   return [
     `### ${field.label}`,
-    value === undefined ? undefined : `**Current:** ${value}`,
+    value === undefined || stateIsRenderedByControl
+      ? undefined
+      : `**Current:** ${value}`,
     field.description,
   ]
     .filter((part) => part !== undefined)

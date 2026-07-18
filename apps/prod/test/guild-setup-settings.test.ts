@@ -137,7 +137,7 @@ const command = (
   };
 };
 
-type ComponentKind = "button" | "channel" | "modal";
+type ComponentKind = "button" | "channel" | "modal" | "string";
 
 const component = (
   kind: ComponentKind,
@@ -146,6 +146,7 @@ const component = (
     userId?: string;
     allowed?: readonly PermissionResolvable[];
     modalValue?: string;
+    selectedValues?: readonly string[];
   }> = {},
 ) => {
   const interaction: Record<string, unknown> = {
@@ -163,7 +164,12 @@ const component = (
     deferred: false,
     replied: false,
     message: { id: "123456789012345699" },
-    values: kind === "channel" ? [hubChannelId] : [],
+    values:
+      kind === "channel"
+        ? [hubChannelId]
+        : kind === "string"
+          ? (options.selectedValues ?? [])
+          : [],
     channels: new Collection([
       [
         hubChannelId,
@@ -183,7 +189,7 @@ const component = (
     isMessageContextMenuCommand: () => false,
     isUserContextMenuCommand: () => false,
     isButton: () => kind === "button",
-    isStringSelectMenu: () => false,
+    isStringSelectMenu: () => kind === "string",
     isMentionableSelectMenu: () => false,
     isChannelSelectMenu: () => kind === "channel",
     isModalSubmit: () => kind === "modal",
@@ -205,28 +211,82 @@ const component = (
 const hubRoute = {
   action: "channel-select",
   categoryId: "setup",
-  subcategoryId: "hub",
+  subcategoryId: "setup",
   fieldId: "hub-channel",
-  page: 0,
-} as const;
-
-const informationRoute = {
-  action: "button",
-  categoryId: "setup",
-  subcategoryId: "hub",
-  fieldId: "hub-information",
   page: 0,
 } as const;
 
 const modalRoute = (fieldId: "assistant-identity" | "assistant-tone") => ({
   action: "modal-submit" as const,
-  categoryId: "setup",
-  subcategoryId: "assistant",
+  categoryId: "identity",
+  subcategoryId: "personality",
   fieldId,
   page: 0,
 });
 
 describe("guild setup settings integration", () => {
+  it("renders direct Setup fields and nested Identity pages", async () => {
+    const { runtime } = await setup();
+    const opened = command(ownerId);
+    await runtime.handleInteraction(opened as unknown as Interaction);
+    const home = JSON.stringify(opened.editReply.mock.calls[0]?.[0]);
+    expect(home).toContain("Setup");
+    expect(home).toContain("Identity");
+    expect(home).not.toContain("Empty-hub privacy");
+
+    const setupCategory = component(
+      "string",
+      {
+        action: "category",
+        categoryId: "setup",
+        subcategoryId: "setup",
+        page: 0,
+      },
+      { selectedValues: ["setup"] },
+    );
+    await runtime.handleInteraction(setupCategory as unknown as Interaction);
+    const setupPage = JSON.stringify(setupCategory.editReply.mock.calls[0]?.[0]);
+    expect(setupPage).toContain("Support channel");
+    expect(setupPage).not.toContain("Choose a settings page");
+    expect(setupPage).not.toContain("**Current:**");
+    expect(setupPage).not.toContain("Empty-hub privacy");
+
+    const identityCategory = component(
+      "string",
+      {
+        action: "category",
+        categoryId: "setup",
+        subcategoryId: "setup",
+        page: 0,
+      },
+      { selectedValues: ["identity"] },
+    );
+    await runtime.handleInteraction(identityCategory as unknown as Interaction);
+    const identityPage = JSON.stringify(
+      identityCategory.editReply.mock.calls[0]?.[0],
+    );
+    expect(identityPage).toContain("Personality");
+    expect(identityPage).toContain("Knowledge base");
+    expect(identityPage).not.toContain("Style prompt");
+
+    const personality = component(
+      "string",
+      {
+        action: "subcategory",
+        categoryId: "identity",
+        subcategoryId: "personality",
+        page: 0,
+      },
+      { selectedValues: ["personality"] },
+    );
+    await runtime.handleInteraction(personality as unknown as Interaction);
+    const personalityPage = JSON.stringify(
+      personality.editReply.mock.calls[0]?.[0],
+    );
+    expect(personalityPage).toContain("Name");
+    expect(personalityPage).toContain("Style prompt");
+  });
+
   it("recovers a promoted hub transition before resuming the replacement hub", async () => {
     const { runtime, store, supportHub } = await setup();
     await store.configureHub(guildId, hubChannelId, ownership(hubChannelId));
@@ -335,32 +395,6 @@ describe("guild setup settings integration", () => {
     expect((await store.get(guildId)).hubChannelId).toBeUndefined();
     expect(JSON.stringify(select.editReply.mock.calls[0]?.[0])).toContain(
       "Prod is missing required permissions",
-    );
-  });
-
-  it("persists one information message ID across repeated refreshes", async () => {
-    const upsertInformationMessage = vi.fn(async () => informationMessageId);
-    const { runtime, store } = await setup({ upsertInformationMessage });
-    await store.configureHub(guildId, hubChannelId, ownership());
-
-    const first = component("button", informationRoute);
-    await runtime.handleInteraction(first as unknown as Interaction);
-    const second = component("button", informationRoute);
-    await runtime.handleInteraction(second as unknown as Interaction);
-
-    expect(upsertInformationMessage).toHaveBeenNthCalledWith(1, {
-      guild,
-      channelId: hubChannelId,
-      assistantIdentity: "Prod",
-    });
-    expect(upsertInformationMessage).toHaveBeenNthCalledWith(2, {
-      guild,
-      channelId: hubChannelId,
-      assistantIdentity: "Prod",
-      messageId: informationMessageId,
-    });
-    expect((await store.get(guildId)).hubInformationMessageId).toBe(
-      informationMessageId,
     );
   });
 

@@ -30,6 +30,7 @@ import type {
   SettingsSubcategory,
   SettingsValidationIssue,
 } from "./contracts.js";
+import { categoryPages } from "./category-layout.js";
 import {
   createSettingsRenderer,
   SettingsViewError,
@@ -726,9 +727,10 @@ function resolveRoute<Context>(
   route: SettingsRoute,
 ): ResolvedRoute<Context> | undefined {
   const category = definition.categories.find(({ id }) => id === route.categoryId);
-  const subcategory = category?.subcategories.find(
-    ({ id }) => id === route.subcategoryId,
-  );
+  const subcategory =
+    category === undefined
+      ? undefined
+      : categoryPages(category).find(({ id }) => id === route.subcategoryId);
   if (category === undefined || subcategory === undefined) {
     return undefined;
   }
