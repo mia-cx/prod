@@ -1,6 +1,7 @@
 import {
   ButtonStyle,
   ComponentType,
+  SeparatorSpacingSize,
   SelectMenuDefaultValueType,
   type APIActionRowComponent,
   type APIButtonComponentWithCustomId,
@@ -11,6 +12,7 @@ import {
   type APIMentionableSelectComponent,
   type APIMessageTopLevelComponent,
   type APISectionComponent,
+  type APISeparatorComponent,
   type APIStringSelectComponent,
   type APITextDisplayComponent,
 } from "discord.js";
@@ -115,7 +117,7 @@ async function renderSettingsView<Context>(
   const routeCategory = authorizedCategories[0]!;
   const routeSubcategory = categoryPages(routeCategory)[0]!;
   const homeChildren: APIComponentInContainer[] = [
-    textDisplay(`# ${definition.title}\n## Settings`),
+    textDisplay(`# ${definition.title}\nChoose a category`),
     categoryNavigation(
       authorizedCategories,
       request.categoryId,
@@ -153,6 +155,7 @@ async function renderSettingsView<Context>(
   const directCategory = isDirectSettingsCategory(category);
   const categoryChildren: APIComponentInContainer[] = [
     textDisplay(nodeHeading(category.label, category.description)),
+    separator(),
   ];
   if (!directCategory) {
     categoryChildren.push(
@@ -188,30 +191,30 @@ async function renderSettingsView<Context>(
     page: requestedPage,
     pageCount: fieldPages.length,
   };
-  const subcategoryChildren: APIComponentInContainer[] = [
-    textDisplay(nodeHeading(subcategory.label, subcategory.description)),
-  ];
+  const fieldChildren: APIComponentInContainer[] = directCategory
+    ? categoryChildren
+    : [textDisplay(nodeHeading(subcategory.label, subcategory.description))];
   if (request.notice !== undefined) {
     const marker = request.notice.kind === "success" ? "✅" : "⚠️";
-    subcategoryChildren.push(
+    fieldChildren.push(
       textDisplay(truncate(`${marker} ${request.notice.message}`, 4_000)),
     );
   }
   for (const field of fields) {
-    subcategoryChildren.push(...(await renderField(field, location, context)));
+    fieldChildren.push(...(await renderField(field, location, context)));
   }
   if (fieldPages.length > 1) {
-    subcategoryChildren.push(pageNavigation(location));
+    fieldChildren.push(pageNavigation(location));
   }
   const components: APIMessageTopLevelComponent[] = [
     container("home", homeChildren, definition.accentColor),
     ...(directCategory
-      ? [container("category", subcategoryChildren, definition.accentColor)]
+      ? [container("category", fieldChildren, definition.accentColor)]
       : [
           container("category", categoryChildren, definition.accentColor),
           container(
             "subcategory",
-            subcategoryChildren,
+            fieldChildren,
             definition.accentColor,
           ),
         ]),
@@ -661,6 +664,14 @@ function textDisplay(content: string): APITextDisplayComponent {
   return {
     type: ComponentType.TextDisplay,
     content: truncate(content, SETTINGS_LIMITS.textDisplayCharacters),
+  };
+}
+
+function separator(): APISeparatorComponent {
+  return {
+    type: ComponentType.Separator,
+    divider: true,
+    spacing: SeparatorSpacingSize.Small,
   };
 }
 

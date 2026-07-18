@@ -103,7 +103,7 @@ export function createGuildSetupSettingsConsumer(
   };
 
   const definition: SettingsDefinition<GuildSetupSettingsContext> = {
-    title: "Prod settings",
+    title: "Settings",
     accentColor: 0x5865f2,
     categories: [
       {

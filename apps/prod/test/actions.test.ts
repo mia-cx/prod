@@ -274,7 +274,7 @@ describe("Prod action runtime", () => {
       }),
     );
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
-      "Prod settings",
+      "Choose a category",
     );
     const payload = interaction.editReply.mock.calls[0]?.[0];
     expect(
@@ -326,7 +326,7 @@ describe("Prod action runtime", () => {
     await runtime.handleInteraction(open as unknown as Interaction);
     expect(open.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(open.editReply.mock.calls[0]?.[0])).toContain(
-      "Prod settings",
+      "Choose a category",
     );
 
     const mutation = settingsChannelSelect(false);

@@ -118,6 +118,7 @@ describe("Components v2 settings rendering", () => {
     expect(homeView.components).toHaveLength(1);
     expect(homeView.location).toEqual({ page: 0, pageCount: 0 });
     expect(JSON.stringify(home)).toContain("Synthetic settings");
+    expect(JSON.stringify(home)).toContain("Choose a category");
     expect(JSON.stringify(home)).toContain("Labels");
     expect(JSON.stringify(home)).not.toContain("Private");
     expect(JSON.stringify(home)).not.toContain("Refresh");
@@ -136,6 +137,9 @@ describe("Components v2 settings rendering", () => {
     });
     expect(JSON.stringify(category)).toContain("Setup");
     expect(JSON.stringify(category)).toContain("Large page");
+    expect(JSON.stringify(category)).toContain(
+      `\"type\":${String(ComponentType.Separator)}`,
+    );
     expect(JSON.stringify(category)).not.toContain("Refresh");
     expect(JSON.stringify(category)).not.toContain('"default":true');
 
@@ -194,6 +198,7 @@ describe("Components v2 settings rendering", () => {
       { categoryId: "setup" },
       { userId: "admin" },
     );
+    const [, category] = view.components;
     const payload = JSON.stringify(view.components);
 
     expect(view.components).toHaveLength(2);
@@ -206,6 +211,14 @@ describe("Components v2 settings rendering", () => {
     expect(payload).not.toContain("Choose a settings page");
     expect(payload).not.toContain("**Current:** Friendly");
     expect(payload).toContain('"value":"friendly","default":true');
+    expect(category).toMatchObject({
+      components: [
+        { type: ComponentType.TextDisplay },
+        { type: ComponentType.Separator, divider: true },
+        expect.anything(),
+        expect.anything(),
+      ],
+    });
   });
 
   it("falls back to field labels for empty dynamic button labels", async () => {
