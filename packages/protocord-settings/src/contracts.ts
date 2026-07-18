@@ -176,10 +176,15 @@ export type SettingsModalView = SettingsFieldView &
     values?: Readonly<Record<string, string>>;
   }>;
 
+export type SettingsModalPresentation =
+  | Readonly<{ kind: "inline" }>
+  | Readonly<{ kind: "preview"; maxLength: number }>;
+
 export type SettingsModalField<Context> = SettingsFieldBase<"modal"> &
   Readonly<{
     title: string;
     inputs: readonly SettingsModalInput[];
+    presentation?: SettingsModalPresentation;
     load(context: Context): Awaitable<SettingsModalView>;
     validate?(
       values: Readonly<Record<string, string>>,

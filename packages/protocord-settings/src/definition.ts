@@ -144,6 +144,14 @@ function validateModalField<Context>(
 ): void {
   assertText(`modal ${field.id} title`, field.title, 1, 45);
   if (
+    field.presentation?.kind === "preview" &&
+    (!Number.isInteger(field.presentation.maxLength) ||
+      field.presentation.maxLength < 1 ||
+      field.presentation.maxLength > 4_000)
+  ) {
+    fail(`modal field ${field.id} preview maxLength must be between 1 and 4000`);
+  }
+  if (
     field.inputs.length === 0 ||
     field.inputs.length > SETTINGS_LIMITS.modalInputs
   ) {

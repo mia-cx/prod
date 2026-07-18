@@ -1,6 +1,7 @@
 import {
   ChannelType,
   PermissionFlagsBits,
+  TextInputStyle,
   type ChatInputCommandInteraction,
   type Guild,
   type Interaction,
@@ -167,6 +168,7 @@ export function createGuildSetupSettingsConsumer(
                 id: "assistant-identity",
                 label: "Name",
                 title: "Edit name",
+                presentation: { kind: "inline" },
                 inputs: [
                   {
                     id: "identity",
@@ -206,10 +208,12 @@ export function createGuildSetupSettingsConsumer(
                 id: "assistant-tone",
                 label: "Style prompt",
                 title: "Edit style prompt",
+                presentation: { kind: "preview", maxLength: 300 },
                 inputs: [
                   {
                     id: "tone",
                     label: "Style prompt",
+                    style: TextInputStyle.Paragraph,
                     placeholder: "friendly, patient, and concise",
                     minLength: 3,
                     maxLength: 500,

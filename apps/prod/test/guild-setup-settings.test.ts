@@ -3,6 +3,7 @@ import {
   Collection,
   MessageFlags,
   PermissionFlagsBits,
+  TextInputStyle,
   type Client,
   type Guild,
   type Interaction,
@@ -134,6 +135,7 @@ const command = (
   return interaction as typeof interaction & {
     editReply: ReturnType<typeof vi.fn>;
     followUp: ReturnType<typeof vi.fn>;
+    showModal: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -288,8 +290,30 @@ describe("guild setup settings integration", () => {
     const personalityPage = JSON.stringify(
       personality.editReply.mock.calls[0]?.[0],
     );
-    expect(personalityPage).toContain("Name");
-    expect(personalityPage).toContain("Style prompt");
+    expect(personalityPage).toContain("**Name:** Prod");
+    expect(personalityPage).toContain("**Style prompt**");
+    expect(personalityPage).toContain("friendly, patient, and concise");
+    expect(personalityPage).not.toContain("**Current:**");
+
+    const styleButton = component("button", {
+      action: "modal",
+      categoryId: "identity",
+      subcategoryId: "personality",
+      fieldId: "assistant-tone",
+      page: 0,
+    });
+    await runtime.handleInteraction(styleButton as unknown as Interaction);
+    expect(styleButton.showModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        components: [
+          expect.objectContaining({
+            component: expect.objectContaining({
+              style: TextInputStyle.Paragraph,
+            }),
+          }),
+        ],
+      }),
+    );
   });
 
   it("recovers a promoted hub transition before resuming the replacement hub", async () => {

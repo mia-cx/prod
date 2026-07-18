@@ -313,6 +313,9 @@ function paginateFields<Context>(
 }
 
 function fieldComponentCost<Context>(field: SettingsField<Context>): number {
+  if (field.kind === "modal" && field.presentation?.kind === "preview") {
+    return 2;
+  }
   return ["string-select", "mentionable-select", "channel-select"].includes(
     field.kind,
   )
@@ -358,11 +361,36 @@ function renderModalField<Context>(
   location: ResolvedSettingsLocation,
   view: Awaited<ReturnType<SettingsModalField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
+  const buttonLabel = view.buttonLabel || field.label;
+  const customId = encodeFieldRoute("modal", location, field.id);
+  if (field.presentation?.kind === "inline") {
+    return [
+      buttonSection(
+        `**${field.label}:**${view.value === undefined ? "" : ` ${view.value}`}`,
+        buttonLabel,
+        customId,
+        ButtonStyle.Secondary,
+        view.disabled,
+      ),
+    ];
+  }
+  if (field.presentation?.kind === "preview") {
+    return [
+      buttonSection(
+        `**${field.label}**`,
+        buttonLabel,
+        customId,
+        ButtonStyle.Secondary,
+        view.disabled,
+      ),
+      textDisplay(truncate(view.value ?? "", field.presentation.maxLength)),
+    ];
+  }
   return [
     buttonSection(
       fieldText(field, view.value),
-      view.buttonLabel || field.label,
-      encodeFieldRoute("modal", location, field.id),
+      buttonLabel,
+      customId,
       ButtonStyle.Secondary,
       view.disabled,
     ),

@@ -267,6 +267,53 @@ describe("Components v2 settings rendering", () => {
     expect(payload).toContain('"label":"Form fallback"');
   });
 
+  it("renders inline modal values and separately truncated previews", async () => {
+    const longPreview = "x".repeat(301);
+    const renderer = createSettingsRenderer<Context>({
+      title: "Modal presentations",
+      categories: [
+        {
+          id: "identity",
+          label: "Identity",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "modal",
+              id: "name",
+              label: "Name",
+              title: "Edit name",
+              presentation: { kind: "inline" },
+              inputs: [{ id: "name", label: "Name" }],
+              load: () => ({ value: "Prod" }),
+              mutate: () => undefined,
+            },
+            {
+              kind: "modal",
+              id: "style",
+              label: "Style prompt",
+              title: "Edit style prompt",
+              presentation: { kind: "preview", maxLength: 300 },
+              inputs: [{ id: "style", label: "Style prompt" }],
+              load: () => ({ value: longPreview }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = await renderer.render(
+      { categoryId: "identity" },
+      { userId: "admin" },
+    );
+    const contents = textDisplayContents(view.components);
+
+    expect(contents).toContain("**Name:** Prod");
+    expect(contents).toContain("**Style prompt**");
+    expect(contents).toContain(`${"x".repeat(299)}…`);
+    expect(contents).not.toContain(longPreview);
+  });
+
   it("paginates fields without exceeding Discord container limits", async () => {
     const renderer = createSettingsRenderer(definition());
 
