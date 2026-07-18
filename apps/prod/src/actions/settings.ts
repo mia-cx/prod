@@ -162,47 +162,8 @@ export function createGuildSetupSettingsConsumer(
           {
             id: "personality",
             label: "Personality",
+            description: "Configure how Prod communicates with users.",
             fields: [
-              {
-                kind: "modal",
-                id: "assistant-identity",
-                label: "Name",
-                title: "Edit name",
-                presentation: { kind: "inline" },
-                inputs: [
-                  {
-                    id: "identity",
-                    label: "Name",
-                    placeholder: "Prod",
-                    minLength: 2,
-                    maxLength: 32,
-                  },
-                ],
-                load: async (context) => {
-                  const value = (await setup.get(requireGuild(context)))
-                    .assistantIdentity;
-                  return {
-                    value,
-                    values: { identity: value },
-                    buttonLabel: "Edit",
-                  };
-                },
-                validate: (values) =>
-                  (values.identity?.trim().length ?? 0) < 2
-                    ? [
-                        {
-                          inputId: "identity",
-                          message: "Use at least two visible characters.",
-                        },
-                      ]
-                    : [],
-                mutate: async (values, context) => {
-                  await setup.setAssistantIdentity(
-                    requireGuild(context),
-                    values.identity!,
-                  );
-                },
-              },
               {
                 kind: "modal",
                 id: "assistant-tone",
@@ -245,6 +206,7 @@ export function createGuildSetupSettingsConsumer(
           {
             id: "knowledge-base",
             label: "Knowledge base",
+            description: "Manage reusable fixes Prod can suggest to users.",
             fields: [],
           },
         ],

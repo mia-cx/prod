@@ -218,11 +218,11 @@ const hubRoute = {
   page: 0,
 } as const;
 
-const modalRoute = (fieldId: "assistant-identity" | "assistant-tone") => ({
+const modalRoute = () => ({
   action: "modal-submit" as const,
   categoryId: "identity",
   subcategoryId: "personality",
-  fieldId,
+  fieldId: "assistant-tone",
   page: 0,
 });
 
@@ -275,7 +275,13 @@ describe("guild setup settings integration", () => {
       "Configure Prod's personality and knowledge.",
     );
     expect(identityPage).toContain("Personality");
+    expect(identityPage).toContain(
+      "Configure how Prod communicates with users.",
+    );
     expect(identityPage).toContain("Knowledge base");
+    expect(identityPage).toContain(
+      "Manage reusable fixes Prod can suggest to users.",
+    );
     expect(identityPage).not.toContain("Style prompt");
 
     const personality = component(
@@ -292,9 +298,13 @@ describe("guild setup settings integration", () => {
     const personalityPage = JSON.stringify(
       personality.editReply.mock.calls[0]?.[0],
     );
-    expect(personalityPage).toContain("**Name:** Prod");
     expect(personalityPage).toContain("**Style prompt**");
     expect(personalityPage).toContain("friendly, patient, and concise");
+    expect(personalityPage).toContain(
+      "Configure how Prod communicates with users.",
+    );
+    expect(personalityPage).not.toContain("assistant-identity");
+    expect(personalityPage).not.toContain("**Name:**");
     expect(personalityPage).not.toContain("**Current:**");
 
     const styleButton = component("button", {
@@ -429,19 +439,11 @@ describe("guild setup settings integration", () => {
     );
   });
 
-  it("persists and rerenders assistant identity and tone", async () => {
+  it("persists and rerenders the style prompt", async () => {
     const { connection, runtime, store } = await setup();
     await store.configureHub(guildId, hubChannelId, ownership());
 
-    const identity = component("modal", modalRoute("assistant-identity"), {
-      modalValue: "  Support Guide  ",
-    });
-    await runtime.handleInteraction(identity as unknown as Interaction);
-    expect(JSON.stringify(identity.editReply.mock.calls[0]?.[0])).toContain(
-      "Support Guide",
-    );
-
-    const tone = component("modal", modalRoute("assistant-tone"), {
+    const tone = component("modal", modalRoute(), {
       modalValue: "  warm, direct, and concise  ",
     });
     await runtime.handleInteraction(tone as unknown as Interaction);
@@ -451,7 +453,7 @@ describe("guild setup settings integration", () => {
 
     const restartedStore = createSqliteGuildSettingsStore(connection.database);
     await expect(restartedStore.get(guildId)).resolves.toMatchObject({
-      assistantIdentity: "Support Guide",
+      assistantIdentity: "Prod",
       tone: "warm, direct, and concise",
     });
   });
