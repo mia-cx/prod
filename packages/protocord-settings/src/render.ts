@@ -744,7 +744,7 @@ function fieldText<Context>(
     field.kind === "mentionable-select" ||
     field.kind === "channel-select";
   return [
-    `### ${field.label}`,
+    `## ${field.label}`,
     value === undefined || stateIsRenderedByControl
       ? undefined
       : `**Current:** ${value}`,

@@ -156,7 +156,7 @@ describe("Components v2 settings rendering", () => {
       });
     }
     expect(JSON.stringify(subcategory)).toContain("General");
-    expect(JSON.stringify(subcategory)).toContain("Refresh");
+    expect(JSON.stringify(subcategory)).toContain("## Refresh");
     expect(JSON.stringify(subcategory)).toContain("Friendly");
     expect(view.location).toEqual({
       categoryId: "setup",

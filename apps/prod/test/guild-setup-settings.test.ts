@@ -246,8 +246,9 @@ describe("guild setup settings integration", () => {
     );
     await runtime.handleInteraction(setupCategory as unknown as Interaction);
     const setupPage = JSON.stringify(setupCategory.editReply.mock.calls[0]?.[0]);
+    expect(setupPage).toContain("Configure basic setup for Prod.");
+    expect(setupPage).toContain("## Support channel");
     expect(setupPage).toContain("Choose where Prod manages support threads.");
-    expect(setupPage).toContain("Support channel");
     expect(setupPage).not.toContain("Choose a settings page");
     expect(setupPage).not.toContain("**Current:**");
     expect(setupPage).not.toContain("Empty-hub privacy");

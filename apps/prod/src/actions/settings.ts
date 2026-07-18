@@ -109,13 +109,14 @@ export function createGuildSetupSettingsConsumer(
       {
         id: "setup",
         label: "Setup",
-        description: "Choose where Prod manages support threads.",
+        description: "Configure basic setup for Prod.",
         authorize,
         fields: [
           {
             kind: "channel-select",
             id: "hub-channel",
             label: "Support channel",
+            description: "Choose where Prod manages support threads.",
             load: async (context) => {
               const state = await setup.get(requireGuild(context));
               return {
