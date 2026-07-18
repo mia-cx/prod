@@ -298,6 +298,45 @@ describe("Discord settings runtime", () => {
     expect(payload).not.toContain("**Category 0**");
   });
 
+  it("navigates paginated subcategory summaries", async () => {
+    const subcategories = Array.from({ length: 11 }, (_, index) => ({
+      id: `page-${String(index)}`,
+      label: `Page ${String(index)}`,
+      description: `Summary ${String(index)}`,
+      fields: [],
+    }));
+    const paginatedRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Many pages",
+        categories: [
+          {
+            id: "category",
+            label: "Category",
+            authorize: () => true,
+            subcategories,
+          },
+        ],
+      },
+    });
+    const next = mockInteraction(
+      "button",
+      encodeSettingsCustomId({
+        action: "subcategory-page",
+        categoryId: "category",
+        subcategoryId: "page-0",
+        page: 1,
+      }),
+    );
+
+    await expect(
+      paginatedRuntime.handle(next.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "viewed" });
+
+    const payload = JSON.stringify(next.editReply.mock.calls[0]?.[0]);
+    expect(payload).toContain("**Page 10:** Summary 10");
+    expect(payload).not.toContain("**Page 0:**");
+  });
+
   it("does not render fields until category and subcategory are selected", async () => {
     const category = mockInteraction("string", route("category"), {
       values: ["setup"],

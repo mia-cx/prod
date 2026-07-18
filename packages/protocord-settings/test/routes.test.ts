@@ -22,6 +22,12 @@ describe("versioned settings routes", () => {
       page: 1,
     },
     {
+      action: "subcategory-page",
+      categoryId: "identity",
+      subcategoryId: "personality",
+      page: 1,
+    },
+    {
       action: "mentionable-select",
       categoryId: "permissions",
       subcategoryId: "presets",

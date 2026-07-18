@@ -7,6 +7,7 @@ import type {
 export const SETTINGS_LIMITS = Object.freeze({
   categories: 25,
   categoriesPerHomePage: 10,
+  subcategoriesPerOverviewPage: 10,
   categorySummaryCharacters: 250,
   subcategoriesPerCategory: 25,
   fieldsPerSubcategory: 100,

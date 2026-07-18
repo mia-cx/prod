@@ -232,8 +232,10 @@ describe("guild setup settings integration", () => {
     const opened = command(ownerId);
     await runtime.handleInteraction(opened as unknown as Interaction);
     const home = JSON.stringify(opened.editReply.mock.calls[0]?.[0]);
-    expect(home).toContain("⚙️ Setup");
-    expect(home).toContain("🪪 Identity");
+    expect(home).toContain("Setup");
+    expect(home).toContain("Identity");
+    expect(home).not.toContain("⚙️");
+    expect(home).not.toContain("🪪");
     expect(home).not.toContain("Empty-hub privacy");
 
     const setupCategory = component(

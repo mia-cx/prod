@@ -63,6 +63,7 @@ export type SettingsViewRequest = Readonly<{
   categoryId?: string;
   subcategoryId?: string;
   homePage?: number;
+  subcategoryPage?: number;
   page?: number;
   notice?: SettingsViewNotice;
 }>;
@@ -129,7 +130,7 @@ async function renderSettingsView<Context>(
     throw stale("category page", String(requestedHomePage));
   }
   const homeChildren: APIComponentInContainer[] = [
-    textDisplay(`# ${definition.title}\nChoose a category`),
+    textDisplay(`# ${definition.title}`),
     textDisplay(categorySummaryList(homeCategories)),
   ];
   if (homePageCount > 1) {
@@ -144,6 +145,7 @@ async function renderSettingsView<Context>(
   }
   homeChildren.push(
     separator(),
+    textDisplay("Choose a category"),
     categoryNavigation(
       authorizedCategories,
       request.categoryId,
@@ -181,12 +183,41 @@ async function renderSettingsView<Context>(
   const directCategory = isDirectSettingsCategory(category);
   const categoryChildren: APIComponentInContainer[] = [
     textDisplay(nodeHeading(category.label, category.description)),
-    separator(),
   ];
   if (!directCategory) {
+    const subcategories = categoryPages(category);
+    const subcategoryPageCount = Math.ceil(
+      subcategories.length / SETTINGS_LIMITS.subcategoriesPerOverviewPage,
+    );
+    const requestedSubcategoryPage = request.subcategoryPage ?? 0;
+    const overviewSubcategories = subcategories.slice(
+      requestedSubcategoryPage * SETTINGS_LIMITS.subcategoriesPerOverviewPage,
+      (requestedSubcategoryPage + 1) *
+        SETTINGS_LIMITS.subcategoriesPerOverviewPage,
+    );
+    if (overviewSubcategories.length === 0) {
+      throw stale("subcategory page", String(requestedSubcategoryPage));
+    }
     categoryChildren.push(
+      textDisplay(subcategorySummaryList(overviewSubcategories)),
+    );
+    if (subcategoryPageCount > 1) {
+      categoryChildren.push(
+        subcategoryPageNavigation(
+          requestedSubcategoryPage,
+          subcategoryPageCount,
+          category.id,
+          subcategories[0]!.id,
+        ),
+      );
+    }
+    categoryChildren.push(
+      separator(),
+      textDisplay("Choose a settings page"),
       subcategoryNavigation(category, request.subcategoryId),
     );
+  } else {
+    categoryChildren.push(separator());
   }
   if (!directCategory && request.subcategoryId === undefined) {
     const components = [
@@ -684,6 +715,43 @@ function homePageNavigation(
   );
 }
 
+function subcategoryPageNavigation(
+  page: number,
+  pageCount: number,
+  categoryId: string,
+  routeSubcategoryId: string,
+): APIActionRowComponent<APIButtonComponentWithCustomId> {
+  const button = (
+    label: string,
+    targetPage: number,
+    disabled: boolean,
+  ): APIButtonComponentWithCustomId => ({
+    type: ComponentType.Button,
+    style: ButtonStyle.Secondary,
+    label,
+    custom_id: encodeSettingsCustomId({
+      action: "subcategory-page",
+      categoryId,
+      subcategoryId: routeSubcategoryId,
+      page: targetPage,
+    }),
+    disabled,
+  });
+  return actionRow(
+    button("Previous", page === 0 ? 0 : page - 1, page === 0),
+    button(
+      `Page ${String(page + 1)} of ${String(pageCount)}`,
+      page,
+      true,
+    ),
+    button(
+      "Next",
+      page === pageCount - 1 ? page : page + 1,
+      page === pageCount - 1,
+    ),
+  );
+}
+
 function navigationButton(
   label: string,
   page: number,
@@ -830,7 +898,6 @@ function categorySummaryList<Context>(
   categories: readonly SettingsCategory<Context>[],
 ): string {
   return [
-    "## Categories",
     ...categories.map((category) =>
       category.description === undefined
         ? `**${category.label}**`
@@ -839,7 +906,22 @@ function categorySummaryList<Context>(
             SETTINGS_LIMITS.categorySummaryCharacters,
           )}`,
     ),
-  ].join("\n\n");
+  ].join("\n");
+}
+
+function subcategorySummaryList<Context>(
+  subcategories: readonly SettingsSubcategory<Context>[],
+): string {
+  return subcategories
+    .map((subcategory) =>
+      subcategory.description === undefined
+        ? `**${subcategory.label}**`
+        : `**${subcategory.label}:** ${truncate(
+            subcategory.description,
+            SETTINGS_LIMITS.categorySummaryCharacters,
+          )}`,
+    )
+    .join("\n");
 }
 
 function fieldText<Context>(

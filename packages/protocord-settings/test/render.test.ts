@@ -119,7 +119,7 @@ describe("Components v2 settings rendering", () => {
     expect(homeView.location).toEqual({ page: 0, pageCount: 1 });
     expect(JSON.stringify(home)).toContain("Synthetic settings");
     expect(JSON.stringify(home)).toContain("Choose a category");
-    expect(JSON.stringify(home)).toContain("## Categories");
+    expect(JSON.stringify(home)).not.toContain("Categories");
     expect(JSON.stringify(home)).toContain("Configure the synthetic consumer.");
     expect(JSON.stringify(home)).toContain(
       "**Setup:** Configure the synthetic consumer.",
@@ -130,6 +130,10 @@ describe("Components v2 settings rendering", () => {
         { type: ComponentType.TextDisplay },
         { type: ComponentType.TextDisplay },
         { type: ComponentType.Separator },
+        {
+          type: ComponentType.TextDisplay,
+          content: "Choose a category",
+        },
         {
           type: ComponentType.ActionRow,
           components: [{ type: ComponentType.StringSelect }],
@@ -153,6 +157,9 @@ describe("Components v2 settings rendering", () => {
       pageCount: 0,
     });
     expect(JSON.stringify(category)).toContain("Setup");
+    expect(JSON.stringify(category)).toContain("**General**");
+    expect(JSON.stringify(category)).toContain("**Large page**");
+    expect(JSON.stringify(category)).toContain("Choose a settings page");
     expect(JSON.stringify(category)).toContain("Large page");
     expect(JSON.stringify(category)).toContain(
       `\"type\":${String(ComponentType.Separator)}`,
@@ -670,15 +677,18 @@ describe("Components v2 settings rendering", () => {
     );
     const contents = textDisplayContents(rendered.components);
 
-    expect(contents).toHaveLength(5);
+    expect(contents).toHaveLength(8);
     expect(contents.every((content) => content.length <= 4_000)).toBe(true);
     expect(contents.reduce((total, content) => total + content.length, 0)).toBe(
       4_000,
     );
     expect(contents).toEqual([
       expect.stringContaining("Text budgets"),
-      expect.stringContaining("Categories"),
       expect.stringContaining("Category heading"),
+      "Choose a category",
+      expect.stringContaining("Category heading"),
+      expect.stringContaining("Subcategory heading"),
+      "Choose a settings page",
       expect.stringContaining("Subcategory heading"),
       expect.stringContaining("Field heading"),
     ]);
@@ -711,7 +721,7 @@ describe("Components v2 settings rendering", () => {
     );
     const contents = textDisplayContents(rendered.components);
 
-    expect(contents[2]).toBe(`# Category\n${categoryDescription}`);
+    expect(contents[3]).toBe(`# Category\n${categoryDescription}`);
     expect(contents.reduce((total, content) => total + content.length, 0)).toBeLessThan(
       4_000,
     );

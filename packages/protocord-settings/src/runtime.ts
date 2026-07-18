@@ -249,6 +249,20 @@ async function handleSettingsInteraction<Context>(
           { homePage: resolved.route.page },
           "viewed",
         );
+      case "subcategory-page":
+        if (!component.isButton()) {
+          return staleInteraction(component);
+        }
+        return await updateView(
+          renderer,
+          component,
+          context,
+          {
+            categoryId: resolved.category.id,
+            subcategoryPage: resolved.route.page,
+          },
+          "viewed",
+        );
       case "page":
         if (!component.isButton()) {
           return staleInteraction(component);
@@ -802,6 +816,7 @@ function routeMatchesInteraction(
     case "string-select":
       return interaction.isStringSelectMenu();
     case "home-page":
+    case "subcategory-page":
     case "page":
     case "button":
     case "modal":
@@ -868,6 +883,9 @@ function singleSelectedValue(interaction: StringSelectMenuInteraction): string {
 function routeRequest(route: SettingsRoute): SettingsViewRequest {
   if (route.action === "home-page") {
     return { homePage: route.page };
+  }
+  if (route.action === "subcategory-page") {
+    return { categoryId: route.categoryId, subcategoryPage: route.page };
   }
   return {
     categoryId: route.categoryId,
