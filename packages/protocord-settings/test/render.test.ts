@@ -116,9 +116,11 @@ describe("Components v2 settings rendering", () => {
 
     expect(authorize).toHaveBeenCalledOnce();
     expect(homeView.components).toHaveLength(1);
-    expect(homeView.location).toEqual({ page: 0, pageCount: 0 });
+    expect(homeView.location).toEqual({ page: 0, pageCount: 1 });
     expect(JSON.stringify(home)).toContain("Synthetic settings");
     expect(JSON.stringify(home)).toContain("Choose a category");
+    expect(JSON.stringify(home)).toContain("## Categories");
+    expect(JSON.stringify(home)).toContain("Configure the synthetic consumer.");
     expect(JSON.stringify(home)).toContain("Labels");
     expect(JSON.stringify(home)).not.toContain("Private");
     expect(JSON.stringify(home)).not.toContain("Refresh");
@@ -164,6 +166,40 @@ describe("Components v2 settings rendering", () => {
       page: 0,
       pageCount: 1,
     });
+  });
+
+  it("paginates authorized category summaries ten at a time", async () => {
+    const categories = Array.from({ length: 12 }, (_, index) => ({
+      id: `category-${String(index)}`,
+      label: `Category ${String(index)}`,
+      ...(index === 5 ? {} : { description: `Summary ${String(index)}` }),
+      authorize: () => index !== 11,
+      fields: [displayField(index)],
+    }));
+    const renderer = createSettingsRenderer<Context>({
+      title: "Many categories",
+      categories,
+    });
+
+    const first = await renderer.render({}, { userId: "admin" });
+    const second = await renderer.render(
+      { homePage: 1 },
+      { userId: "admin" },
+    );
+    const firstContents = textDisplayContents(first.components).join("\n");
+    const secondContents = textDisplayContents(second.components).join("\n");
+
+    expect(first.location).toEqual({ page: 0, pageCount: 2 });
+    expect(second.location).toEqual({ page: 1, pageCount: 2 });
+    expect(firstContents).toContain("Summary 0");
+    expect(firstContents).toContain("**Category 5**");
+    expect(firstContents).not.toContain("Summary 5");
+    expect(firstContents).toContain("Summary 9");
+    expect(firstContents).not.toContain("Summary 10");
+    expect(secondContents).toContain("Summary 10");
+    expect(secondContents).not.toContain("Summary 0");
+    expect(secondContents).not.toContain("Summary 11");
+    expect(JSON.stringify(first.components)).toContain('"label":"Next"');
   });
 
   it("renders direct category fields without redundant navigation or select state text", async () => {
@@ -591,7 +627,7 @@ describe("Components v2 settings rendering", () => {
         {
           id: "category",
           label: "Category heading",
-          description: "c".repeat(4_000),
+          description: "c".repeat(100),
           authorize: () => true,
           subcategories: [
             {
@@ -619,13 +655,14 @@ describe("Components v2 settings rendering", () => {
     );
     const contents = textDisplayContents(rendered.components);
 
-    expect(contents).toHaveLength(4);
+    expect(contents).toHaveLength(5);
     expect(contents.every((content) => content.length <= 4_000)).toBe(true);
     expect(contents.reduce((total, content) => total + content.length, 0)).toBe(
       4_000,
     );
     expect(contents).toEqual([
       expect.stringContaining("Text budgets"),
+      expect.stringContaining("Categories"),
       expect.stringContaining("Category heading"),
       expect.stringContaining("Subcategory heading"),
       expect.stringContaining("Field heading"),
@@ -633,7 +670,7 @@ describe("Components v2 settings rendering", () => {
   });
 
   it("preserves text displays when their combined content fits the budget", async () => {
-    const categoryDescription = "c".repeat(3_000);
+    const categoryDescription = "c".repeat(100);
     const renderer = createSettingsRenderer({
       title: "Under budget",
       categories: [
@@ -659,7 +696,7 @@ describe("Components v2 settings rendering", () => {
     );
     const contents = textDisplayContents(rendered.components);
 
-    expect(contents[1]).toBe(`# Category\n${categoryDescription}`);
+    expect(contents[2]).toBe(`# Category\n${categoryDescription}`);
     expect(contents.reduce((total, content) => total + content.length, 0)).toBeLessThan(
       4_000,
     );

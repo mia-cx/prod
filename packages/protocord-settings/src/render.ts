@@ -62,6 +62,7 @@ export type SettingsViewNotice = Readonly<{
 export type SettingsViewRequest = Readonly<{
   categoryId?: string;
   subcategoryId?: string;
+  homePage?: number;
   page?: number;
   notice?: SettingsViewNotice;
 }>;
@@ -116,6 +117,17 @@ async function renderSettingsView<Context>(
 
   const routeCategory = authorizedCategories[0]!;
   const routeSubcategory = categoryPages(routeCategory)[0]!;
+  const homePageCount = Math.ceil(
+    authorizedCategories.length / SETTINGS_LIMITS.categoriesPerHomePage,
+  );
+  const requestedHomePage = request.homePage ?? 0;
+  const homeCategories = authorizedCategories.slice(
+    requestedHomePage * SETTINGS_LIMITS.categoriesPerHomePage,
+    (requestedHomePage + 1) * SETTINGS_LIMITS.categoriesPerHomePage,
+  );
+  if (homeCategories.length === 0) {
+    throw stale("category page", String(requestedHomePage));
+  }
   const homeChildren: APIComponentInContainer[] = [
     textDisplay(`# ${definition.title}\nChoose a category`),
     categoryNavigation(
@@ -124,7 +136,19 @@ async function renderSettingsView<Context>(
       routeCategory.id,
       routeSubcategory.id,
     ),
+    separator(),
+    textDisplay(categorySummaryList(homeCategories)),
   ];
+  if (homePageCount > 1) {
+    homeChildren.push(
+      homePageNavigation(
+        requestedHomePage,
+        homePageCount,
+        routeCategory.id,
+        routeSubcategory.id,
+      ),
+    );
+  }
   if (request.categoryId === undefined) {
     const components = [
       container("home", homeChildren, definition.accentColor),
@@ -132,7 +156,7 @@ async function renderSettingsView<Context>(
     constrainTextDisplays(components);
     return {
       components,
-      location: { page: 0, pageCount: 0 },
+      location: { page: requestedHomePage, pageCount: homePageCount },
     };
   }
 
@@ -621,6 +645,43 @@ function pageNavigation(
   );
 }
 
+function homePageNavigation(
+  page: number,
+  pageCount: number,
+  routeCategoryId: string,
+  routeSubcategoryId: string,
+): APIActionRowComponent<APIButtonComponentWithCustomId> {
+  const button = (
+    label: string,
+    targetPage: number,
+    disabled: boolean,
+  ): APIButtonComponentWithCustomId => ({
+    type: ComponentType.Button,
+    style: ButtonStyle.Secondary,
+    label,
+    custom_id: encodeSettingsCustomId({
+      action: "home-page",
+      categoryId: routeCategoryId,
+      subcategoryId: routeSubcategoryId,
+      page: targetPage,
+    }),
+    disabled,
+  });
+  return actionRow(
+    button("Previous", page === 0 ? 0 : page - 1, page === 0),
+    button(
+      `Page ${String(page + 1)} of ${String(pageCount)}`,
+      page,
+      true,
+    ),
+    button(
+      "Next",
+      page === pageCount - 1 ? page : page + 1,
+      page === pageCount - 1,
+    ),
+  );
+}
+
 function navigationButton(
   label: string,
   page: number,
@@ -761,6 +822,27 @@ function nodeHeading(label: string, description: string | undefined): string {
   return [`# ${label}`, description]
     .filter((value) => value !== undefined)
     .join("\n");
+}
+
+function categorySummaryList<Context>(
+  categories: readonly SettingsCategory<Context>[],
+): string {
+  return [
+    "## Categories",
+    ...categories.map((category) =>
+      [
+        `**${category.label}**`,
+        category.description === undefined
+          ? undefined
+          : truncate(
+              category.description,
+              SETTINGS_LIMITS.categorySummaryCharacters,
+            ),
+      ]
+        .filter((part) => part !== undefined)
+        .join("\n"),
+    ),
+  ].join("\n\n");
 }
 
 function fieldText<Context>(

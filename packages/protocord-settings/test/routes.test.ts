@@ -16,6 +16,12 @@ describe("versioned settings routes", () => {
       page: 0,
     },
     {
+      action: "home-page",
+      categoryId: "setup",
+      subcategoryId: "general",
+      page: 1,
+    },
+    {
       action: "mentionable-select",
       categoryId: "permissions",
       subcategoryId: "presets",
@@ -75,4 +81,3 @@ describe("versioned settings routes", () => {
     ).toThrow(/page/);
   });
 });
-

@@ -6,6 +6,7 @@ export const SETTINGS_ROUTE_VERSION = 1;
 export type SettingsRouteAction =
   | "category"
   | "subcategory"
+  | "home-page"
   | "page"
   | "button"
   | "string-select"
@@ -32,6 +33,7 @@ export type DecodeSettingsRouteResult =
 const ACTION_TOKENS: Readonly<Record<SettingsRouteAction, string>> = {
   category: "c",
   subcategory: "s",
+  "home-page": "hp",
   page: "p",
   button: "b",
   "string-select": "ss",
@@ -130,7 +132,7 @@ export function isSettingsCustomId(customId: string): boolean {
 }
 
 function routeNeedsField(action: SettingsRouteAction): boolean {
-  return !["category", "subcategory", "page"].includes(action);
+  return !["category", "subcategory", "home-page", "page"].includes(action);
 }
 
 function assertRouteId(label: string, value: string): void {
@@ -146,4 +148,3 @@ function parseBase36Integer(value: string): number | undefined {
   const parsed = Number.parseInt(value, 36);
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
-
