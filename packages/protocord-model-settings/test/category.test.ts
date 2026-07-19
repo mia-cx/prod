@@ -14,9 +14,7 @@ const secret = "sk-or-v1-never-render-this-1234";
 
 const setup = (
   catalog: ProviderCatalog = {
-    listModels: async () => [
-      { id: "openai/gpt-5-mini", name: "GPT-5 mini" },
-    ],
+    listModels: async () => [{ id: "openai/gpt-5-mini", name: "GPT-5 mini" }],
   },
 ) => {
   let configuration: GuildModelConfiguration = {
@@ -58,7 +56,7 @@ const field = (
   subcategoryId: string,
   fieldId: string,
 ) => {
-  const subcategory = category.subcategories.find(
+  const subcategory = category.subcategories?.find(
     ({ id }) => id === subcategoryId,
   );
   const result = subcategory?.fields.find(({ id }) => id === fieldId);
@@ -75,7 +73,7 @@ describe("model settings category", () => {
     expect(await category.authorize({ guildId, authorized: false })).toBe(
       false,
     );
-    expect(category.subcategories.map(({ id }) => id)).toEqual([
+    expect(category.subcategories?.map(({ id }) => id)).toEqual([
       "triage",
       "credentials",
     ]);
@@ -140,7 +138,11 @@ describe("model settings category", () => {
     const key = field(category, "credentials", "guild-api-key");
     const status = field(category, "credentials", "credential-status");
     const clear = field(category, "credentials", "clear-guild-api-key");
-    if (key.kind !== "modal" || status.kind !== "display" || clear.kind !== "button") {
+    if (
+      key.kind !== "modal" ||
+      status.kind !== "display" ||
+      clear.kind !== "button"
+    ) {
       throw new Error("Unexpected field kinds");
     }
 

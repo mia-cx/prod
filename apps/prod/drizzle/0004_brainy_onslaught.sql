@@ -1,1 +1,0 @@
-ALTER TABLE `mia_cx_model_configurations` ADD `api_key_envelope_version` integer DEFAULT 0 NOT NULL;

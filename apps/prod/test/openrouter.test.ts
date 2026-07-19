@@ -145,7 +145,9 @@ describe("OpenRouter catalog adapter", () => {
       { guildId: "123456789012345678" },
     );
     const payload = JSON.stringify(view.components);
-    expect(payload).toContain("Enter a model ID manually");
+    expect(payload).toContain(
+      "Manual model entry remains available during catalog outages.",
+    );
     expect(payload).toContain("Manual model ID");
   });
 
@@ -154,8 +156,9 @@ describe("OpenRouter catalog adapter", () => {
     const catalog = createOpenRouterCatalog({
       baseUrl: "https://openrouter.ai/api/v1/",
       fetch: (async () =>
-        new Response(JSON.stringify({ data: [{ id: secret.repeat(20) }] }))) as
-        typeof globalThis.fetch,
+        new Response(
+          JSON.stringify({ data: [{ id: secret.repeat(20) }] }),
+        )) as typeof globalThis.fetch,
       maxResponseBytes: 64,
     });
 

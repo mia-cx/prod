@@ -1,6 +1,7 @@
 import type {
   SettingsAuthorization,
   SettingsCategory,
+  SettingsModalValues,
   SettingsMutationResult,
   SettingsValidationIssue,
 } from "@protocord/settings";
@@ -24,10 +25,7 @@ export type CreateModelSettingsCategoryOptions<Context> = Readonly<{
   deploymentCredentialConfigured: boolean;
 }>;
 
-const issue = (
-  message: string,
-  inputId?: string,
-): SettingsValidationIssue => ({
+const issue = (message: string, inputId?: string): SettingsValidationIssue => ({
   message,
   ...(inputId === undefined ? {} : { inputId }),
 });
@@ -35,6 +33,11 @@ const issue = (
 const invalid = (
   issues: readonly SettingsValidationIssue[],
 ): SettingsMutationResult => ({ status: "invalid", issues });
+
+const modalText = (values: SettingsModalValues, inputId: string): string => {
+  const value = values[inputId];
+  return typeof value === "string" ? value : "";
+};
 
 const modelIdIssue = (value: string): SettingsValidationIssue | undefined => {
   if (
@@ -146,15 +149,20 @@ export function createModelSettingsCategory<Context>(
               const selected = values[0];
               if (selected === KEEP_CURRENT) return [];
               const validationIssue =
-                selected === undefined ? modelIdIssue("") : modelIdIssue(selected);
+                selected === undefined
+                  ? modelIdIssue("")
+                  : modelIdIssue(selected);
               return validationIssue === undefined ? [] : [validationIssue];
             },
             mutate: async (values, context) => {
               const modelId = values[0];
               if (modelId === KEEP_CURRENT) return;
               const validationIssue =
-                modelId === undefined ? modelIdIssue("") : modelIdIssue(modelId);
-              if (validationIssue !== undefined) return invalid([validationIssue]);
+                modelId === undefined
+                  ? modelIdIssue("")
+                  : modelIdIssue(modelId);
+              if (validationIssue !== undefined)
+                return invalid([validationIssue]);
               await options.store.setModel({
                 guildId: options.getGuildId(context),
                 purpose,
@@ -189,13 +197,16 @@ export function createModelSettingsCategory<Context>(
               };
             },
             validate: (values) => {
-              const validationIssue = modelIdIssue(values["model-id"] ?? "");
+              const validationIssue = modelIdIssue(
+                modalText(values, "model-id"),
+              );
               return validationIssue === undefined ? [] : [validationIssue];
             },
             mutate: async (values, context) => {
-              const modelId = values["model-id"] ?? "";
+              const modelId = modalText(values, "model-id");
               const validationIssue = modelIdIssue(modelId);
-              if (validationIssue !== undefined) return invalid([validationIssue]);
+              if (validationIssue !== undefined)
+                return invalid([validationIssue]);
               try {
                 await options.store.setModel({
                   guildId: options.getGuildId(context),
@@ -268,13 +279,14 @@ export function createModelSettingsCategory<Context>(
               };
             },
             validate: (values) => {
-              const validationIssue = apiKeyIssue(values["api-key"] ?? "");
+              const validationIssue = apiKeyIssue(modalText(values, "api-key"));
               return validationIssue === undefined ? [] : [validationIssue];
             },
             mutate: async (values, context) => {
-              const apiKey = values["api-key"] ?? "";
+              const apiKey = modalText(values, "api-key");
               const validationIssue = apiKeyIssue(apiKey);
-              if (validationIssue !== undefined) return invalid([validationIssue]);
+              if (validationIssue !== undefined)
+                return invalid([validationIssue]);
               await options.store.setGuildApiKey({
                 guildId: options.getGuildId(context),
                 purpose,
