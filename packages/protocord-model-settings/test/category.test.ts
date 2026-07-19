@@ -145,6 +145,9 @@ describe("model settings category", () => {
     ) {
       throw new Error("Unexpected field kinds");
     }
+    expect(key.inputs).toContainEqual(
+      expect.objectContaining({ id: "api-key", sensitive: true }),
+    );
 
     await key.mutate({ "api-key": secret }, context);
     const configuredViews = await Promise.all([

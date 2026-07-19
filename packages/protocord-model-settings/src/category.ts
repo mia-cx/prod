@@ -263,6 +263,7 @@ export function createModelSettingsCategory<Context>(
                 required: true,
                 minLength: 1,
                 maxLength: 4_000,
+                sensitive: true,
               },
             ],
             load: async (context) => {

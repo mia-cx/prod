@@ -415,7 +415,10 @@ async function showSettingsModal<Context>(
       draftScope,
     ),
   );
-  const values = draft?.values ?? view.values ?? {};
+  const values = retainableModalValues(
+    field,
+    draft?.values ?? view.values ?? {},
+  );
   validateModalValues(field, values);
   await interaction.showModal({
     custom_id: encodeSettingsCustomId({
@@ -731,7 +734,7 @@ async function submitModal<Context>(
     modalScope,
   );
   if (result.status === "invalid") {
-    rememberDraft(drafts, key, values);
+    rememberDraft(drafts, key, field, values);
   } else {
     drafts.delete(key);
   }
@@ -1024,14 +1027,17 @@ async function resolveModalDraftScope<Context>(
   return scope;
 }
 
-function rememberDraft(
+function rememberDraft<Context>(
   drafts: Map<string, ModalDraft>,
   key: string,
+  field: Extract<SettingsField<Context>, { kind: "modal" }>,
   values: SettingsModalValues,
 ): void {
   drafts.delete(key);
+  const retainedValues = retainableModalValues(field, values);
+  if (Object.keys(retainedValues).length === 0) return;
   drafts.set(key, {
-    values,
+    values: retainedValues,
     expiresAt: Date.now() + MODAL_DRAFT_TTL_MS,
   });
   if (drafts.size > MODAL_DRAFT_LIMIT) {
@@ -1040,6 +1046,19 @@ function rememberDraft(
       drafts.delete(oldest);
     }
   }
+}
+
+function retainableModalValues<Context>(
+  field: Extract<SettingsField<Context>, { kind: "modal" }>,
+  values: SettingsModalValues,
+): SettingsModalValues {
+  return Object.fromEntries(
+    field.inputs.flatMap((input) => {
+      if (input.kind !== "checkbox" && input.sensitive === true) return [];
+      const value = values[input.id];
+      return value === undefined ? [] : [[input.id, value]];
+    }),
+  );
 }
 
 function readDraft(

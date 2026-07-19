@@ -741,6 +741,76 @@ describe("Discord settings runtime", () => {
     expect(state.name).toBe("Prod Support");
   });
 
+  it("never prefills or retains sensitive modal values", async () => {
+    const secret = "sk-never-prefill-this";
+    const sensitiveRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Sensitive settings",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "credential",
+                    label: "Credential",
+                    title: "Edit credential",
+                    inputs: [
+                      { id: "name", label: "Name" },
+                      {
+                        id: "api-key",
+                        label: "API key",
+                        sensitive: true,
+                      },
+                    ],
+                    load: () => ({
+                      values: { name: "Prod", "api-key": secret },
+                    }),
+                    validate: () => [{ message: "Invalid credential." }],
+                    mutate: () => undefined,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const open = mockInteraction("button", route("modal", "credential"));
+    await sensitiveRuntime.handle(open.interaction, { userId: "admin" });
+    expect(JSON.stringify(open.showModal.mock.calls[0]?.[0])).toContain(
+      '"value":"Prod"',
+    );
+    expect(JSON.stringify(open.showModal.mock.calls[0]?.[0])).not.toContain(
+      secret,
+    );
+
+    const invalid = mockInteraction(
+      "modal",
+      route("modal-submit", "credential"),
+      {
+        fields: {
+          getTextInputValue: (id: string) =>
+            id === "api-key" ? secret : "Retry name",
+        },
+      },
+    );
+    await sensitiveRuntime.handle(invalid.interaction, { userId: "admin" });
+
+    const retry = mockInteraction("button", route("modal", "credential"));
+    await sensitiveRuntime.handle(retry.interaction, { userId: "admin" });
+    const retryPayload = JSON.stringify(retry.showModal.mock.calls[0]?.[0]);
+    expect(retryPayload).toContain('"value":"Retry name"');
+    expect(retryPayload).not.toContain(secret);
+  });
+
   it("isolates modal drafts by their dynamic scope", async () => {
     type ScopedContext = Context & Readonly<{ scope: string }>;
     const scopedRuntime = createSettingsRuntime<ScopedContext>({
