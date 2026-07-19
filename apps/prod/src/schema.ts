@@ -128,6 +128,96 @@ export const reporterHubAccess = sqliteTable(
   ],
 );
 
+export const permissionRuleOrigins = sqliteTable(
+  "permission_rule_origins",
+  {
+    guildId: text("guild_id").notNull(),
+    subjectType: text("subject_type", { enum: ["user", "role"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    objectType: text("object_type", {
+      enum: ["ticket", "queue", "settings", "permissions"],
+    }).notNull(),
+    objectId: text("object_id").notNull(),
+    verb: text("verb", {
+      enum: [
+        "view",
+        "view_metadata",
+        "claim_self",
+        "unclaim_self",
+        "assign_other",
+        "unassign_other",
+        "label",
+        "pause_triage",
+        "resume_triage",
+        "close",
+        "reopen",
+        "suggest_assignee",
+        "complete_triage",
+        "manage",
+      ],
+    }).notNull(),
+    sourceType: text("source_type", {
+      enum: ["preset", "custom", "independent"],
+    }).notNull(),
+    sourceId: text("source_id").notNull(),
+    permit: text({ enum: ["allow", "deny"] }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.guildId,
+        table.subjectType,
+        table.subjectId,
+        table.objectType,
+        table.objectId,
+        table.verb,
+        table.sourceType,
+        table.sourceId,
+      ],
+    }),
+    index("permission_rule_origins_guild").on(table.guildId),
+    index("permission_rule_origins_source").on(
+      table.guildId,
+      table.sourceType,
+      table.sourceId,
+    ),
+  ],
+);
+
+export const permissionRuleOriginEvents = sqliteTable(
+  "permission_rule_origin_events",
+  {
+    sequence: integer().primaryKey({ autoIncrement: true }),
+    id: text().notNull(),
+    guildId: text("guild_id").notNull(),
+    subjectType: text("subject_type", { enum: ["user", "role"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    objectType: text("object_type", {
+      enum: ["ticket", "queue", "settings", "permissions"],
+    }).notNull(),
+    objectId: text("object_id").notNull(),
+    verb: text("verb").notNull(),
+    sourceType: text("source_type", {
+      enum: ["preset", "custom", "independent"],
+    }).notNull(),
+    sourceId: text("source_id").notNull(),
+    eventType: text("event_type", {
+      enum: ["added", "updated", "removed"],
+    }).notNull(),
+    actorUserId: text("actor_user_id").notNull(),
+    beforePermit: text("before_permit", { enum: ["allow", "deny"] }),
+    afterPermit: text("after_permit", { enum: ["allow", "deny"] }),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("permission_rule_origin_events_id").on(table.id),
+    index("permission_rule_origin_events_guild").on(
+      table.guildId,
+      table.sequence,
+    ),
+  ],
+);
+
 export const schemaContributors = Object.freeze([
   permissionsSchemaOwner,
   modelSettingsSchemaOwner,

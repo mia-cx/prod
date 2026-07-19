@@ -3,6 +3,7 @@ import { getTableName } from "drizzle-orm";
 
 import {
   guildSettings,
+  permissionRuleOrigins,
   permissionRuleEvents,
   permissionRules,
   reporterHubAccess,
@@ -32,5 +33,8 @@ describe("Drizzle schema composition", () => {
     expect(getTableName(tickets)).toBe("tickets");
     expect(getTableName(ticketEvents)).toBe("ticket_events");
     expect(getTableName(reporterHubAccess)).toBe("reporter_hub_access");
+    expect(getTableName(permissionRuleOrigins)).toBe(
+      "permission_rule_origins",
+    );
   });
 });

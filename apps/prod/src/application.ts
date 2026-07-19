@@ -1,7 +1,12 @@
 import type { Logger } from "pino";
+import { createSqlitePermissionRuleStore } from "@protocord/permissions";
 
 import type { ProdConfig } from "./config.js";
 import { createProdActionRuntime } from "./actions/runtime.js";
+import {
+  createProdAuthorizationService,
+  createProdPermissionRuleStore,
+} from "./authorization.js";
 import {
   openDatabase,
   type DatabaseConnection,
@@ -10,6 +15,8 @@ import {
 import { createDiscordGateway, type DiscordGateway } from "./discord.js";
 import { createSqliteGuildSettingsStore } from "./guild-settings.js";
 import { createGuildOperationExecutor } from "./guild-operation.js";
+import { createPermissionAdministrationService } from "./permission-administration.js";
+import { createPermissionContributionStore } from "./permission-contribution-store.js";
 import { applyMigrations } from "./migrations.js";
 import { createSupportHubDiscord } from "./support-hub.js";
 import {
@@ -74,12 +81,33 @@ export const startProd = async (
       createTicketProvisioningDiscord(),
       { executeGuildOperation },
     );
+    const sqlitePermissionRules = createSqlitePermissionRuleStore(
+      connection.database,
+    );
+    const permissionAuthorization = createProdAuthorizationService({
+      store: sqlitePermissionRules,
+      validateResource: ({ object }) =>
+        (object.objectType === "settings" ||
+          object.objectType === "permissions") &&
+        object.objectId === "*",
+    });
+    const permissionAdministration = createPermissionAdministrationService({
+      rules: createProdPermissionRuleStore(sqlitePermissionRules),
+      contributions: createPermissionContributionStore(connection.database),
+      authorize: async () => {
+        throw new Error(
+          "Permission mutations require a live Discord authorization recheck",
+        );
+      },
+    });
     const actions = createProdActionRuntime(logger, {
       textCommandPrefix: config.textCommandPrefix,
       guildSettingsStore,
       supportHubDiscord: createSupportHubDiscord(),
       ticketProvisioningService,
       executeGuildOperation,
+      permissionAdministration,
+      permissionAuthorization,
     });
     gateway =
       dependencies.gateway ??

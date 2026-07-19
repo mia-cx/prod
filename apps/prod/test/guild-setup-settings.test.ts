@@ -10,15 +10,22 @@ import {
   type PermissionResolvable,
 } from "discord.js";
 import { encodeSettingsCustomId } from "@protocord/settings";
+import { createSqlitePermissionRuleStore } from "@protocord/permissions";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createProdActionRuntime } from "../src/actions/runtime.js";
+import {
+  createProdAuthorizationService,
+  createProdPermissionRuleStore,
+} from "../src/authorization.js";
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import type { HubTransition } from "../src/hub-transition.js";
 import { createLogger } from "../src/logger.js";
 import { applyMigrations } from "../src/migrations.js";
+import { createPermissionAdministrationService } from "../src/permission-administration.js";
+import { createPermissionContributionStore } from "../src/permission-contribution-store.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
 import type { TicketProvisioningService } from "../src/ticket-provisioning.js";
 
@@ -66,7 +73,10 @@ afterEach(() => {
   for (const connection of connections.splice(0)) connection.close();
 });
 
-const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
+const setup = async (
+  overrides: Partial<SupportHubDiscord> = {},
+  withPermissionSettings = false,
+) => {
   const connection = openDatabase(":memory:");
   connections.push(connection);
   await applyMigrations(connection.database);
@@ -88,19 +98,61 @@ const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
     deleteInformationMessage: vi.fn(async () => undefined),
     ...overrides,
   };
+  const sqliteRules = createSqlitePermissionRuleStore(connection.database);
+  const permissionAuthorization = createProdAuthorizationService({
+    store: sqliteRules,
+    validateResource: ({ object }) =>
+      (object.objectType === "settings" ||
+        object.objectType === "permissions") &&
+      object.objectId === "*",
+  });
+  const permissionAdministration = createPermissionAdministrationService({
+    rules: createProdPermissionRuleStore(sqliteRules),
+    contributions: createPermissionContributionStore(connection.database),
+    authorize: async () => undefined,
+  });
   const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
     textCommandPrefix: "",
     guildSettingsStore: store,
     supportHubDiscord: supportHub,
     ticketProvisioningService,
+    ...(withPermissionSettings
+      ? { permissionAdministration, permissionAuthorization }
+      : {}),
   });
-  return { connection, store, supportHub, runtime };
+  return {
+    connection,
+    store,
+    supportHub,
+    runtime,
+    permissionAdministration,
+  };
 };
 
-const guild = {
+const guildRecord: Record<string, unknown> = {
   id: guildId,
   ownerId,
-} as Guild;
+  client: { user: { id: "bot-1" } },
+  roles: { cache: new Collection() },
+};
+guildRecord.members = {
+  fetch: async (userId: string) => ({
+    id: userId,
+    guild: guildRecord,
+    roles: {
+      cache: {
+        values: () => [{ id: guildId }][Symbol.iterator](),
+      },
+    },
+    permissions: {
+      has: (permission: string | bigint) =>
+        userId === administratorId &&
+        (permission === "Administrator" ||
+          permission === PermissionFlagsBits.Administrator),
+    },
+  }),
+};
+const guild = guildRecord as unknown as Guild;
 
 const permissions = (...allowed: readonly PermissionResolvable[]) => ({
   has: (permission: PermissionResolvable) => allowed.includes(permission),
@@ -241,6 +293,75 @@ const modalRoute = (
 });
 
 describe("guild setup settings integration", () => {
+  it("adds Manage Server roles to every permission preset on first reconciliation", async () => {
+    const { runtime, permissionAdministration } = await setup({}, true);
+    const bootstrapGuildId = "123456789012345690";
+    const managerRoleId = "123456789012345691";
+    const ordinaryRoleId = "123456789012345692";
+    const botManagedRoleId = "123456789012345693";
+    const bootstrapGuild = {
+      id: bootstrapGuildId,
+      ownerId,
+      client: { user: { id: "bot-1" } },
+      roles: {
+        cache: new Collection([
+          [
+            bootstrapGuildId,
+            {
+              id: bootstrapGuildId,
+              managed: false,
+              permissions: permissions(PermissionFlagsBits.ManageGuild),
+            },
+          ],
+          [
+            managerRoleId,
+            {
+              id: managerRoleId,
+              managed: false,
+              permissions: permissions(PermissionFlagsBits.ManageGuild),
+            },
+          ],
+          [
+            ordinaryRoleId,
+            {
+              id: ordinaryRoleId,
+              managed: false,
+              permissions: permissions(),
+            },
+          ],
+          [
+            botManagedRoleId,
+            {
+              id: botManagedRoleId,
+              managed: true,
+              permissions: permissions(PermissionFlagsBits.ManageGuild),
+            },
+          ],
+        ]),
+      },
+    } as unknown as Guild;
+    const client = {
+      guilds: {
+        fetch: vi.fn(),
+        cache: new Map([[bootstrapGuildId, bootstrapGuild]]),
+      },
+    } as unknown as Client<true>;
+
+    await runtime.reconcile!(client);
+
+    for (const preset of [
+      "support_staff",
+      "assignment_manager",
+      "configurator",
+    ] as const) {
+      await expect(
+        permissionAdministration.listPresetSubjects(bootstrapGuildId, preset),
+      ).resolves.toEqual([
+        { subjectType: "role", subjectId: managerRoleId },
+      ]);
+    }
+  });
+
   it("renders direct Setup fields and nested Identity pages", async () => {
     const { runtime } = await setup();
     const opened = command(ownerId);
@@ -445,6 +566,18 @@ describe("guild setup settings integration", () => {
     expect(manager.editReply).toHaveBeenCalledWith(
       expect.objectContaining({ flags: MessageFlags.IsComponentsV2 }),
     );
+  });
+
+  it("refreshes the setup view after configuring the first hub with permission settings enabled", async () => {
+    const { runtime, store } = await setup({}, true);
+    const select = component("channel", hubRoute);
+
+    await runtime.handleInteraction(select as unknown as Interaction);
+
+    expect(await store.get(guildId)).toMatchObject({ hubChannelId });
+    const response = JSON.stringify(select.editReply.mock.calls.at(-1)?.[0]);
+    expect(response).not.toContain("could not refresh");
+    expect(response).toContain("Support channel");
   });
 
   it("shows hub validation failures without configuring the guild", async () => {

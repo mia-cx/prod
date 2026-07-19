@@ -279,6 +279,114 @@ describe("Components v2 settings rendering", () => {
     });
   });
 
+  it("uses native state instead of current-value text for every select type", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Stateful selects",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "string-select",
+              id: "mode",
+              label: "Mode",
+              load: () => ({
+                value: "Current mode",
+                selectedValues: ["friendly"],
+                options: [{ label: "Friendly", value: "friendly" }],
+              }),
+              mutate: () => undefined,
+            },
+            {
+              kind: "mentionable-select",
+              id: "members",
+              label: "Members",
+              load: () => ({
+                value: "Current members",
+                defaults: [
+                  { kind: "user" as const, id: "123456789012345670" },
+                  { kind: "role" as const, id: "123456789012345671" },
+                ],
+                minValues: 0,
+                maxValues: 2,
+              }),
+              mutate: () => undefined,
+            },
+            {
+              kind: "channel-select",
+              id: "channel",
+              label: "Channel",
+              load: () => ({
+                value: "Current channel",
+                defaultChannelIds: ["123456789012345672"],
+                minValues: 1,
+                maxValues: 1,
+              }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const payload = JSON.stringify(rendered.components);
+
+    expect(payload).not.toContain("Current mode");
+    expect(payload).not.toContain("Current members");
+    expect(payload).not.toContain("Current channel");
+    expect(payload).toContain('"value":"friendly","default":true');
+    expect(payload).toContain(
+      '"default_values":[{"id":"123456789012345670","type":"user"},{"id":"123456789012345671","type":"role"}]',
+    );
+    expect(payload).toContain(
+      '"default_values":[{"id":"123456789012345672","type":"channel"}]',
+    );
+  });
+
+  it("renders display and button copy without a current-state prefix", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Plain copy",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "display",
+              id: "summary",
+              label: "Summary",
+              load: () => ({ value: "Nothing configured." }),
+            },
+            {
+              kind: "button",
+              id: "refresh",
+              label: "Refresh",
+              load: () => ({ value: "Reload the data." }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const payload = JSON.stringify(rendered.components);
+
+    expect(payload).toContain("Nothing configured.");
+    expect(payload).toContain("Reload the data.");
+    expect(payload).not.toContain("**Current:**");
+  });
+
   it("reserves notice space when paginating direct category fields", async () => {
     const renderer = createSettingsRenderer<Context>({
       title: "Direct settings",
@@ -762,5 +870,37 @@ describe("Components v2 settings rendering", () => {
     expect(contents.reduce((total, content) => total + content.length, 0)).toBeLessThan(
       4_000,
     );
+  });
+
+  it("paginates only fields that are currently visible", async () => {
+    const renderer = createSettingsRenderer({
+      title: "Dynamic fields",
+      categories: [
+        {
+          id: "category",
+          label: "Category",
+          authorize: () => true,
+          subcategories: [
+            {
+              id: "subcategory",
+              label: "Subcategory",
+              fields: Array.from({ length: 12 }, (_, index) => ({
+                ...displayField(index),
+                visible: () => index < 2,
+              })),
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "category", subcategoryId: "subcategory" },
+      { userId: "admin" },
+    );
+
+    expect(rendered.location.pageCount).toBe(1);
+    expect(JSON.stringify(rendered.components)).toContain("Value 0");
+    expect(JSON.stringify(rendered.components)).not.toContain("Value 2");
   });
 });

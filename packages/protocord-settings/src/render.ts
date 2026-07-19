@@ -235,8 +235,14 @@ async function renderSettingsView<Context>(
     category,
     request.subcategoryId ?? category.id,
   );
+  const visibleFields: SettingsField<Context>[] = [];
+  for (const field of subcategory.fields) {
+    if (field.visible === undefined || (await field.visible(context))) {
+      visibleFields.push(field);
+    }
+  }
   const fieldPages = paginateFields(
-    subcategory.fields,
+    visibleFields,
     fixedComponentCount(directCategory),
   );
   const requestedPage = request.page ?? 0;
@@ -412,7 +418,11 @@ async function renderField<Context>(
     case "string-select":
       return renderStringSelect(field, location, await field.load(context));
     case "mentionable-select":
-      return renderMentionableSelect(field, location, await field.load(context));
+      return renderMentionableSelect(
+        field,
+        location,
+        await field.load(context, "render"),
+      );
     case "channel-select":
       return renderChannelSelect(field, location, await field.load(context));
   }
@@ -937,11 +947,15 @@ function fieldText<Context>(
     field.kind === "string-select" ||
     field.kind === "mentionable-select" ||
     field.kind === "channel-select";
-  return [
-    `## ${field.label}`,
+  const renderedValue =
     value === undefined || stateIsRenderedByControl
       ? undefined
-      : `**Current:** ${value}`,
+      : field.kind === "modal"
+        ? `**Current:** ${value}`
+        : value;
+  return [
+    `## ${field.label}`,
+    renderedValue,
     field.description,
   ]
     .filter((part) => part !== undefined)
