@@ -451,6 +451,7 @@ describe("guild setup settings integration", () => {
     expect(labelsPage).not.toContain("## Create label");
     expect(labelsPage).toContain("# Current labels");
     expect(labelsPage).not.toContain("**Current:**");
+    expect(labelsPage).not.toContain("Label list");
     expect(labelsPage).toContain(
       '"content":"# Current labels"}],"accessory"',
     );
@@ -925,6 +926,8 @@ describe("guild setup settings integration", () => {
     for (let index = 0; index < customNames.length - 1; index++) {
       expect(payload).toContain(`${String(index).padStart(2, "0")}-`);
     }
+    expect(payload).toContain(`${"x".repeat(99)}…`);
+    expect(payload).not.toContain("x".repeat(100));
     expect(payload).toContain("zz-");
 
     const overflow = component("modal", labelModalRoute("label-create"), {

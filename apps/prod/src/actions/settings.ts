@@ -85,13 +85,24 @@ const modalText = (values: SettingsModalValues, inputId: string): string => {
   return typeof value === "string" ? value : "";
 };
 
-const labelSummary = (description: string): string =>
-  Array.from(description).slice(0, 100).join("");
+const labelSummary = (description: string): string => {
+  const characters = Array.from(description);
+  return characters.length <= 100
+    ? description
+    : `${characters.slice(0, 99).join("")}…`;
+};
 
-const labelListItem = (label: TicketLabel): string =>
-  label.description === undefined
+const labelListItem = (label: TicketLabel, summarize = false): string => {
+  const description =
+    label.description === undefined
+      ? undefined
+      : summarize
+        ? labelSummary(label.description)
+        : label.description;
+  return description === undefined
     ? `**${escapeMarkdown(label.name)}**`
-    : `**${escapeMarkdown(label.name)}:** ${escapeMarkdown(label.description)}`;
+    : `**${escapeMarkdown(label.name)}:** ${escapeMarkdown(description)}`;
+};
 
 const requireGuild = (context: GuildSetupSettingsContext): Guild => {
   if (context.guild === undefined) {
@@ -608,7 +619,7 @@ export function createGuildSetupSettingsConsumer(
               (await labelStore.list(requireGuild(context).id)).length > 0,
             load: async (context) => ({
               value: (await labelStore.list(requireGuild(context).id))
-                .map(labelListItem)
+                .map((label) => labelListItem(label, true))
                 .join("\n"),
             }),
           },
