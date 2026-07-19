@@ -216,6 +216,7 @@ export type SettingsModalField<Context> = SettingsFieldBase<"modal", Context> &
     title: string;
     inputs: readonly SettingsModalInput[];
     presentation?: SettingsModalPresentation;
+    draftScope?(context: Context): Awaitable<string>;
     load(context: Context): Awaitable<SettingsModalView>;
     validate?(
       values: SettingsModalValues,

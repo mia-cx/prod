@@ -741,6 +741,68 @@ describe("Discord settings runtime", () => {
     expect(state.name).toBe("Prod Support");
   });
 
+  it("isolates modal drafts by their dynamic scope", async () => {
+    type ScopedContext = Context & Readonly<{ scope: string }>;
+    const scopedRuntime = createSettingsRuntime<ScopedContext>({
+      definition: {
+        title: "Scoped drafts",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "identity",
+                    label: "Identity",
+                    title: "Edit identity",
+                    inputs: [{ id: "name", label: "Name" }],
+                    draftScope: (context: ScopedContext) => context.scope,
+                    load: (context: ScopedContext) => ({
+                      values: { name: `Fresh ${context.scope}` },
+                    }),
+                    validate: () => [{ message: "Invalid draft." }],
+                    mutate: () => undefined,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      } as unknown as SettingsDefinition<ScopedContext>,
+    });
+    const invalid = mockInteraction(
+      "modal",
+      route("modal-submit", "identity"),
+      { fields: { getTextInputValue: () => "Draft A" } },
+    );
+    await scopedRuntime.handle(invalid.interaction, {
+      userId: "admin",
+      scope: "a",
+    });
+
+    const differentScope = mockInteraction(
+      "button",
+      route("modal", "identity"),
+    );
+    await scopedRuntime.handle(differentScope.interaction, {
+      userId: "admin",
+      scope: "b",
+    });
+
+    expect(JSON.stringify(differentScope.showModal.mock.calls[0]?.[0])).toContain(
+      '"value":"Fresh b"',
+    );
+    expect(JSON.stringify(differentScope.showModal.mock.calls[0]?.[0])).not.toContain(
+      "Draft A",
+    );
+  });
+
   it("routes modal and mutation buttons nested in an appended container", async () => {
     const mutate = vi.fn();
     const rowRuntime = createSettingsRuntime<Context>({

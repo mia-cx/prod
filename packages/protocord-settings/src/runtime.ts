@@ -402,9 +402,18 @@ async function showSettingsModal<Context>(
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings modal is disabled");
   }
+  const draftScope = await beforeModalDeadline(
+    () => resolveModalDraftScope(field, context),
+    deadline,
+  );
   const draft = readDraft(
     drafts,
-    draftKey(interaction.user.id, interaction.message.id, resolved.route),
+    draftKey(
+      interaction.user.id,
+      interaction.message.id,
+      resolved.route,
+      draftScope,
+    ),
   );
   const values = draft?.values ?? view.values ?? {};
   validateModalValues(field, values);
@@ -715,6 +724,7 @@ async function submitModal<Context>(
     interaction.user.id,
     interaction.message.id,
     resolved.route,
+    await resolveModalDraftScope(field, context),
   );
   if (result.status === "invalid") {
     rememberDraft(drafts, key, values);
@@ -972,6 +982,7 @@ function draftKey(
   userId: string,
   messageId: string,
   route: SettingsRoute,
+  scope: string | undefined,
 ): string {
   return [
     messageId,
@@ -979,7 +990,22 @@ function draftKey(
     route.categoryId,
     route.subcategoryId,
     route.fieldId ?? "-",
+    scope ?? "-",
   ].join(":");
+}
+
+async function resolveModalDraftScope<Context>(
+  field: Extract<SettingsField<Context>, { kind: "modal" }>,
+  context: Context,
+): Promise<string | undefined> {
+  const scope = await field.draftScope?.(context);
+  if (scope !== undefined && (scope.length === 0 || scope.length > 100)) {
+    throw new SettingsViewError(
+      "invalid-view",
+      `settings modal ${field.id} draft scope must contain between 1 and 100 characters`,
+    );
+  }
+  return scope;
 }
 
 function rememberDraft(
