@@ -5,6 +5,9 @@ import {
   createSqliteGuildSettingsStore,
   DEFAULT_ASSISTANT_IDENTITY,
   DEFAULT_ASSISTANT_TONE,
+  DEFAULT_PRODUCT_KNOWLEDGE_PROMPT,
+  DEFAULT_SAFETY_PROMPT,
+  DEFAULT_SUPPORT_WORKFLOW_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
   GuildNotConfiguredError,
 } from "../src/guild-settings.js";
@@ -50,6 +53,9 @@ describe("SQLite guild settings", () => {
         initialized: false,
         assistantIdentity: DEFAULT_ASSISTANT_IDENTITY,
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        productKnowledgePrompt: DEFAULT_PRODUCT_KNOWLEDGE_PROMPT,
+        supportWorkflowPrompt: DEFAULT_SUPPORT_WORKFLOW_PROMPT,
+        safetyPrompt: DEFAULT_SAFETY_PROMPT,
         tone: DEFAULT_ASSISTANT_TONE,
       });
     } finally {
@@ -69,6 +75,9 @@ describe("SQLite guild settings", () => {
         initialized: true,
         assistantIdentity: "Helper",
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        productKnowledgePrompt: DEFAULT_PRODUCT_KNOWLEDGE_PROMPT,
+        supportWorkflowPrompt: DEFAULT_SUPPORT_WORKFLOW_PROMPT,
+        safetyPrompt: DEFAULT_SAFETY_PROMPT,
         tone: DEFAULT_ASSISTANT_TONE,
       });
     } finally {
@@ -83,6 +92,9 @@ describe("SQLite guild settings", () => {
       await store.setHubInformationMessage("guild-1", "message-1");
       await store.setAssistantIdentity("guild-1", "Support Guide");
       await store.setSystemPrompt("guild-1", "Help users solve problems");
+      await store.setProductKnowledgePrompt("guild-1", "Poke uses messages");
+      await store.setSupportWorkflowPrompt("guild-1", "Collect reproduction steps");
+      await store.setSafetyPrompt("guild-1", "Never request secrets");
       await store.setTone("guild-1", "Warm, direct, and brief");
 
       const restartedStore = createSqliteGuildSettingsStore(
@@ -96,6 +108,9 @@ describe("SQLite guild settings", () => {
         hubPermissionOwnership: ownership("channel-1"),
         assistantIdentity: "Support Guide",
         systemPrompt: "Help users solve problems",
+        productKnowledgePrompt: "Poke uses messages",
+        supportWorkflowPrompt: "Collect reproduction steps",
+        safetyPrompt: "Never request secrets",
         tone: "Warm, direct, and brief",
       });
     } finally {

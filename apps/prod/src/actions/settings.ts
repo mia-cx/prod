@@ -167,16 +167,15 @@ export function createGuildSetupSettingsConsumer(
               {
                 kind: "modal",
                 id: "assistant-system-prompt",
-                label: "System prompt",
-                title: "Edit system prompt",
+                label: "Role",
+                title: "Edit role",
                 presentation: { kind: "preview", maxLength: 300 },
                 inputs: [
                   {
                     id: "system-prompt",
-                    label: "System prompt",
+                    label: "Role",
                     style: TextInputStyle.Paragraph,
                     minLength: 3,
-                    maxLength: 4_000,
                   },
                 ],
                 load: async (context) => {
@@ -206,6 +205,123 @@ export function createGuildSetupSettingsConsumer(
               },
               {
                 kind: "modal",
+                id: "assistant-product",
+                label: "Product knowledge",
+                title: "Edit product knowledge",
+                presentation: { kind: "preview", maxLength: 300 },
+                inputs: [
+                  {
+                    id: "product-knowledge",
+                    label: "Product knowledge",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 3,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context)))
+                    .productKnowledgePrompt;
+                  return {
+                    value,
+                    values: { "product-knowledge": value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values["product-knowledge"]?.trim().length ?? 0) < 3
+                    ? [
+                        {
+                          inputId: "product-knowledge",
+                          message: "Use at least three visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setProductKnowledgePrompt(
+                    requireGuild(context),
+                    values["product-knowledge"]!,
+                  );
+                },
+              },
+              {
+                kind: "modal",
+                id: "assistant-workflow",
+                label: "Support workflow",
+                title: "Edit support workflow",
+                presentation: { kind: "preview", maxLength: 300 },
+                inputs: [
+                  {
+                    id: "support-workflow",
+                    label: "Support workflow",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 3,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context)))
+                    .supportWorkflowPrompt;
+                  return {
+                    value,
+                    values: { "support-workflow": value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values["support-workflow"]?.trim().length ?? 0) < 3
+                    ? [
+                        {
+                          inputId: "support-workflow",
+                          message: "Use at least three visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setSupportWorkflowPrompt(
+                    requireGuild(context),
+                    values["support-workflow"]!,
+                  );
+                },
+              },
+              {
+                kind: "modal",
+                id: "assistant-safety",
+                label: "Safety",
+                title: "Edit safety",
+                presentation: { kind: "preview", maxLength: 300 },
+                inputs: [
+                  {
+                    id: "safety",
+                    label: "Safety",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 3,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context)))
+                    .safetyPrompt;
+                  return {
+                    value,
+                    values: { safety: value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values.safety?.trim().length ?? 0) < 3
+                    ? [
+                        {
+                          inputId: "safety",
+                          message: "Use at least three visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setSafetyPrompt(
+                    requireGuild(context),
+                    values.safety!,
+                  );
+                },
+              },
+              {
+                kind: "modal",
                 id: "assistant-style-prompt",
                 label: "Style prompt",
                 title: "Edit style prompt",
@@ -217,7 +333,6 @@ export function createGuildSetupSettingsConsumer(
                     style: TextInputStyle.Paragraph,
                     placeholder: "friendly, patient, and concise",
                     minLength: 3,
-                    maxLength: 4_000,
                   },
                 ],
                 load: async (context) => {

@@ -207,6 +207,7 @@ const component = (
   return interaction as typeof interaction & {
     editReply: ReturnType<typeof vi.fn>;
     followUp: ReturnType<typeof vi.fn>;
+    showModal: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -219,13 +220,21 @@ const hubRoute = {
 } as const;
 
 const modalRoute = (
-  fieldId: "assistant-system-prompt" | "assistant-style-prompt",
+  fieldId:
+    | "assistant-system-prompt"
+    | "assistant-product"
+    | "assistant-workflow"
+    | "assistant-safety"
+    | "assistant-style-prompt",
 ) => ({
   action: "modal-submit" as const,
   categoryId: "identity",
   subcategoryId: "personality",
   fieldId,
-  page: 0,
+  page:
+    fieldId === "assistant-safety" || fieldId === "assistant-style-prompt"
+      ? 1
+      : 0,
 });
 
 describe("guild setup settings integration", () => {
@@ -300,18 +309,36 @@ describe("guild setup settings integration", () => {
     const personalityPage = JSON.stringify(
       personality.editReply.mock.calls[0]?.[0],
     );
-    expect(personalityPage).toContain("**Style prompt**");
-    expect(personalityPage).toContain("**System prompt**");
+    expect(personalityPage).toContain("**Role**");
+    expect(personalityPage).toContain("**Product knowledge**");
+    expect(personalityPage).toContain("**Support workflow**");
     expect(personalityPage).toContain(
-      "you are an automated support agent for poke",
+      "you are an automated support agent for Poke",
     );
-    expect(personalityPage).toContain("write responses in lowercase only");
     expect(personalityPage).toContain(
       "Configure how Prod communicates with users.",
     );
     expect(personalityPage).not.toContain("assistant-identity");
     expect(personalityPage).not.toContain("**Name:**");
     expect(personalityPage).not.toContain("**Current:**");
+
+    const personalityPageTwo = component("button", {
+      action: "page",
+      categoryId: "identity",
+      subcategoryId: "personality",
+      page: 1,
+    });
+    await runtime.handleInteraction(
+      personalityPageTwo as unknown as Interaction,
+    );
+    const secondPersonalityPage = JSON.stringify(
+      personalityPageTwo.editReply.mock.calls[0]?.[0],
+    );
+    expect(secondPersonalityPage).toContain("**Safety**");
+    expect(secondPersonalityPage).toContain("**Style prompt**");
+    expect(secondPersonalityPage).toContain(
+      "write responses in lowercase only",
+    );
 
     const styleButton = component("button", {
       action: "modal",
@@ -332,6 +359,9 @@ describe("guild setup settings integration", () => {
         ],
       }),
     );
+    expect(
+      styleButton.showModal.mock.calls[0]?.[0]?.components[0]?.component,
+    ).not.toHaveProperty("max_length");
   });
 
   it("recovers a promoted hub transition before resuming the replacement hub", async () => {
@@ -445,7 +475,7 @@ describe("guild setup settings integration", () => {
     );
   });
 
-  it("persists and rerenders system and style prompts separately", async () => {
+  it("persists and rerenders prompt sections separately", async () => {
     const { connection, runtime, store } = await setup();
     await store.configureHub(guildId, hubChannelId, ownership());
 
@@ -459,6 +489,29 @@ describe("guild setup settings integration", () => {
       JSON.stringify(systemPrompt.editReply.mock.calls[0]?.[0]),
     ).toContain("help users complete their reports");
 
+    const productKnowledge = component(
+      "modal",
+      modalRoute("assistant-product"),
+      { modalValue: "  poke works in messaging channels  " },
+    );
+    await runtime.handleInteraction(
+      productKnowledge as unknown as Interaction,
+    );
+
+    const supportWorkflow = component(
+      "modal",
+      modalRoute("assistant-workflow"),
+      { modalValue: "  collect exact reproduction steps  " },
+    );
+    await runtime.handleInteraction(supportWorkflow as unknown as Interaction);
+
+    const safety = component(
+      "modal",
+      modalRoute("assistant-safety"),
+      { modalValue: "  never request user secrets  " },
+    );
+    await runtime.handleInteraction(safety as unknown as Interaction);
+
     const tone = component("modal", modalRoute("assistant-style-prompt"), {
       modalValue: "  lowercase, direct, and concise  ",
     });
@@ -471,6 +524,9 @@ describe("guild setup settings integration", () => {
     await expect(restartedStore.get(guildId)).resolves.toMatchObject({
       assistantIdentity: "Prod",
       systemPrompt: "help users complete their reports",
+      productKnowledgePrompt: "poke works in messaging channels",
+      supportWorkflowPrompt: "collect exact reproduction steps",
+      safetyPrompt: "never request user secrets",
       tone: "lowercase, direct, and concise",
     });
   });

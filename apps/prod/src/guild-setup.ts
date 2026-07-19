@@ -19,6 +19,9 @@ export interface GuildSetupService {
   refreshInformationMessage(guild: Guild): Promise<SupportHubValidation>;
   setAssistantIdentity(guild: Guild, identity: string): Promise<void>;
   setSystemPrompt(guild: Guild, prompt: string): Promise<void>;
+  setProductKnowledgePrompt(guild: Guild, prompt: string): Promise<void>;
+  setSupportWorkflowPrompt(guild: Guild, prompt: string): Promise<void>;
+  setSafetyPrompt(guild: Guild, prompt: string): Promise<void>;
   setTone(guild: Guild, tone: string): Promise<void>;
 }
 
@@ -256,6 +259,21 @@ export const createGuildSetupService = (
       execute(guild.id, async () => {
         await recoverPendingTransition(guild);
         await store.setSystemPrompt(guild.id, prompt);
+      }),
+    setProductKnowledgePrompt: (guild: Guild, prompt: string) =>
+      execute(guild.id, async () => {
+        await recoverPendingTransition(guild);
+        await store.setProductKnowledgePrompt(guild.id, prompt);
+      }),
+    setSupportWorkflowPrompt: (guild: Guild, prompt: string) =>
+      execute(guild.id, async () => {
+        await recoverPendingTransition(guild);
+        await store.setSupportWorkflowPrompt(guild.id, prompt);
+      }),
+    setSafetyPrompt: (guild: Guild, prompt: string) =>
+      execute(guild.id, async () => {
+        await recoverPendingTransition(guild);
+        await store.setSafetyPrompt(guild.id, prompt);
       }),
   });
 };
