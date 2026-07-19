@@ -25,6 +25,7 @@ import { applyMigrations } from "../src/migrations.js";
 import { createPermissionAdministrationService } from "../src/permission-administration.js";
 import { createPermissionContributionStore } from "../src/permission-contribution-store.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
+import type { TicketProvisioningService } from "../src/ticket-provisioning.js";
 
 const guildId = "123456789012345670";
 const managerId = "123456789012345671";
@@ -64,17 +65,37 @@ const guildSettingsStore: GuildSettingsStore = {
     hubPermissionOwnership: ownership,
     assistantIdentity: "Prod",
     tone: "friendly, patient, and concise",
+    systemPrompt: "You are Prod.",
+    productKnowledgePrompt: "Know the product.",
+    supportWorkflowPrompt: "Follow the workflow.",
+    safetyPrompt: "Be safe.",
   }),
   initialize: async () => undefined,
   configureHub: async () => undefined,
   setHubInformationMessage: async () => undefined,
   setAssistantIdentity: async () => undefined,
   setTone: async () => undefined,
+  setSystemPrompt: async () => undefined,
+  setProductKnowledgePrompt: async () => undefined,
+  setSupportWorkflowPrompt: async () => undefined,
+  setSafetyPrompt: async () => undefined,
   getHubTransition: async () => undefined,
   beginHubTransition: async () => undefined,
   promoteHubTransition: async () => undefined,
   finishHubTransition: async () => undefined,
   abortHubTransition: async () => undefined,
+};
+
+const ticketProvisioningService: TicketProvisioningService = {
+  open: vi.fn(),
+  discoverRecoveryThreads: vi.fn().mockResolvedValue({
+    discovered: 0,
+    failed: 0,
+  }),
+  recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
+  canReleaseHub: vi.fn().mockResolvedValue(true),
+  suspendHubAccess: vi.fn().mockResolvedValue(0),
+  resumeHubAccess: vi.fn().mockResolvedValue(0),
 };
 
 const supportHubDiscord: SupportHubDiscord = {
@@ -131,6 +152,7 @@ describe("permission settings integration", () => {
       textCommandPrefix: "",
       guildSettingsStore,
       supportHubDiscord,
+      ticketProvisioningService,
       permissionAdministration: administration,
       permissionAuthorization,
     });

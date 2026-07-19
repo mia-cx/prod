@@ -500,7 +500,7 @@ describe("guild setup settings integration", () => {
     expect(await store.get(guildId)).toMatchObject({ hubChannelId });
     const response = JSON.stringify(select.editReply.mock.calls.at(-1)?.[0]);
     expect(response).not.toContain("could not refresh");
-    expect(response).toContain("Support hub");
+    expect(response).toContain("Support channel");
   });
 
   it("shows hub validation failures without configuring the guild", async () => {

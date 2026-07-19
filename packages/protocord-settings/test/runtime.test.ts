@@ -489,7 +489,8 @@ describe("Discord settings runtime", () => {
       release = () => resolve(true);
     });
     const category = definition.categories[0]!;
-    const subcategory = category.subcategories[0]!;
+    const subcategory = category.subcategories?.[0];
+    if (subcategory === undefined) throw new Error("Expected subcategory");
     const slowRuntime = createSettingsRuntime({
       definition: {
         ...definition,
@@ -945,7 +946,8 @@ describe("Discord settings runtime", () => {
 
   it("rejects a field interaction after the field becomes hidden", async () => {
     const category = definition.categories[0]!;
-    const subcategory = category.subcategories[0]!;
+    const subcategory = category.subcategories?.[0];
+    if (subcategory === undefined) throw new Error("Expected subcategory");
     const hiddenRuntime = createSettingsRuntime({
       definition: {
         ...definition,

@@ -112,7 +112,7 @@ const field = (
   fieldId: string,
 ): SettingsField<Context> => {
   const found = category.subcategories
-    .find(({ id }) => id === subcategoryId)
+    ?.find(({ id }) => id === subcategoryId)
     ?.fields.find(({ id }) => id === fieldId);
   if (found === undefined)
     throw new Error(`Missing ${subcategoryId}/${fieldId}`);
@@ -207,7 +207,7 @@ describe("permission settings category", () => {
     );
     expect(
       category.subcategories
-        .find(({ id }) => id === "support_staff")
+        ?.find(({ id }) => id === "support_staff")
         ?.fields.map(({ id }) => id),
     ).toEqual(["current", "subjects"]);
   });
@@ -502,7 +502,7 @@ describe("permission settings category", () => {
     const serialized = JSON.stringify(category);
     expect(serialized).not.toContain("categoryId");
     expect(serialized).not.toContain("channelId");
-    expect(category.subcategories.map(({ id }) => id)).toEqual([
+    expect(category.subcategories?.map(({ id }) => id)).toEqual([
       "support_staff",
       "assignment_manager",
       "configurator",
