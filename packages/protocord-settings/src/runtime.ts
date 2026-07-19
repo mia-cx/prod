@@ -421,6 +421,7 @@ async function showSettingsModal<Context>(
     custom_id: encodeSettingsCustomId({
       ...resolved.route,
       action: "modal-submit",
+      ...(draftScope === undefined ? {} : { modalScope: draftScope }),
     }),
     title: field.title,
     components: field.inputs.map((input): APILabelComponent => {
@@ -714,17 +715,20 @@ async function submitModal<Context>(
         : interaction.fields.getTextInputValue(input.id),
     ]),
   ) as SettingsModalValues;
+  const modalScope =
+    resolved.route.modalScope ?? (await resolveModalDraftScope(field, context));
   const key = draftKey(
     interaction.user.id,
     interaction.message.id,
     resolved.route,
-    await resolveModalDraftScope(field, context),
+    modalScope,
   );
   const result = await validateAndMutate(
     values,
     context,
     field.validate,
     field.mutate,
+    modalScope,
   );
   if (result.status === "invalid") {
     rememberDraft(drafts, key, values);
@@ -741,18 +745,30 @@ async function validateAndMutate<Value, Context>(
     | ((
         value: Value,
         context: Context,
+        modalScope?: string,
       ) => Awaitable<readonly SettingsValidationIssue[]>)
     | undefined,
   mutate: (
     value: Value,
     context: Context,
+    modalScope?: string,
   ) => Awaitable<SettingsMutationCallbackResult>,
+  modalScope?: string,
 ): Promise<SettingsMutationResult> {
-  const issues = validate === undefined ? [] : await validate(value, context);
+  const issues =
+    validate === undefined
+      ? []
+      : modalScope === undefined
+        ? await validate(value, context)
+        : await validate(value, context, modalScope);
   if (issues.length > 0) {
     return { status: "invalid", issues };
   }
-  return normalizeMutationResult(await mutate(value, context));
+  return normalizeMutationResult(
+    modalScope === undefined
+      ? await mutate(value, context)
+      : await mutate(value, context, modalScope),
+  );
 }
 
 async function finishMutation<Context>(

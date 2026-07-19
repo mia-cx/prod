@@ -9,7 +9,10 @@ import {
   type Interaction,
   type PermissionResolvable,
 } from "discord.js";
-import { encodeSettingsCustomId } from "@protocord/settings";
+import {
+  decodeSettingsCustomId,
+  encodeSettingsCustomId,
+} from "@protocord/settings";
 import { createSqlitePermissionRuleStore } from "@protocord/permissions";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -824,6 +827,49 @@ describe("guild setup settings integration", () => {
     await expect(
       restarted.findByName(guildId, "connectivity"),
     ).resolves.toBeUndefined();
+  });
+
+  it("edits the label captured when the modal opened", async () => {
+    const { runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+    const account = (await labelStore.findByName(guildId, "account"))!;
+    const bug = (await labelStore.findByName(guildId, "bug"))!;
+
+    const selectAccount = component("string", labelSelectRoute, {
+      selectedValues: [account.id],
+    });
+    await runtime.handleInteraction(selectAccount as unknown as Interaction);
+    const openEdit = component("button", {
+      ...labelModalRoute("label-edit"),
+      action: "modal",
+    });
+    await runtime.handleInteraction(openEdit as unknown as Interaction);
+    const modalCustomId = openEdit.showModal.mock.calls[0]?.[0]?.custom_id;
+    expect(modalCustomId).toEqual(expect.any(String));
+
+    const selectBug = component("string", labelSelectRoute, {
+      selectedValues: [bug.id],
+    });
+    await runtime.handleInteraction(selectBug as unknown as Interaction);
+    const decoded = decodeSettingsCustomId(modalCustomId as string);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) throw new Error("Expected a settings modal route");
+    const submitAccountEdit = component("modal", decoded.route, {
+      modalValues: {
+        name: "account access",
+        description: "Updated account description.",
+      },
+    });
+    await runtime.handleInteraction(
+      submitAccountEdit as unknown as Interaction,
+    );
+
+    await expect(labelStore.findById(guildId, account.id)).resolves.toMatchObject(
+      { name: "account access" },
+    );
+    await expect(labelStore.findById(guildId, bug.id)).resolves.toMatchObject({
+      name: "bug",
+    });
   });
 
   it("appends management controls for the selected label", async () => {

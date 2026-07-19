@@ -765,10 +765,19 @@ export function createGuildSetupSettingsConsumer(
                         buttonLabel: "Edit",
                       };
                     },
-                    mutate: (values, context) =>
+                    mutate: (values, context, modalScope) =>
                       labelMutation(async () => {
-                        const label = await requireSelectedLabel(context);
-                        await labelStore.update(requireGuild(context).id, label.id, {
+                        const guild = requireGuild(context);
+                        const label =
+                          modalScope === undefined
+                            ? await requireSelectedLabel(context)
+                            : await labelStore.findById(guild.id, modalScope);
+                        if (label === undefined) {
+                          throw new LabelNotFoundError(
+                            "The label opened for editing no longer exists.",
+                          );
+                        }
+                        await labelStore.update(guild.id, label.id, {
                           name: modalText(values, "name"),
                           description: modalText(values, "description"),
                         });

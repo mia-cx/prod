@@ -221,10 +221,12 @@ export type SettingsModalField<Context> = SettingsFieldBase<"modal", Context> &
     validate?(
       values: SettingsModalValues,
       context: Context,
+      modalScope?: string,
     ): Awaitable<readonly SettingsValidationIssue[]>;
     mutate(
       values: SettingsModalValues,
       context: Context,
+      modalScope?: string,
     ): Awaitable<SettingsMutationCallbackResult>;
   }>;
 
