@@ -279,6 +279,43 @@ describe("Components v2 settings rendering", () => {
     });
   });
 
+  it("reserves notice space when paginating direct category fields", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Direct settings",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: Array.from({ length: 8 }, (_, index) => displayField(index)),
+        },
+      ],
+    });
+
+    const ordinary = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const withNotice = await renderer.render(
+      {
+        categoryId: "setup",
+        notice: { kind: "success", message: "Saved" },
+      },
+      { userId: "admin" },
+    );
+    const category = withNotice.components[1];
+
+    expect(withNotice.location.pageCount).toBe(ordinary.location.pageCount);
+    expect(withNotice.location.pageCount).toBe(2);
+    expect(category?.type).toBe(ComponentType.Container);
+    expect(
+      category?.type === ComponentType.Container
+        ? category.components.length
+        : 0,
+    ).toBeLessThanOrEqual(10);
+    expect(JSON.stringify(category)).toContain("Saved");
+  });
+
   it("falls back to field labels for empty dynamic button labels", async () => {
     const renderer = createSettingsRenderer({
       title: "Button labels",

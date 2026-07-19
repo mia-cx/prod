@@ -235,7 +235,10 @@ async function renderSettingsView<Context>(
     category,
     request.subcategoryId ?? category.id,
   );
-  const fieldPages = paginateFields(subcategory.fields, fixedComponentCount());
+  const fieldPages = paginateFields(
+    subcategory.fields,
+    fixedComponentCount(directCategory),
+  );
   const requestedPage = request.page ?? 0;
   const fields = fieldPages[requestedPage];
   if (fields === undefined) {
@@ -317,8 +320,10 @@ function selectSubcategory<Context>(
   return subcategory;
 }
 
-function fixedComponentCount(): number {
-  return 2;
+function fixedComponentCount(directCategory: boolean): number {
+  // Direct pages already contain both their heading and separator. Always
+  // reserve one more slot so a validation notice cannot overflow the page.
+  return directCategory ? 3 : 2;
 }
 
 function paginateFields<Context>(
