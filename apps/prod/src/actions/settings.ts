@@ -104,6 +104,7 @@ export function createGuildSetupSettingsConsumer(
         .filter(
           (role) =>
             role.id !== guild.id &&
+            !role.managed &&
             role.permissions.has(PermissionFlagsBits.ManageGuild),
         )
         .map((role) => ({

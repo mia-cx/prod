@@ -298,6 +298,7 @@ describe("guild setup settings integration", () => {
     const bootstrapGuildId = "123456789012345690";
     const managerRoleId = "123456789012345691";
     const ordinaryRoleId = "123456789012345692";
+    const botManagedRoleId = "123456789012345693";
     const bootstrapGuild = {
       id: bootstrapGuildId,
       ownerId,
@@ -308,6 +309,7 @@ describe("guild setup settings integration", () => {
             bootstrapGuildId,
             {
               id: bootstrapGuildId,
+              managed: false,
               permissions: permissions(PermissionFlagsBits.ManageGuild),
             },
           ],
@@ -315,12 +317,25 @@ describe("guild setup settings integration", () => {
             managerRoleId,
             {
               id: managerRoleId,
+              managed: false,
               permissions: permissions(PermissionFlagsBits.ManageGuild),
             },
           ],
           [
             ordinaryRoleId,
-            { id: ordinaryRoleId, permissions: permissions() },
+            {
+              id: ordinaryRoleId,
+              managed: false,
+              permissions: permissions(),
+            },
+          ],
+          [
+            botManagedRoleId,
+            {
+              id: botManagedRoleId,
+              managed: true,
+              permissions: permissions(PermissionFlagsBits.ManageGuild),
+            },
           ],
         ]),
       },
