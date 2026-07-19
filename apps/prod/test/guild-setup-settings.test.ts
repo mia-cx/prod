@@ -456,9 +456,9 @@ describe("guild setup settings integration", () => {
       '"content":"# Current labels"}],"accessory"',
     );
     expect(labelsPage.indexOf("# Current labels")).toBeLessThan(
-      labelsPage.indexOf("**account:**"),
+      labelsPage.indexOf("`account`:"),
     );
-    expect(labelsPage.indexOf("**account:**")).toBeLessThan(
+    expect(labelsPage.indexOf("`account`:")).toBeLessThan(
       labelsPage.indexOf("Choose a label"),
     );
     expect(labelsPage).not.toContain("Add a label.");
@@ -839,7 +839,7 @@ describe("guild setup settings integration", () => {
     expect(payload).toContain('"label":"Delete"');
     expect(payload).not.toContain("## Edit label");
     expect(payload).not.toContain("## Delete label");
-    expect(payload.indexOf("**account:**")).toBeLessThan(
+    expect(payload.indexOf("`account`:")).toBeLessThan(
       payload.indexOf("Choose a label"),
     );
   });

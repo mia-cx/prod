@@ -101,8 +101,8 @@ const labelListItem = (label: TicketLabel, summarize = false): string => {
         ? labelSummary(label.description)
         : label.description;
   return description === undefined
-    ? `**${escapeMarkdown(label.name)}**`
-    : `**${escapeMarkdown(label.name)}:** ${escapeMarkdown(description)}`;
+    ? inlineCode(label.name)
+    : `${inlineCode(label.name)}: ${escapeMarkdown(description)}`;
 };
 
 const requireGuild = (context: GuildSetupSettingsContext): Guild => {
