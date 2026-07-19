@@ -165,21 +165,38 @@ export type SettingsChannelSelectField<Context> =
       ): Awaitable<SettingsMutationCallbackResult>;
     }>;
 
-export type SettingsModalInput = Readonly<{
+type SettingsModalInputBase = Readonly<{
   id: string;
   label: string;
   description?: string;
+}>;
+
+export type SettingsModalTextInput = SettingsModalInputBase &
+  Readonly<{
+    kind?: "text";
   style?: TextInputStyle;
   placeholder?: string;
   required?: boolean;
   minLength?: number;
   maxLength?: number;
-}>;
+  }>;
+
+export type SettingsModalCheckboxInput = SettingsModalInputBase &
+  Readonly<{
+    kind: "checkbox";
+  }>;
+
+export type SettingsModalInput =
+  | SettingsModalTextInput
+  | SettingsModalCheckboxInput;
+
+export type SettingsModalValue = string | boolean;
+export type SettingsModalValues = Readonly<Record<string, SettingsModalValue>>;
 
 export type SettingsModalView = SettingsFieldView &
   Readonly<{
     buttonLabel?: string;
-    values?: Readonly<Record<string, string>>;
+    values?: SettingsModalValues;
   }>;
 
 export type SettingsModalPresentation =
@@ -193,11 +210,11 @@ export type SettingsModalField<Context> = SettingsFieldBase<"modal", Context> &
     presentation?: SettingsModalPresentation;
     load(context: Context): Awaitable<SettingsModalView>;
     validate?(
-      values: Readonly<Record<string, string>>,
+      values: SettingsModalValues,
       context: Context,
     ): Awaitable<readonly SettingsValidationIssue[]>;
     mutate(
-      values: Readonly<Record<string, string>>,
+      values: SettingsModalValues,
       context: Context,
     ): Awaitable<SettingsMutationCallbackResult>;
   }>;

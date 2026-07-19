@@ -12,6 +12,7 @@ import {
   createSettingsRuntime,
   type SettingsDefinition,
   type SettingsDispatchResult,
+  type SettingsModalValues,
   type SettingsMutationResult,
   type SettingsValidationIssue,
 } from "@protocord/settings";
@@ -77,6 +78,11 @@ const invalid = (
 });
 
 const issue = (message: string): SettingsValidationIssue => ({ message });
+
+const modalText = (values: SettingsModalValues, inputId: string): string => {
+  const value = values[inputId];
+  return typeof value === "string" ? value : "";
+};
 
 const requireGuild = (context: GuildSetupSettingsContext): Guild => {
   if (context.guild === undefined) {
@@ -296,7 +302,7 @@ export function createGuildSetupSettingsConsumer(
                   };
                 },
                 validate: (values) =>
-                  (values["system-prompt"]?.trim().length ?? 0) < 3
+                  modalText(values, "system-prompt").trim().length < 3
                     ? [
                         {
                           inputId: "system-prompt",
@@ -307,7 +313,7 @@ export function createGuildSetupSettingsConsumer(
                 mutate: async (values, context) => {
                   await setup.setSystemPrompt(
                     requireGuild(context),
-                    values["system-prompt"]!,
+                    modalText(values, "system-prompt"),
                   );
                 },
               },
@@ -335,7 +341,7 @@ export function createGuildSetupSettingsConsumer(
                   };
                 },
                 validate: (values) =>
-                  (values["product-knowledge"]?.trim().length ?? 0) < 3
+                  modalText(values, "product-knowledge").trim().length < 3
                     ? [
                         {
                           inputId: "product-knowledge",
@@ -346,7 +352,7 @@ export function createGuildSetupSettingsConsumer(
                 mutate: async (values, context) => {
                   await setup.setProductKnowledgePrompt(
                     requireGuild(context),
-                    values["product-knowledge"]!,
+                    modalText(values, "product-knowledge"),
                   );
                 },
               },
@@ -374,7 +380,7 @@ export function createGuildSetupSettingsConsumer(
                   };
                 },
                 validate: (values) =>
-                  (values["support-workflow"]?.trim().length ?? 0) < 3
+                  modalText(values, "support-workflow").trim().length < 3
                     ? [
                         {
                           inputId: "support-workflow",
@@ -385,7 +391,7 @@ export function createGuildSetupSettingsConsumer(
                 mutate: async (values, context) => {
                   await setup.setSupportWorkflowPrompt(
                     requireGuild(context),
-                    values["support-workflow"]!,
+                    modalText(values, "support-workflow"),
                   );
                 },
               },
@@ -413,7 +419,7 @@ export function createGuildSetupSettingsConsumer(
                   };
                 },
                 validate: (values) =>
-                  (values.safety?.trim().length ?? 0) < 3
+                  modalText(values, "safety").trim().length < 3
                     ? [
                         {
                           inputId: "safety",
@@ -424,7 +430,7 @@ export function createGuildSetupSettingsConsumer(
                 mutate: async (values, context) => {
                   await setup.setSafetyPrompt(
                     requireGuild(context),
-                    values.safety!,
+                    modalText(values, "safety"),
                   );
                 },
               },
@@ -452,7 +458,7 @@ export function createGuildSetupSettingsConsumer(
                   };
                 },
                 validate: (values) =>
-                  (values.tone?.trim().length ?? 0) < 3
+                  modalText(values, "tone").trim().length < 3
                     ? [
                         {
                           inputId: "tone",
@@ -461,7 +467,10 @@ export function createGuildSetupSettingsConsumer(
                       ]
                     : [],
                 mutate: async (values, context) => {
-                  await setup.setTone(requireGuild(context), values.tone!);
+                  await setup.setTone(
+                    requireGuild(context),
+                    modalText(values, "tone"),
+                  );
                 },
               },
             ],
@@ -560,8 +569,8 @@ export function createGuildSetupSettingsConsumer(
             mutate: (values, context) =>
               labelMutation(() =>
                 labelStore.create(requireGuild(context).id, {
-                  name: values.name ?? "",
-                  description: values.description ?? "",
+                  name: modalText(values, "name"),
+                  description: modalText(values, "description"),
                 }),
               ),
           },
@@ -600,10 +609,10 @@ export function createGuildSetupSettingsConsumer(
               labelMutation(() =>
                 labelStore.update(
                   requireGuild(context).id,
-                  values["current-name"] ?? "",
+                  modalText(values, "current-name"),
                   {
-                    name: values.name ?? "",
-                    description: values.description ?? "",
+                    name: modalText(values, "name"),
+                    description: modalText(values, "description"),
                   },
                 ),
               ),
@@ -630,7 +639,7 @@ export function createGuildSetupSettingsConsumer(
               labelMutation(() =>
                 labelStore.deactivate(
                   requireGuild(context).id,
-                  values.name ?? "",
+                  modalText(values, "name"),
                 ),
               ),
           },

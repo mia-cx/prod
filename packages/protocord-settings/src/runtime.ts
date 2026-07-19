@@ -25,6 +25,7 @@ import type {
   SettingsDefinition,
   SettingsField,
   SettingsMentionable,
+  SettingsModalValues,
   SettingsMutationCallbackResult,
   SettingsMutationResult,
   SettingsSubcategory,
@@ -58,7 +59,7 @@ const MODAL_DRAFT_LIMIT = 1_000;
 const MODAL_RESPONSE_TIMEOUT_MS = 2_500;
 
 type ModalDraft = Readonly<{
-  values: Readonly<Record<string, string>>;
+  values: SettingsModalValues;
   expiresAt: number;
 }>;
 
@@ -412,29 +413,41 @@ async function showSettingsModal<Context>(
       action: "modal-submit",
     }),
     title: field.title,
-    components: field.inputs.map((input): APILabelComponent => ({
-      type: ComponentType.Label,
-      label: input.label,
-      ...(input.description === undefined
-        ? {}
-        : { description: input.description }),
-      component: {
-        type: ComponentType.TextInput,
-        custom_id: input.id,
-        style: input.style ?? TextInputStyle.Short,
-        ...(input.placeholder === undefined
+    components: field.inputs.map((input): APILabelComponent => {
+      const value = values[input.id];
+      return {
+        type: ComponentType.Label,
+        label: input.label,
+        ...(input.description === undefined
           ? {}
-          : { placeholder: input.placeholder }),
-        ...(input.required === undefined ? {} : { required: input.required }),
-        ...(input.minLength === undefined
-          ? {}
-          : { min_length: input.minLength }),
-        ...(input.maxLength === undefined
-          ? {}
-          : { max_length: input.maxLength }),
-        ...(values[input.id] === undefined ? {} : { value: values[input.id] }),
-      },
-    })),
+          : { description: input.description }),
+        component:
+          input.kind === "checkbox"
+            ? {
+                type: ComponentType.Checkbox,
+                custom_id: input.id,
+                ...(typeof value === "boolean" ? { default: value } : {}),
+              }
+            : {
+                type: ComponentType.TextInput,
+                custom_id: input.id,
+                style: input.style ?? TextInputStyle.Short,
+                ...(input.placeholder === undefined
+                  ? {}
+                  : { placeholder: input.placeholder }),
+                ...(input.required === undefined
+                  ? {}
+                  : { required: input.required }),
+                ...(input.minLength === undefined
+                  ? {}
+                  : { min_length: input.minLength }),
+                ...(input.maxLength === undefined
+                  ? {}
+                  : { max_length: input.maxLength }),
+                ...(typeof value === "string" ? { value } : {}),
+              },
+      };
+    }),
   } satisfies APIModalInteractionResponseCallbackData);
   return { matched: true, status: "modal-shown" };
 }
@@ -465,12 +478,27 @@ async function beforeModalDeadline<Value>(
 
 function validateModalValues<Context>(
   field: Extract<SettingsField<Context>, { kind: "modal" }>,
-  values: Readonly<Record<string, string>>,
+  values: SettingsModalValues,
 ): void {
   for (const input of field.inputs) {
     const value = values[input.id];
+    if (input.kind === "checkbox") {
+      if (value !== undefined && typeof value !== "boolean") {
+        throw new SettingsViewError(
+          "invalid-view",
+          `settings modal ${field.id} value for ${input.id} must be boolean`,
+        );
+      }
+      continue;
+    }
     const maximum = Math.min(input.maxLength ?? 4_000, 4_000);
-    if (value !== undefined && value.length > maximum) {
+    if (value !== undefined && typeof value !== "string") {
+      throw new SettingsViewError(
+        "invalid-view",
+        `settings modal ${field.id} value for ${input.id} must be text`,
+      );
+    }
+    if (typeof value === "string" && value.length > maximum) {
       throw new SettingsViewError(
         "invalid-view",
         `settings modal ${field.id} value for ${input.id} exceeds ${String(maximum)} characters`,
@@ -671,9 +699,11 @@ async function submitModal<Context>(
   const values = Object.fromEntries(
     field.inputs.map((input) => [
       input.id,
-      interaction.fields.getTextInputValue(input.id),
+      input.kind === "checkbox"
+        ? interaction.fields.getCheckbox(input.id)
+        : interaction.fields.getTextInputValue(input.id),
     ]),
-  );
+  ) as SettingsModalValues;
   const result = await validateAndMutate(
     values,
     context,
@@ -925,7 +955,7 @@ function draftKey(
 function rememberDraft(
   drafts: Map<string, ModalDraft>,
   key: string,
-  values: Readonly<Record<string, string>>,
+  values: SettingsModalValues,
 ): void {
   drafts.delete(key);
   drafts.set(key, {

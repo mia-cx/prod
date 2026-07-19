@@ -65,6 +65,46 @@ describe("consumer settings definitions", () => {
     ).toThrow(/either direct fields or subcategories/);
   });
 
+  it("accepts native checkbox inputs in modals", () => {
+    const definition = validDefinition();
+    const category = definition.categories[0]!;
+
+    expect(() =>
+      defineSettings({
+        ...definition,
+        categories: [
+          {
+            ...category,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "edit",
+                    label: "Edit",
+                    title: "Edit setting",
+                    inputs: [
+                      {
+                        kind: "checkbox",
+                        id: "active",
+                        label: "Active",
+                        description: "Allow this setting to be selected.",
+                      },
+                    ],
+                    load: () => ({ values: { active: true } }),
+                    mutate: () => undefined,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
   it("rejects duplicate and unstable consumer IDs", () => {
     const definition = validDefinition();
     const category = definition.categories[0]!;

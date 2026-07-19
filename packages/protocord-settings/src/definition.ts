@@ -174,6 +174,7 @@ function validateModalField<Context>(
       input.description,
       100,
     );
+    if (input.kind === "checkbox") continue;
     assertOptionalText(
       `modal input ${input.id} placeholder`,
       input.placeholder,

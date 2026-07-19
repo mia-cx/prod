@@ -1,6 +1,7 @@
 import {
   ChannelType,
   Collection,
+  ComponentType,
   MessageFlags,
   type Interaction,
   type RepliableInteraction,
@@ -13,6 +14,7 @@ import {
   type SettingsChannel,
   type SettingsDefinition,
   type SettingsMentionable,
+  type SettingsModalValues,
   type SettingsRouteAction,
 } from "../src/index.js";
 
@@ -38,8 +40,8 @@ const mutateMentionables = vi.fn((values: readonly SettingsMentionable[]) => {
 const mutateChannels = vi.fn((values: readonly SettingsChannel[]) => {
   state.channels = values;
 });
-const mutateName = vi.fn((values: Readonly<Record<string, string>>) => {
-  state.name = values.name ?? state.name;
+const mutateName = vi.fn((values: SettingsModalValues) => {
+  if (typeof values.name === "string") state.name = values.name;
 });
 
 const definition: SettingsDefinition<Context> = {
@@ -113,7 +115,7 @@ const definition: SettingsDefinition<Context> = {
                 disabled: state.identityDisabled,
               }),
               validate: (values) =>
-                (values.name?.length ?? 0) < 2
+                (typeof values.name !== "string" || values.name.length < 2)
                   ? [
                       {
                         inputId: "name",
@@ -737,6 +739,100 @@ describe("Discord settings runtime", () => {
       runtime.handle(valid.interaction, { userId: "admin" }),
     ).resolves.toEqual({ matched: true, status: "mutated" });
     expect(state.name).toBe("Prod Support");
+  });
+
+  it("renders, submits, and preserves native checkbox modal values", async () => {
+    const mutate = vi.fn();
+    const checkboxRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Checkbox settings",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "preferences",
+                    label: "Preferences",
+                    title: "Edit preferences",
+                    inputs: [
+                      { id: "name", label: "Name" },
+                      {
+                        kind: "checkbox",
+                        id: "active",
+                        label: "Active",
+                        description: "Allow this setting to be selected.",
+                      },
+                    ],
+                    load: () => ({
+                      values: { name: "Bug", active: true },
+                    }),
+                    validate: (values) =>
+                      values.name === "x"
+                        ? [{ inputId: "name", message: "Too short." }]
+                        : [],
+                    mutate,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const open = mockInteraction("button", route("modal", "preferences"));
+
+    await checkboxRuntime.handle(open.interaction, { userId: "admin" });
+
+    const payload = JSON.stringify(open.showModal.mock.calls[0]?.[0]);
+    expect(payload).toContain(`"type":${String(ComponentType.Checkbox)}`);
+    expect(payload).toContain('"custom_id":"active"');
+    expect(payload).toContain('"default":true');
+
+    const invalid = mockInteraction(
+      "modal",
+      route("modal-submit", "preferences"),
+      {
+        fields: {
+          getTextInputValue: () => "x",
+          getCheckbox: () => false,
+        },
+      },
+    );
+    await expect(
+      checkboxRuntime.handle(invalid.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "validation-failed" });
+    expect(mutate).not.toHaveBeenCalled();
+
+    const retry = mockInteraction("button", route("modal", "preferences"));
+    await checkboxRuntime.handle(retry.interaction, { userId: "admin" });
+    const retryPayload = JSON.stringify(retry.showModal.mock.calls[0]?.[0]);
+    expect(retryPayload).toContain('"value":"x"');
+    expect(retryPayload).toContain('"default":false');
+
+    const valid = mockInteraction(
+      "modal",
+      route("modal-submit", "preferences"),
+      {
+        fields: {
+          getTextInputValue: () => "Feature",
+          getCheckbox: () => false,
+        },
+      },
+    );
+    await expect(
+      checkboxRuntime.handle(valid.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "mutated" });
+    expect(mutate).toHaveBeenCalledWith(
+      { name: "Feature", active: false },
+      { userId: "admin" },
+    );
   });
 
   it("isolates modal drafts to their originating settings message", async () => {
