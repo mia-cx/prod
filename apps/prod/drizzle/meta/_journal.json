@@ -36,6 +36,20 @@
       "when": 1784282692113,
       "tag": "0004_bumpy_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784422001482,
+      "tag": "0005_pink_the_hood",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784422027971,
+      "tag": "0006_flaky_terrax",
+      "breakpoints": true
     }
   ]
 }

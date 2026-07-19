@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "06acae9f-a7d2-426f-9cba-70bbd78516a1",
-  "prevId": "e25535dd-1bd7-489b-87bd-12217b22e0fc",
+  "id": "3a2ca138-f04c-4cd3-8635-aa214442e5b7",
+  "prevId": "0039b839-b771-4300-bb91-7661f185cc0a",
   "tables": {
     "guild_settings": {
       "name": "guild_settings",
@@ -233,6 +233,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "number": {
+          "name": "number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "guild_id": {
           "name": "guild_id",
           "type": "text",
@@ -325,6 +332,14 @@
             "status"
           ],
           "isUnique": false
+        },
+        "tickets_guild_number": {
+          "name": "tickets_guild_number",
+          "columns": [
+            "guild_id",
+            "number"
+          ],
+          "isUnique": true
         },
         "tickets_reporter_active": {
           "name": "tickets_reporter_active",
