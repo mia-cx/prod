@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { sql } from "drizzle-orm";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { openDatabase } from "../src/database.js";
 import { permissionRules } from "../src/schema.js";
@@ -10,6 +12,18 @@ import {
 } from "../src/migrations.js";
 
 describe("application-owned migration history", () => {
+  it("keeps migration timestamps strictly increasing", async () => {
+    const journal = JSON.parse(
+      await readFile(join(migrationsFolder, "meta/_journal.json"), "utf8"),
+    ) as { entries: Array<{ when: number }> };
+
+    expect(journal.entries.map((entry) => entry.when)).toEqual(
+      [...journal.entries]
+        .map((entry) => entry.when)
+        .sort((left, right) => left - right),
+    );
+  });
+
   it("applies the checked-in Drizzle history as one application-owned stream", async () => {
     const connection = openDatabase(":memory:");
     const onHistoryApplied = vi.fn();
