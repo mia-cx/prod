@@ -87,9 +87,9 @@ const modalText = (values: SettingsModalValues, inputId: string): string => {
 
 const labelSummary = (description: string): string => {
   const characters = Array.from(description);
-  return characters.length <= 100
+  return characters.length <= 50
     ? description
-    : `${characters.slice(0, 99).join("")}…`;
+    : `${characters.slice(0, 49).join("")}…`;
 };
 
 const labelListItem = (label: TicketLabel, summarize = false): string => {

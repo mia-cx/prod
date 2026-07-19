@@ -926,8 +926,8 @@ describe("guild setup settings integration", () => {
     for (let index = 0; index < customNames.length - 1; index++) {
       expect(payload).toContain(`${String(index).padStart(2, "0")}-`);
     }
-    expect(payload).toContain(`${"x".repeat(99)}…`);
-    expect(payload).not.toContain("x".repeat(100));
+    expect(payload).toContain(`${"x".repeat(49)}…`);
+    expect(payload).not.toContain("x".repeat(50));
     expect(payload).toContain("zz-");
 
     const overflow = component("modal", labelModalRoute("label-create"), {
