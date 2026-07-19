@@ -902,6 +902,9 @@ describe("ticket provisioning", () => {
     const service = createTicketProvisioningService(settings, store, discord);
 
     try {
+      await expect(
+        service.discoverRecoveryThreads(async () => guild),
+      ).resolves.toEqual({ discovered: 1, failed: 0 });
       await expect(service.recover(async () => guild)).resolves.toEqual({
         recovered: 1,
         failed: 0,
@@ -1132,7 +1135,7 @@ describe("Discord ticket privacy adapter", () => {
     const edit = vi.fn().mockResolvedValue(undefined);
     const send = vi.fn();
     const mockGuild = {
-      roles: { everyone: { id: "everyone" } },
+      roles: { everyone: { id: "everyone" }, cache: new Collection() },
       members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
@@ -1142,7 +1145,10 @@ describe("Discord ticket privacy adapter", () => {
             cache: new Collection([
               [
                 "everyone",
-                { deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads) },
+                {
+                  id: "everyone",
+                  deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads),
+                },
               ],
             ]),
           },
@@ -1199,10 +1205,13 @@ describe("Discord ticket privacy adapter", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("refuses reporter access while the hub contains a public thread", async () => {
+  it("refuses reporter access after a conflicting hub overwrite drifts", async () => {
     const edit = vi.fn();
     const mockGuild = {
-      roles: { everyone: { id: "everyone" } },
+      roles: {
+        everyone: { id: "everyone" },
+        cache: new Collection([["role-1", { id: "role-1" }]]),
+      },
       members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
@@ -1212,7 +1221,69 @@ describe("Discord ticket privacy adapter", () => {
             cache: new Collection([
               [
                 "everyone",
-                { deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads) },
+                {
+                  id: "everyone",
+                  deny: new PermissionsBitField(
+                    PermissionFlagsBits.ManageThreads,
+                  ),
+                },
+              ],
+              [
+                "role-1",
+                {
+                  id: "role-1",
+                  type: OverwriteType.Role,
+                  allow: new PermissionsBitField(
+                    PermissionFlagsBits.SendMessages,
+                  ),
+                },
+              ],
+            ]),
+          },
+          threads: {
+            fetchActive: vi.fn().mockResolvedValue({
+              threads: new Collection(),
+            }),
+            fetchArchived: vi.fn().mockResolvedValue({
+              threads: new Collection(),
+              hasMore: false,
+            }),
+          },
+          messages: {
+            fetch: vi.fn().mockResolvedValue(new Collection()),
+          },
+        }),
+      },
+    } as unknown as Guild;
+
+    await expect(
+      createTicketProvisioningDiscord().grantReporterAccess(
+        mockGuild,
+        "hub-1",
+        reporter,
+        new Set(),
+      ),
+    ).rejects.toThrow("channel-specific role or member allows");
+    expect(edit).not.toHaveBeenCalled();
+  });
+
+  it("refuses reporter access while the hub contains a public thread", async () => {
+    const edit = vi.fn();
+    const mockGuild = {
+      roles: { everyone: { id: "everyone" }, cache: new Collection() },
+      members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
+      channels: {
+        fetch: vi.fn().mockResolvedValue({
+          type: ChannelType.GuildText,
+          permissionOverwrites: {
+            edit,
+            cache: new Collection([
+              [
+                "everyone",
+                {
+                  id: "everyone",
+                  deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads),
+                },
               ],
             ]),
           },
@@ -1251,7 +1322,7 @@ describe("Discord ticket privacy adapter", () => {
   it("refuses reporter access while the hub contains an unmanaged private thread", async () => {
     const edit = vi.fn();
     const mockGuild = {
-      roles: { everyone: { id: "everyone" } },
+      roles: { everyone: { id: "everyone" }, cache: new Collection() },
       members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
@@ -1262,6 +1333,7 @@ describe("Discord ticket privacy adapter", () => {
               [
                 "everyone",
                 {
+                  id: "everyone",
                   deny: new PermissionsBitField(
                     PermissionFlagsBits.ManageThreads,
                   ),
@@ -1307,7 +1379,7 @@ describe("Discord ticket privacy adapter", () => {
   it("refuses reporter access while the hub contains unmanaged history", async () => {
     const edit = vi.fn();
     const mockGuild = {
-      roles: { everyone: { id: "everyone" } },
+      roles: { everyone: { id: "everyone" }, cache: new Collection() },
       members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
@@ -1317,7 +1389,10 @@ describe("Discord ticket privacy adapter", () => {
             cache: new Collection([
               [
                 "everyone",
-                { deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads) },
+                {
+                  id: "everyone",
+                  deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads),
+                },
               ],
             ]),
           },
@@ -1458,6 +1533,7 @@ describe("Discord ticket privacy adapter", () => {
     const match = {
       id: "thread-match",
       name: "ticket-ticketst",
+      ownerId: "bot-1",
       type: ChannelType.PrivateThread,
     };
     const fetchArchived = vi
@@ -1473,7 +1549,19 @@ describe("Discord ticket privacy adapter", () => {
     const hub = {
       type: ChannelType.GuildText,
       threads: {
-        fetchActive: vi.fn().mockResolvedValue({ threads: new Collection() }),
+        fetchActive: vi.fn().mockResolvedValue({
+          threads: new Collection([
+            [
+              "thread-impostor",
+              {
+                id: "thread-impostor",
+                name: "ticket-ticketst",
+                ownerId: "staff-1",
+                type: ChannelType.PrivateThread,
+              },
+            ],
+          ]),
+        }),
         fetchArchived,
       },
     };
@@ -1490,7 +1578,10 @@ describe("Discord ticket privacy adapter", () => {
       client: { rest: { get: getThreadMember } },
     };
     const fetch = vi.fn(async (id: string) => (id === "hub-1" ? hub : thread));
-    const mockGuild = { channels: { fetch } } as unknown as Guild;
+    const mockGuild = {
+      channels: { fetch },
+      members: { me: { id: "bot-1" } },
+    } as unknown as Guild;
     const adapter = createTicketProvisioningDiscord();
     const ticket = {
       id: "ticket-stale",
@@ -1561,6 +1652,7 @@ describe("Discord ticket privacy adapter", () => {
 
   it("edits deterministic instructions found by marker instead of duplicating them", async () => {
     const edit = vi.fn().mockResolvedValue({ id: "message-existing" });
+    const editCollision = vi.fn();
     const send = vi.fn();
     const messages = new Collection([
       [
@@ -1570,6 +1662,16 @@ describe("Discord ticket privacy adapter", () => {
           content: "copied marker ticket:42",
           author: { id: "reporter-1" },
           editable: false,
+        },
+      ],
+      [
+        "message-collision",
+        {
+          id: "message-collision",
+          content: "-# Managed by Prod · ticket:420",
+          author: { id: "bot-1" },
+          editable: true,
+          edit: editCollision,
         },
       ],
       [
@@ -1614,6 +1716,7 @@ describe("Discord ticket privacy adapter", () => {
       previousContent: "-# Managed by Prod · ticket:ticket-stale",
     });
     expect(edit).toHaveBeenCalledOnce();
+    expect(editCollision).not.toHaveBeenCalled();
     expect(edit).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining("ticket:42"),

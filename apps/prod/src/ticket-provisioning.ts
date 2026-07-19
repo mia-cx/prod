@@ -23,6 +23,7 @@ import {
   findPublicSupportHubThreads,
   findUnmanagedActivePrivateSupportHubThreads,
   findUnmanagedSupportHubMessages,
+  supportHubOverwriteConflict,
 } from "./support-hub.js";
 import {
   captureReporterHubAccess,
@@ -102,6 +103,9 @@ export interface TicketProvisioningDiscord {
 
 export interface TicketProvisioningService {
   open(input: OpenTicketInput): Promise<Ticket>;
+  discoverRecoveryThreads(
+    resolveGuild: (guildId: string) => Promise<Guild>,
+  ): Promise<Readonly<{ discovered: number; failed: number }>>;
   recover(
     resolveGuild: (guildId: string) => Promise<Guild>,
   ): Promise<Readonly<{ recovered: number; failed: number }>>;
@@ -211,9 +215,12 @@ const requirePrivateThread = async (
 const findNamedThread = async (
   threads: TextChannel["threads"],
   names: ReadonlySet<string>,
+  ownerId: string,
 ): Promise<PrivateThreadChannel | undefined> => {
   const active = await threads.fetchActive();
-  const activeMatch = active.threads.find((thread) => names.has(thread.name));
+  const activeMatch = active.threads.find(
+    (thread) => thread.ownerId === ownerId && names.has(thread.name),
+  );
   if (activeMatch?.type === ChannelType.PrivateThread) return activeMatch;
   let before: PrivateThreadChannel | undefined;
   for (let page = 0; page < 10; page += 1) {
@@ -224,7 +231,7 @@ const findNamedThread = async (
       ...(before === undefined ? {} : { before }),
     });
     const archivedMatch = archived.threads.find(
-      (thread) => names.has(thread.name),
+      (thread) => thread.ownerId === ownerId && names.has(thread.name),
     );
     if (archivedMatch?.type === ChannelType.PrivateThread) {
       return archivedMatch;
@@ -249,11 +256,14 @@ const findManagedOpening = async (
   thread: PrivateThreadChannel,
   ticket: Ticket,
 ): Promise<Message | undefined> => {
-  const markers = new Set([`ticket:${ticket.number}`, `ticket:${ticket.id}`]);
+  const footers = new Set([
+    `-# Managed by Prod · ticket:${ticket.number}`,
+    `-# Managed by Prod · ticket:${ticket.id}`,
+  ]);
   const isOwnedOpening = (message: Message): boolean =>
     message.author.id === thread.client.user?.id &&
     message.editable &&
-    [...markers].some((marker) => message.content.includes(marker));
+    [...footers].some((footer) => message.content.endsWith(footer));
   if (ticket.openingMessageId !== undefined) {
     const stored = await thread.messages
       .fetch(ticket.openingMessageId)
@@ -289,6 +299,14 @@ export const createTicketProvisioningDiscord =
       ) => {
         const hub = await requireHub(guild, hubChannelId);
         const botMember = guild.members.me ?? (await guild.members.fetchMe());
+        const overwriteConflict = supportHubOverwriteConflict(
+          hub,
+          guild,
+          botMember,
+        );
+        if (overwriteConflict !== undefined) {
+          throw new Error(overwriteConflict);
+        }
         const [publicThreads, unmanagedPrivateThreads, unmanagedMessages] =
           await Promise.all([
           findPublicSupportHubThreads(hub),
@@ -377,6 +395,7 @@ export const createTicketProvisioningDiscord =
           }
         }
         const hub = await requireHub(guild, ticket.hubChannelId);
+        const botMember = guild.members.me ?? (await guild.members.fetchMe());
         return (
           await findNamedThread(
             hub.threads,
@@ -384,6 +403,7 @@ export const createTicketProvisioningDiscord =
               ticketThreadName(ticket),
               legacyTicketThreadName(ticket),
             ]),
+            botMember.id,
           )
         )?.id;
       },
@@ -718,7 +738,7 @@ export const createTicketProvisioningService = (
       await store.beginReporterAccess(ticket, snapshot);
       accessOwnershipStarted = true;
       const managedThreadIds = new Set(
-        await store.listActiveThreadIds(ticket.guildId, ticket.hubChannelId),
+        await store.listManagedThreadIds(ticket.guildId, ticket.hubChannelId),
       );
       await discord.grantReporterAccess(
         guild,
@@ -791,6 +811,34 @@ export const createTicketProvisioningService = (
           return provision(input.guild, ticket, false);
         });
       }),
+    discoverRecoveryThreads: async (resolveGuild) => {
+      let discovered = 0;
+      let failed = 0;
+      for (const ticket of await store.listProvisioning()) {
+        if (ticket.threadId !== undefined) continue;
+        await executeGuildOperation(ticket.guildId, () =>
+          execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
+            try {
+              const state = await settings.get(ticket.guildId);
+              if (state.hubChannelId !== ticket.hubChannelId) return;
+              const guild = await resolveGuild(ticket.guildId);
+              const threadId = await discord.findTicketThread(guild, ticket);
+              if (threadId === undefined) return;
+              await store.recordProgress(
+                ticket.id,
+                "thread_created",
+                { recovered: true, legacyDiscovery: true },
+                { threadId },
+              );
+              discovered += 1;
+            } catch {
+              failed += 1;
+            }
+          }),
+        );
+      }
+      return Object.freeze({ discovered, failed });
+    },
     recover: async (resolveGuild) => {
       let recovered = 0;
       let failed = 0;
@@ -881,7 +929,7 @@ export const createTicketProvisioningService = (
             );
           }
           const managedThreadIds = new Set(
-            await store.listActiveThreadIds(guild.id, hubChannelId),
+            await store.listManagedThreadIds(guild.id, hubChannelId),
           );
           let resumed = 0;
           for (const ownership of ownerships) {

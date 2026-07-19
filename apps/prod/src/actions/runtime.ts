@@ -234,6 +234,12 @@ export const createProdActionRuntime = (
     refreshCommands: (client) => registerDiscordCommands(client, registry),
     reconcile: async (client) => {
       const hubSafetyFailures: unknown[] = [];
+      const reconciledGuilds: Array<
+        readonly [
+          Guild,
+          Awaited<ReturnType<typeof settings.reconcile>>,
+        ]
+      > = [];
       for (const guild of client.guilds.cache.values()) {
         let state: Awaited<ReturnType<typeof settings.reconcile>>;
         try {
@@ -242,6 +248,20 @@ export const createProdActionRuntime = (
           hubSafetyFailures.push(error);
           continue;
         }
+        reconciledGuilds.push([guild, state]);
+      }
+      const discovery =
+        await options.ticketProvisioningService.discoverRecoveryThreads(
+          async (guildId) => client.guilds.fetch(guildId),
+        );
+      if (discovery.failed > 0) {
+        hubSafetyFailures.push(
+          new Error(
+            `Prod could not discover ${String(discovery.failed)} interrupted ticket threads before restoring hub access`,
+          ),
+        );
+      }
+      for (const [guild, state] of reconciledGuilds) {
         if (state.hubChannelId !== undefined) {
           try {
             await reconcileHubSafety(guild, state.hubChannelId);

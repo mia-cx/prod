@@ -34,6 +34,10 @@ const operatorId = "123456789012345676";
 const connections: DatabaseConnection[] = [];
 const ticketProvisioningService: TicketProvisioningService = {
   open: vi.fn(),
+  discoverRecoveryThreads: vi.fn().mockResolvedValue({
+    discovered: 0,
+    failed: 0,
+  }),
   recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
   canReleaseHub: vi.fn().mockResolvedValue(true),
   suspendHubAccess: vi.fn().mockResolvedValue(0),

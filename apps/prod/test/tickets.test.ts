@@ -130,8 +130,17 @@ describe("SQLite ticket store", () => {
         originatingAlias: "report",
       });
       expect(await store.hasOtherActiveTicket(first)).toBe(true);
+      await store.recordProgress(
+        second.id,
+        "thread_created",
+        {},
+        { threadId: "thread-failed" },
+      );
       await store.markFailed(second.id, "controlled failure");
       expect(await store.hasOtherActiveTicket(first)).toBe(false);
+      expect(await store.listManagedThreadIds("guild-1", "hub-1")).toEqual([
+        "thread-failed",
+      ]);
       const otherHub = await store.create({
         id: "ticket-3",
         guildId: "guild-1",

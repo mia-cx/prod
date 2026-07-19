@@ -100,6 +100,10 @@ const ticketProvisioningService: TicketProvisioningService = {
     createdAt: "2026-07-17T10:00:00.000Z",
     updatedAt: "2026-07-17T10:00:00.000Z",
   }),
+  discoverRecoveryThreads: vi.fn().mockResolvedValue({
+    discovered: 0,
+    failed: 0,
+  }),
   recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
   canReleaseHub: vi.fn().mockResolvedValue(true),
   suspendHubAccess: vi.fn().mockResolvedValue(0),
@@ -565,6 +569,7 @@ describe("Prod action runtime", () => {
 
   it("resolves guilds through the ready client during startup reconciliation", async () => {
     vi.mocked(supportHubDiscord.deletePublicThreads).mockClear();
+    vi.mocked(ticketProvisioningService.discoverRecoveryThreads).mockClear();
     vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
     vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
     const fetchGuild = vi.fn().mockResolvedValue({ id: "guild-stale" });
@@ -590,6 +595,11 @@ describe("Prod action runtime", () => {
     await runtime.reconcile!(client);
 
     expect(ticketProvisioningService.recover).toHaveBeenCalledOnce();
+    expect(
+      ticketProvisioningService.discoverRecoveryThreads,
+    ).toHaveBeenCalledBefore(
+      vi.mocked(ticketProvisioningService.resumeHubAccess),
+    );
     expect(supportHubDiscord.deletePublicThreads).toHaveBeenCalledWith(
       { id: "guild-1" },
       "123456789012345678",

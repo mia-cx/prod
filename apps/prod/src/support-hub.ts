@@ -270,7 +270,7 @@ const fetchTextChannel = async (
   return channel?.type === ChannelType.GuildText ? channel : undefined;
 };
 
-const conflictingOverwriteIssue = (
+export const supportHubOverwriteConflict = (
   channel: TextChannel,
   guild: Guild,
   botMember: GuildMember,
@@ -318,7 +318,7 @@ const resolveHub = async (
   const missing = requiredBotPermissions
     .filter(([, permission]) => permissions?.has(permission) !== true)
     .map(([name]) => name);
-  const conflict = conflictingOverwriteIssue(channel, guild, botMember);
+  const conflict = supportHubOverwriteConflict(channel, guild, botMember);
   const [publicThreads, unmanagedMessages] =
     missing.length === 0
       ? await Promise.all([
