@@ -562,20 +562,11 @@ export function createGuildSetupSettingsConsumer(
         authorize: authorizeLabels,
         fields: [
           {
-            kind: "display",
-            id: "label-list",
-            label: "Current labels",
-            load: async (context) => ({
-              value: (await labelStore.list(requireGuild(context).id))
-                .map(labelListItem)
-                .join("\n"),
-            }),
-          },
-          {
             kind: "modal",
             id: "label-create",
-            label: "Create label",
+            label: "Current labels",
             title: "Create ticket label",
+            presentation: { kind: "section" },
             inputs: [
               {
                 id: "name",
@@ -593,9 +584,11 @@ export function createGuildSetupSettingsConsumer(
                 maxLength: 500,
               },
             ],
-            load: () => ({
-              value: "Add a label.",
-              buttonLabel: "Create",
+            load: async (context) => ({
+              value: (await labelStore.list(requireGuild(context).id))
+                .map(labelListItem)
+                .join("\n"),
+              buttonLabel: "Create label",
             }),
             mutate: (values, context) =>
               labelMutation(async () => {

@@ -448,6 +448,9 @@ describe("guild setup settings integration", () => {
     expect(labelsPage).toContain("Select a label to manage it.");
     expect(labelsPage).toContain("Choose a label");
     expect(labelsPage).toContain("Create label");
+    expect(labelsPage).not.toContain("## Create label");
+    expect(labelsPage).toContain("# Current labels");
+    expect(labelsPage).not.toContain("Add a label.");
     expect(labelsPage).not.toContain("Choose a settings page");
     expect(labelsPage).not.toContain("Ticket labels:");
 
@@ -839,6 +842,9 @@ describe("guild setup settings integration", () => {
     const payload = JSON.stringify(labelsCategory.editReply.mock.calls[0]?.[0]);
     expect(payload).toContain("Current labels");
     expect(payload).toContain("Create label");
+    expect(payload).not.toContain("## Create label");
+    expect(payload).toContain("# Current labels");
+    expect(payload).not.toContain("Add a label.");
     expect(payload).not.toContain("Choose a label");
   });
 

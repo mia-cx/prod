@@ -201,6 +201,7 @@ export type SettingsModalView = SettingsFieldView &
 
 export type SettingsModalPresentation =
   | Readonly<{ kind: "inline" }>
+  | Readonly<{ kind: "section" }>
   | Readonly<{ kind: "preview"; maxLength: number }>;
 
 export type SettingsModalField<Context> = SettingsFieldBase<"modal", Context> &

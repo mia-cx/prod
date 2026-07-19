@@ -472,6 +472,19 @@ function renderModalField<Context>(
       ),
     ];
   }
+  if (field.presentation?.kind === "section") {
+    return [
+      buttonSection(
+        [`# ${field.label}`, view.value]
+          .filter((part) => part !== undefined)
+          .join("\n"),
+        buttonLabel,
+        customId,
+        ButtonStyle.Secondary,
+        view.disabled,
+      ),
+    ];
+  }
   if (field.presentation?.kind === "preview") {
     return [
       buttonSection(

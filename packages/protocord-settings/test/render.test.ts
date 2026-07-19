@@ -519,7 +519,7 @@ describe("Components v2 settings rendering", () => {
     expect(payload).toContain('"label":"Form fallback"');
   });
 
-  it("renders inline modal values and separately truncated previews", async () => {
+  it("renders inline, section, and separately truncated modal presentations", async () => {
     const longPreview = "x".repeat(301);
     const renderer = createSettingsRenderer<Context>({
       title: "Modal presentations",
@@ -529,6 +529,19 @@ describe("Components v2 settings rendering", () => {
           label: "Identity",
           authorize: () => true,
           fields: [
+            {
+              kind: "modal",
+              id: "labels",
+              label: "Current labels",
+              title: "Create label",
+              presentation: { kind: "section" },
+              inputs: [{ id: "name", label: "Name" }],
+              load: () => ({
+                value: "**bug:** Unexpected behavior.",
+                buttonLabel: "Create label",
+              }),
+              mutate: () => undefined,
+            },
             {
               kind: "modal",
               id: "name",
@@ -561,7 +574,13 @@ describe("Components v2 settings rendering", () => {
     const contents = textDisplayContents(view.components);
 
     expect(contents).toContain("**Name:** Prod");
+    expect(contents).toContain(
+      "# Current labels\n**bug:** Unexpected behavior.",
+    );
     expect(contents).toContain("**Style prompt**");
+    expect(JSON.stringify(view.components)).toContain(
+      '"label":"Create label"',
+    );
     expect(contents).toContain(`${"x".repeat(299)}…`);
     expect(contents).not.toContain(longPreview);
   });
