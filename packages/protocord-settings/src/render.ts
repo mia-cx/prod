@@ -19,6 +19,7 @@ import {
 
 import type {
   SettingsAuthorizationDecision,
+  SettingsActionRowField,
   SettingsCategory,
   SettingsChannelSelectField,
   SettingsDefinition,
@@ -413,6 +414,8 @@ async function renderField<Context>(
         ),
       ];
     }
+    case "action-row":
+      return renderActionRowField(field, location, context);
     case "modal":
       return renderModalField(field, location, await field.load(context));
     case "string-select":
@@ -426,6 +429,29 @@ async function renderField<Context>(
     case "channel-select":
       return renderChannelSelect(field, location, await field.load(context));
   }
+}
+
+async function renderActionRowField<Context>(
+  field: SettingsActionRowField<Context>,
+  location: ResolvedSettingsLocation,
+  context: Context,
+): Promise<readonly APIComponentInContainer[]> {
+  const items: APIButtonComponentWithCustomId[] = [];
+  for (const item of field.items) {
+    if (item.visible !== undefined && !(await item.visible(context))) continue;
+    const view = await item.load(context);
+    items.push({
+      type: ComponentType.Button as const,
+      custom_id: encodeFieldRoute(item.kind, location, item.id),
+      style:
+        item.kind === "button"
+          ? (item.style ?? ButtonStyle.Secondary)
+          : ButtonStyle.Secondary,
+      label: truncate(view.buttonLabel || item.label, 80),
+      ...(view.disabled === undefined ? {} : { disabled: view.disabled }),
+    });
+  }
+  return items.length === 0 ? [] : [actionRow(...items)];
 }
 
 function renderModalField<Context>(

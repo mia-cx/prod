@@ -803,7 +803,7 @@ function resolveRoute<Context>(
   const field =
     route.fieldId === undefined
       ? undefined
-      : subcategory.fields.find(({ id }) => id === route.fieldId);
+      : findRouteField(subcategory.fields, route.fieldId);
   if (route.fieldId !== undefined && field === undefined) {
     return undefined;
   }
@@ -813,6 +813,20 @@ function resolveRoute<Context>(
     subcategory,
     ...(field === undefined ? {} : { field }),
   };
+}
+
+function findRouteField<Context>(
+  fields: readonly SettingsField<Context>[],
+  fieldId: string,
+): SettingsField<Context> | undefined {
+  for (const field of fields) {
+    if (field.id === fieldId) return field;
+    if (field.kind === "action-row") {
+      const item = field.items.find(({ id }) => id === fieldId);
+      if (item !== undefined) return item;
+    }
+  }
+  return undefined;
 }
 
 async function requireAuthorization<Context>(

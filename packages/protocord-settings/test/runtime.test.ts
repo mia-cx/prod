@@ -741,6 +741,61 @@ describe("Discord settings runtime", () => {
     expect(state.name).toBe("Prod Support");
   });
 
+  it("routes modal and mutation buttons nested in an action row", async () => {
+    const mutate = vi.fn();
+    const rowRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Action row settings",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "action-row",
+                    id: "actions",
+                    label: "Actions",
+                    items: [
+                      {
+                        kind: "modal",
+                        id: "edit",
+                        label: "Edit",
+                        title: "Edit setting",
+                        inputs: [{ id: "name", label: "Name" }],
+                        load: () => ({ values: { name: "Bug" } }),
+                        mutate: () => undefined,
+                      },
+                      {
+                        kind: "button",
+                        id: "delete",
+                        label: "Delete",
+                        load: () => ({}),
+                        mutate,
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const edit = mockInteraction("button", route("modal", "edit"));
+    const deletion = mockInteraction("button", route("button", "delete"));
+
+    await rowRuntime.handle(edit.interaction, { userId: "admin" });
+    await rowRuntime.handle(deletion.interaction, { userId: "admin" });
+
+    expect(edit.showModal).toHaveBeenCalledOnce();
+    expect(mutate).toHaveBeenCalledOnce();
+  });
+
   it("renders, submits, and preserves native checkbox modal values", async () => {
     const mutate = vi.fn();
     const checkboxRuntime = createSettingsRuntime<Context>({

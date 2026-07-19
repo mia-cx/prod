@@ -174,11 +174,11 @@ type SettingsModalInputBase = Readonly<{
 export type SettingsModalTextInput = SettingsModalInputBase &
   Readonly<{
     kind?: "text";
-  style?: TextInputStyle;
-  placeholder?: string;
-  required?: boolean;
-  minLength?: number;
-  maxLength?: number;
+    style?: TextInputStyle;
+    placeholder?: string;
+    required?: boolean;
+    minLength?: number;
+    maxLength?: number;
   }>;
 
 export type SettingsModalCheckboxInput = SettingsModalInputBase &
@@ -217,11 +217,22 @@ export type SettingsModalField<Context> = SettingsFieldBase<"modal", Context> &
       values: SettingsModalValues,
       context: Context,
     ): Awaitable<SettingsMutationCallbackResult>;
-  }>;
+    }>;
+
+export type SettingsActionRowItem<Context> =
+  | SettingsButtonField<Context>
+  | SettingsModalField<Context>;
+
+export type SettingsActionRowField<Context> =
+  SettingsFieldBase<"action-row", Context> &
+    Readonly<{
+      items: readonly SettingsActionRowItem<Context>[];
+    }>;
 
 export type SettingsField<Context> =
   | SettingsDisplayField<Context>
   | SettingsButtonField<Context>
+  | SettingsActionRowField<Context>
   | SettingsStringSelectField<Context>
   | SettingsMentionableSelectField<Context>
   | SettingsChannelSelectField<Context>

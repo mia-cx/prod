@@ -387,6 +387,55 @@ describe("Components v2 settings rendering", () => {
     expect(payload).not.toContain("**Current:**");
   });
 
+  it("renders modal and mutation buttons in one action row", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Inline actions",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "action-row",
+              id: "actions",
+              label: "Actions",
+              items: [
+                {
+                  kind: "modal",
+                  id: "edit",
+                  label: "Edit",
+                  title: "Edit setting",
+                  inputs: [{ id: "name", label: "Name" }],
+                  load: () => ({}),
+                  mutate: () => undefined,
+                },
+                {
+                  kind: "button",
+                  id: "delete",
+                  label: "Delete",
+                  style: ButtonStyle.Danger,
+                  load: () => ({}),
+                  mutate: () => undefined,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const rows = JSON.stringify(rendered.components).match(
+      /"type":1,"components":\[\{"type":2[^\]]+"label":"Edit"[^\]]+"label":"Delete"[^\]]+\]/g,
+    );
+
+    expect(rows).toHaveLength(1);
+  });
+
   it("reserves notice space when paginating direct category fields", async () => {
     const renderer = createSettingsRenderer<Context>({
       title: "Direct settings",

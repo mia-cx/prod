@@ -1,4 +1,5 @@
 import type {
+  SettingsActionRowField,
   SettingsDefinition,
   SettingsField,
   SettingsModalField,
@@ -121,7 +122,12 @@ function validateFields<Context>(
     );
   }
   assertUnique(
-    fields.map(({ id }) => id),
+    fields.flatMap((field) => [
+      field.id,
+      ...(field.kind === "action-row"
+        ? field.items.map(({ id }) => id)
+        : []),
+    ]),
     `field in ${owner}`,
   );
   for (const field of fields) {
@@ -136,8 +142,28 @@ function validateField<Context>(
   assertStableId("field", field.id);
   assertText(`field ${field.id} label`, field.label, 1, 80);
   assertOptionalText(`field ${field.id} description`, field.description, 4_000);
+  if (field.kind === "action-row") {
+    validateActionRowField(field, subcategoryId);
+  }
   if (field.kind === "modal") {
     validateModalField(field, subcategoryId);
+  }
+}
+
+function validateActionRowField<Context>(
+  field: SettingsActionRowField<Context>,
+  owner: string,
+): void {
+  if (
+    field.items.length === 0 ||
+    field.items.length > SETTINGS_LIMITS.actionRowButtons
+  ) {
+    fail(
+      `action row ${field.id} in ${owner} must define between 1 and ${SETTINGS_LIMITS.actionRowButtons} items`,
+    );
+  }
+  for (const item of field.items) {
+    validateField(item, owner);
   }
 }
 
