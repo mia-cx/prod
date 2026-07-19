@@ -88,6 +88,8 @@ export interface TicketProvisioningDiscord {
     guild: Guild,
     ticket: Ticket,
   ): Promise<OpeningInstructionsMutation>;
+  updateTicketThreadName(guild: Guild, ticket: Ticket): Promise<void>;
+  reconcileTicketPresentation(guild: Guild, ticket: Ticket): Promise<void>;
   rollbackTicketThread(
     guild: Guild,
     threadId: string,
@@ -165,6 +167,13 @@ export const ticketThreadName = (ticket: Ticket): string => {
     .slice(0, 100);
 };
 
+const legacyTicketThreadName = (ticket: Ticket): string => {
+  const legacyId = ticket.id.replaceAll("-", "").slice(0, 8).toLowerCase();
+  const currentName = ticketThreadName(ticket);
+  const summary = currentName.slice(`ticket-${ticket.number}`.length);
+  return `ticket-${legacyId}${summary}`.slice(0, 100);
+};
+
 export const ticketOpeningInstructions = (ticket: Ticket): string =>
   [
     `## Ticket ${ticket.number}`,
@@ -201,10 +210,10 @@ const requirePrivateThread = async (
 
 const findNamedThread = async (
   threads: TextChannel["threads"],
-  name: string,
+  names: ReadonlySet<string>,
 ): Promise<PrivateThreadChannel | undefined> => {
   const active = await threads.fetchActive();
-  const activeMatch = active.threads.find((thread) => thread.name === name);
+  const activeMatch = active.threads.find((thread) => names.has(thread.name));
   if (activeMatch?.type === ChannelType.PrivateThread) return activeMatch;
   let before: PrivateThreadChannel | undefined;
   for (let page = 0; page < 10; page += 1) {
@@ -215,7 +224,7 @@ const findNamedThread = async (
       ...(before === undefined ? {} : { before }),
     });
     const archivedMatch = archived.threads.find(
-      (thread) => thread.name === name,
+      (thread) => names.has(thread.name),
     );
     if (archivedMatch?.type === ChannelType.PrivateThread) {
       return archivedMatch;
@@ -240,11 +249,11 @@ const findManagedOpening = async (
   thread: PrivateThreadChannel,
   ticket: Ticket,
 ): Promise<Message | undefined> => {
-  const marker = `ticket:${ticket.number}`;
+  const markers = new Set([`ticket:${ticket.number}`, `ticket:${ticket.id}`]);
   const isOwnedOpening = (message: Message): boolean =>
     message.author.id === thread.client.user?.id &&
     message.editable &&
-    message.content.includes(marker);
+    [...markers].some((marker) => message.content.includes(marker));
   if (ticket.openingMessageId !== undefined) {
     const stored = await thread.messages
       .fetch(ticket.openingMessageId)
@@ -368,8 +377,15 @@ export const createTicketProvisioningDiscord =
           }
         }
         const hub = await requireHub(guild, ticket.hubChannelId);
-        return (await findNamedThread(hub.threads, ticketThreadName(ticket)))
-          ?.id;
+        return (
+          await findNamedThread(
+            hub.threads,
+            new Set([
+              ticketThreadName(ticket),
+              legacyTicketThreadName(ticket),
+            ]),
+          )
+        )?.id;
       },
       createTicketThread: async (guild, ticket) => {
         const hub = await requireHub(guild, ticket.hubChannelId);
@@ -424,6 +440,23 @@ export const createTicketProvisioningDiscord =
           created: false,
           previousContent,
         });
+      },
+      updateTicketThreadName: async (guild, ticket) => {
+        if (ticket.threadId === undefined) {
+          throw new Error("The ticket thread has not been persisted");
+        }
+        const thread = await requirePrivateThread(guild, ticket.threadId);
+        if (thread.parentId !== ticket.hubChannelId) {
+          throw new Error("The private ticket thread belongs to another hub");
+        }
+        const name = ticketThreadName(ticket);
+        if (thread.name !== name) {
+          await thread.setName(name, `Number Prod ticket ${ticket.number}`);
+        }
+      },
+      reconcileTicketPresentation: async (guild, ticket) => {
+        await discord.updateTicketThreadName(guild, ticket);
+        await discord.upsertOpeningInstructions(guild, ticket);
       },
       rollbackTicketThread: async (
         guild,
@@ -665,6 +698,18 @@ export const createTicketProvisioningService = (
         guild,
         ticket.reporterUserId,
       );
+      if (threadId === undefined && recovering) {
+        threadId = await discord.findTicketThread(guild, ticket);
+        if (threadId !== undefined) {
+          await store.recordProgress(
+            ticket.id,
+            "thread_created",
+            { recovered: true, legacyDiscovery: true },
+            { threadId },
+          );
+          ticket = (await store.get(ticket.id))!;
+        }
+      }
       const snapshot = await discord.captureReporterAccess(
         guild,
         ticket.hubChannelId,
@@ -682,9 +727,6 @@ export const createTicketProvisioningService = (
         managedThreadIds,
       );
       await store.recordProgress(ticket.id, "reporter_access_granted");
-      if (threadId === undefined && recovering) {
-        threadId = await discord.findTicketThread(guild, ticket);
-      }
       if (threadId === undefined) {
         threadId = await discord.createTicketThread(guild, ticket);
         createdThreadId = threadId;
@@ -702,6 +744,9 @@ export const createTicketProvisioningService = (
       await discord.addReporter(guild, threadId, ticket.reporterUserId);
       await store.recordProgress(ticket.id, "reporter_added");
       opening = await discord.upsertOpeningInstructions(guild, ticket);
+      if (recovering) {
+        await discord.updateTicketThreadName(guild, ticket);
+      }
       if (ticket.openingMessageId !== opening.messageId) {
         await store.recordProgress(
           ticket.id,
@@ -749,7 +794,11 @@ export const createTicketProvisioningService = (
     recover: async (resolveGuild) => {
       let recovered = 0;
       let failed = 0;
-      for (const ticket of await store.listProvisioning()) {
+      const provisioningTickets = await store.listProvisioning();
+      const provisioningTicketIds = new Set(
+        provisioningTickets.map(({ id }) => id),
+      );
+      for (const ticket of provisioningTickets) {
         await executeGuildOperation(ticket.guildId, () =>
           execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
             try {
@@ -770,6 +819,21 @@ export const createTicketProvisioningService = (
               }
               await provision(guild, ticket, true);
               recovered += 1;
+            } catch {
+              failed += 1;
+            }
+          }),
+        );
+      }
+      for (const ticket of await store.listOpen()) {
+        if (provisioningTicketIds.has(ticket.id)) continue;
+        await executeGuildOperation(ticket.guildId, () =>
+          execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
+            try {
+              const guild = await resolveGuild(ticket.guildId);
+              const state = await settings.get(ticket.guildId);
+              if (state.hubChannelId !== ticket.hubChannelId) return;
+              await discord.reconcileTicketPresentation(guild, ticket);
             } catch {
               failed += 1;
             }

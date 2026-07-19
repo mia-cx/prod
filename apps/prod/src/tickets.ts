@@ -53,6 +53,7 @@ export interface TicketStore {
   ): Promise<Ticket>;
   get(ticketId: string): Promise<Ticket | undefined>;
   listProvisioning(): Promise<readonly Ticket[]>;
+  listOpen(): Promise<readonly Ticket[]>;
   hasActiveTickets(guildId: string, hubChannelId: string): Promise<boolean>;
   listActiveThreadIds(
     guildId: string,
@@ -330,6 +331,13 @@ export const createSqliteTicketStore = (
         .select()
         .from(tickets)
         .where(eq(tickets.status, "provisioning"))
+        .all()
+        .map(ticketFromRow),
+    listOpen: async () =>
+      database
+        .select()
+        .from(tickets)
+        .where(eq(tickets.status, "open"))
         .all()
         .map(ticketFromRow),
     hasActiveTickets: async (guildId: string, hubChannelId: string) =>

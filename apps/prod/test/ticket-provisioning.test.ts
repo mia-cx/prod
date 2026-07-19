@@ -71,6 +71,8 @@ const discordFixture = (
     messageId: "message-1",
     created: true,
   }),
+  updateTicketThreadName: vi.fn().mockResolvedValue(undefined),
+  reconcileTicketPresentation: vi.fn().mockResolvedValue(undefined),
   rollbackTicketThread: vi.fn().mockResolvedValue(undefined),
   deleteTicketThread: vi.fn().mockResolvedValue(undefined),
   ...overrides,
@@ -616,6 +618,47 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("reconciles numbered presentation for tickets opened before the upgrade", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const ticket = await store.create({
+      id: "ticket-legacy-open",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    await store.recordProgress(
+      ticket.id,
+      "thread_created",
+      {},
+      { threadId: "thread-legacy" },
+    );
+    await store.recordProgress(
+      ticket.id,
+      "instructions_posted",
+      {},
+      { openingMessageId: "message-legacy" },
+    );
+    await store.markOpen(ticket.id);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord);
+
+    try {
+      await expect(service.recover(async () => guild)).resolves.toEqual({
+        recovered: 0,
+        failed: 0,
+      });
+      expect(discord.reconcileTicketPresentation).toHaveBeenCalledWith(
+        guild,
+        expect.objectContaining({ id: ticket.id, number: 1 }),
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   it("suspends and resumes every persisted reporter access ownership", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -824,6 +867,50 @@ describe("ticket provisioning", () => {
         status: "open",
         threadId: "thread-existing",
         openingMessageId: "message-existing",
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("discovers and owns a legacy-named thread before restoring reporter access", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const ticket = await store.create({
+      id: "ticket-legacy-orphan",
+      guildId: guild.id,
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    const findTicketThread = vi.fn().mockResolvedValue("thread-legacy");
+    const grantReporterAccess = vi.fn(
+      async (
+        _guild: Guild,
+        _hubChannelId: string,
+        _reporter: GuildMember,
+        managedThreadIds: ReadonlySet<string>,
+      ) => {
+        expect(managedThreadIds).toContain("thread-legacy");
+      },
+    );
+    const discord = discordFixture({
+      findTicketThread,
+      grantReporterAccess,
+    });
+    const service = createTicketProvisioningService(settings, store, discord);
+
+    try {
+      await expect(service.recover(async () => guild)).resolves.toEqual({
+        recovered: 1,
+        failed: 0,
+      });
+      expect(findTicketThread).toHaveBeenCalledBefore(grantReporterAccess);
+      expect(discord.createTicketThread).not.toHaveBeenCalled();
+      expect(await store.get(ticket.id)).toMatchObject({
+        status: "open",
+        threadId: "thread-legacy",
       });
     } finally {
       connection.close();
@@ -1370,7 +1457,7 @@ describe("Discord ticket privacy adapter", () => {
     };
     const match = {
       id: "thread-match",
-      name: "ticket-1",
+      name: "ticket-ticketst",
       type: ChannelType.PrivateThread,
     };
     const fetchArchived = vi
@@ -1489,7 +1576,7 @@ describe("Discord ticket privacy adapter", () => {
         "message-existing",
         {
           id: "message-existing",
-          content: "-# Managed by Prod · ticket:42",
+          content: "-# Managed by Prod · ticket:ticket-stale",
           author: { id: "bot-1" },
           editable: true,
           edit,
@@ -1524,10 +1611,52 @@ describe("Discord ticket privacy adapter", () => {
     ).resolves.toEqual({
       messageId: "message-existing",
       created: false,
-      previousContent: "-# Managed by Prod · ticket:42",
+      previousContent: "-# Managed by Prod · ticket:ticket-stale",
     });
     expect(edit).toHaveBeenCalledOnce();
+    expect(edit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("ticket:42"),
+      }),
+    );
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("renames a legacy ticket thread to its numbered case name", async () => {
+    const setName = vi.fn().mockResolvedValue(undefined);
+    const mockGuild = {
+      channels: {
+        fetch: vi.fn().mockResolvedValue({
+          type: ChannelType.PrivateThread,
+          parentId: "hub-1",
+          name: "ticket-ticketst",
+          setName,
+        }),
+      },
+    } as unknown as Guild;
+
+    await createTicketProvisioningDiscord().updateTicketThreadName(
+      mockGuild,
+      {
+        id: "ticket-stale",
+        number: 42,
+        guildId: "guild-1",
+        hubChannelId: "hub-1",
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+        status: "open",
+        triageStatus: "collecting",
+        threadId: "thread-existing",
+        openingMessageId: "message-existing",
+        createdAt: "2026-07-17T10:00:00.000Z",
+        updatedAt: "2026-07-17T10:00:00.000Z",
+      },
+    );
+
+    expect(setName).toHaveBeenCalledWith(
+      "ticket-42",
+      "Number Prod ticket 42",
+    );
   });
 
   it("rolls back only mutations owned by a failed thread recovery", async () => {
