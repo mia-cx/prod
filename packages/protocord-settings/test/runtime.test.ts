@@ -803,6 +803,68 @@ describe("Discord settings runtime", () => {
     );
   });
 
+  it("clears the submitted draft scope before mutation changes it", async () => {
+    let currentScope = "a";
+    let valid = false;
+    const scopedRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Mutable draft scope",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "identity",
+                    label: "Identity",
+                    title: "Edit identity",
+                    inputs: [{ id: "name", label: "Name" }],
+                    draftScope: () => currentScope,
+                    load: () => ({ values: { name: `Fresh ${currentScope}` } }),
+                    validate: () => (valid ? [] : [{ message: "Invalid draft." }]),
+                    mutate: () => {
+                      currentScope = "b";
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const invalid = mockInteraction(
+      "modal",
+      route("modal-submit", "identity"),
+      { fields: { getTextInputValue: () => "Draft A" } },
+    );
+    await scopedRuntime.handle(invalid.interaction, { userId: "admin" });
+
+    valid = true;
+    const committed = mockInteraction(
+      "modal",
+      route("modal-submit", "identity"),
+      { fields: { getTextInputValue: () => "Committed A" } },
+    );
+    await scopedRuntime.handle(committed.interaction, { userId: "admin" });
+    currentScope = "a";
+    const reopened = mockInteraction("button", route("modal", "identity"));
+    await scopedRuntime.handle(reopened.interaction, { userId: "admin" });
+
+    expect(JSON.stringify(reopened.showModal.mock.calls[0]?.[0])).toContain(
+      '"value":"Fresh a"',
+    );
+    expect(JSON.stringify(reopened.showModal.mock.calls[0]?.[0])).not.toContain(
+      "Draft A",
+    );
+  });
+
   it("routes modal and mutation buttons nested in an appended container", async () => {
     const mutate = vi.fn();
     const rowRuntime = createSettingsRuntime<Context>({

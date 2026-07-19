@@ -714,17 +714,17 @@ async function submitModal<Context>(
         : interaction.fields.getTextInputValue(input.id),
     ]),
   ) as SettingsModalValues;
-  const result = await validateAndMutate(
-    values,
-    context,
-    field.validate,
-    field.mutate,
-  );
   const key = draftKey(
     interaction.user.id,
     interaction.message.id,
     resolved.route,
     await resolveModalDraftScope(field, context),
+  );
+  const result = await validateAndMutate(
+    values,
+    context,
+    field.validate,
+    field.mutate,
   );
   if (result.status === "invalid") {
     rememberDraft(drafts, key, values);
