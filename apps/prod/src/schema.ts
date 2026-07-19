@@ -46,6 +46,7 @@ export const tickets = sqliteTable(
   "tickets",
   {
     id: text().primaryKey(),
+    number: integer().notNull(),
     guildId: text("guild_id").notNull(),
     hubChannelId: text("hub_channel_id").notNull(),
     reporterUserId: text("reporter_user_id").notNull(),
@@ -67,6 +68,7 @@ export const tickets = sqliteTable(
   },
   (table) => [
     index("tickets_status").on(table.status),
+    uniqueIndex("tickets_guild_number").on(table.guildId, table.number),
     index("tickets_reporter_active").on(
       table.guildId,
       table.reporterUserId,

@@ -14,6 +14,7 @@ CREATE INDEX `ticket_events_ticket_sequence` ON `ticket_events` (`ticket_id`,`se
 CREATE INDEX `ticket_events_guild` ON `ticket_events` (`guild_id`);--> statement-breakpoint
 CREATE TABLE `tickets` (
 	`id` text PRIMARY KEY NOT NULL,
+	`number` integer NOT NULL,
 	`guild_id` text NOT NULL,
 	`hub_channel_id` text NOT NULL,
 	`reporter_user_id` text NOT NULL,
@@ -29,5 +30,6 @@ CREATE TABLE `tickets` (
 );
 --> statement-breakpoint
 CREATE INDEX `tickets_status` ON `tickets` (`status`);--> statement-breakpoint
+CREATE UNIQUE INDEX `tickets_guild_number` ON `tickets` (`guild_id`,`number`);--> statement-breakpoint
 CREATE INDEX `tickets_reporter_active` ON `tickets` (`guild_id`,`reporter_user_id`,`status`);--> statement-breakpoint
 CREATE UNIQUE INDEX `tickets_thread` ON `tickets` (`thread_id`);

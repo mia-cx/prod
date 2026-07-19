@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, max, ne } from "drizzle-orm";
 
 import type { ProdDatabase } from "./database.js";
 import {
@@ -15,6 +15,7 @@ export type TicketEventType = (typeof ticketEvents.$inferInsert)["eventType"];
 
 export type Ticket = Readonly<{
   id: string;
+  number: number;
   guildId: string;
   hubChannelId: string;
   reporterUserId: string;
@@ -139,6 +140,7 @@ const assertId = (label: string, value: string): void => {
 const ticketFromRow = (row: typeof tickets.$inferSelect): Ticket =>
   Object.freeze({
     id: row.id,
+    number: row.number,
     guildId: row.guildId,
     hubChannelId: row.hubChannelId,
     reporterUserId: row.reporterUserId,
@@ -227,13 +229,7 @@ export const createSqliteTicketStore = (
         assertId(label, value);
       }
       const timestamp = now();
-      const row: typeof tickets.$inferInsert = {
-        ...input,
-        status: "provisioning",
-        triageStatus: "collecting",
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
+      let row: typeof tickets.$inferSelect | undefined;
       database.transaction((transaction) => {
         const activeReporterTickets = transaction
           .select({ id: tickets.id })
@@ -290,7 +286,25 @@ export const createSqliteTicketStore = (
             "This server is opening several tickets right now. Please retry shortly.",
           );
         }
-        transaction.insert(tickets).values(row).run();
+        const highestNumber = transaction
+          .select({ value: max(tickets.number) })
+          .from(tickets)
+          .where(eq(tickets.guildId, input.guildId))
+          .get()?.value;
+        const newRow: typeof tickets.$inferSelect = {
+          ...input,
+          summary: input.summary ?? null,
+          number: (highestNumber ?? 0) + 1,
+          status: "provisioning",
+          triageStatus: "collecting",
+          threadId: null,
+          openingMessageId: null,
+          failureReason: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        transaction.insert(tickets).values(newRow).run();
+        row = newRow;
         insertEvent(
           transaction,
           { id: input.id, guildId: input.guildId },
@@ -299,13 +313,8 @@ export const createSqliteTicketStore = (
           timestamp,
         );
       });
-      return ticketFromRow({
-        ...row,
-        summary: row.summary ?? null,
-        threadId: null,
-        openingMessageId: null,
-        failureReason: null,
-      });
+      if (row === undefined) throw new Error("Ticket transaction did not run");
+      return ticketFromRow(row);
     },
     get: async (ticketId: string) => {
       assertId("ticket id", ticketId);

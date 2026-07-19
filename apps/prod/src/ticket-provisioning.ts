@@ -153,16 +153,13 @@ export const sanitizeTicketSummary = (
   return escapeMarkdown(limited).replaceAll("@", "@\u200b");
 };
 
-const shortTicketId = (ticketId: string): string =>
-  ticketId.replaceAll("-", "").slice(0, 8).toLowerCase();
-
 export const ticketThreadName = (ticket: Ticket): string => {
   const summary = ticket.summary
     ?.replaceAll("\\", "")
     .replace(/[^\p{L}\p{N} ._-]+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
-  return [`ticket-${shortTicketId(ticket.id)}`, summary]
+  return [`ticket-${ticket.number}`, summary]
     .filter((part) => part !== undefined && part.length > 0)
     .join("-")
     .slice(0, 100);
@@ -170,13 +167,13 @@ export const ticketThreadName = (ticket: Ticket): string => {
 
 export const ticketOpeningInstructions = (ticket: Ticket): string =>
   [
-    `## Ticket ${shortTicketId(ticket.id)}`,
+    `## Ticket ${ticket.number}`,
     ...(ticket.summary === undefined
       ? []
       : [`**Opening summary:** ${ticket.summary}`]),
     "Send `DEBUGSHARE` to Poke and paste Poke's response in this private thread.",
     "Then tell us what happened, what you expected, and any relevant reproduction context.",
-    `-# Managed by Prod · ticket:${ticket.id}`,
+    `-# Managed by Prod · ticket:${ticket.number}`,
   ].join("\n\n");
 
 const requireHub = async (
@@ -243,7 +240,7 @@ const findManagedOpening = async (
   thread: PrivateThreadChannel,
   ticket: Ticket,
 ): Promise<Message | undefined> => {
-  const marker = `ticket:${ticket.id}`;
+  const marker = `ticket:${ticket.number}`;
   const isOwnedOpening = (message: Message): boolean =>
     message.author.id === thread.client.user?.id &&
     message.editable &&

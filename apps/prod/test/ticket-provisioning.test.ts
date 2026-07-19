@@ -350,7 +350,7 @@ describe("ticket provisioning", () => {
       );
       expect(ticketOpeningInstructions(ticket)).toContain("`DEBUGSHARE`");
       expect(ticketOpeningInstructions(ticket)).toContain(
-        "ticket:ticket-12345678",
+        "ticket:1",
       );
       expect(
         (await store.listEvents(ticket.id)).map(({ eventType }) => eventType),
@@ -1370,7 +1370,7 @@ describe("Discord ticket privacy adapter", () => {
     };
     const match = {
       id: "thread-match",
-      name: "ticket-ticketst",
+      name: "ticket-1",
       type: ChannelType.PrivateThread,
     };
     const fetchArchived = vi
@@ -1407,6 +1407,7 @@ describe("Discord ticket privacy adapter", () => {
     const adapter = createTicketProvisioningDiscord();
     const ticket = {
       id: "ticket-stale",
+      number: 1,
       guildId: "guild-1",
       hubChannelId: "hub-1",
       reporterUserId: "reporter-1",
@@ -1450,6 +1451,7 @@ describe("Discord ticket privacy adapter", () => {
 
     await createTicketProvisioningDiscord().createTicketThread(mockGuild, {
       id: "12345678-abcd",
+      number: 42,
       guildId: "guild-1",
       hubChannelId: "hub-1",
       reporterUserId: "reporter-1",
@@ -1462,7 +1464,7 @@ describe("Discord ticket privacy adapter", () => {
 
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "ticket-12345678",
+        name: "ticket-42",
         type: ChannelType.PrivateThread,
         invitable: false,
       }),
@@ -1478,7 +1480,7 @@ describe("Discord ticket privacy adapter", () => {
         "message-reporter",
         {
           id: "message-reporter",
-          content: "copied marker ticket:ticket-stale",
+          content: "copied marker ticket:42",
           author: { id: "reporter-1" },
           editable: false,
         },
@@ -1487,7 +1489,7 @@ describe("Discord ticket privacy adapter", () => {
         "message-existing",
         {
           id: "message-existing",
-          content: "-# Managed by Prod · ticket:ticket-stale",
+          content: "-# Managed by Prod · ticket:42",
           author: { id: "bot-1" },
           editable: true,
           edit,
@@ -1508,6 +1510,7 @@ describe("Discord ticket privacy adapter", () => {
     await expect(
       createTicketProvisioningDiscord().upsertOpeningInstructions(mockGuild, {
         id: "ticket-stale",
+        number: 42,
         guildId: "guild-1",
         hubChannelId: "hub-1",
         reporterUserId: "reporter-1",
@@ -1521,7 +1524,7 @@ describe("Discord ticket privacy adapter", () => {
     ).resolves.toEqual({
       messageId: "message-existing",
       created: false,
-      previousContent: "-# Managed by Prod · ticket:ticket-stale",
+      previousContent: "-# Managed by Prod · ticket:42",
     });
     expect(edit).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalled();
@@ -1544,6 +1547,7 @@ describe("Discord ticket privacy adapter", () => {
     } as unknown as Guild;
     const ticket = {
       id: "ticket-stale",
+      number: 42,
       guildId: "guild-1",
       hubChannelId: "hub-1",
       reporterUserId: "reporter-1",

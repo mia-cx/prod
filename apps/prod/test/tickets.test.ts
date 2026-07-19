@@ -40,6 +40,7 @@ describe("SQLite ticket store", () => {
         summary: "Poke crashes",
       });
       expect(ticket).toMatchObject({
+        number: 1,
         status: "provisioning",
         triageStatus: "collecting",
       });
@@ -74,6 +75,35 @@ describe("SQLite ticket store", () => {
         "instructions_posted",
         "opened",
       ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("assigns sequential ticket numbers independently within each guild", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+
+    try {
+      const create = (id: string, guildId: string) =>
+        store.create({
+          id,
+          guildId,
+          hubChannelId: `hub-${guildId}`,
+          reporterUserId: `reporter-${id}`,
+          originatingAlias: "issue",
+        });
+
+      await expect(create("ticket-a", "guild-1")).resolves.toMatchObject({
+        number: 1,
+      });
+      await expect(create("ticket-b", "guild-1")).resolves.toMatchObject({
+        number: 2,
+      });
+      await expect(create("ticket-c", "guild-2")).resolves.toMatchObject({
+        number: 1,
+      });
     } finally {
       connection.close();
     }

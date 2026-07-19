@@ -164,6 +164,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "number": {
+          "name": "number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "guild_id": {
           "name": "guild_id",
           "type": "text",
@@ -256,6 +263,14 @@
             "status"
           ],
           "isUnique": false
+        },
+        "tickets_guild_number": {
+          "name": "tickets_guild_number",
+          "columns": [
+            "guild_id",
+            "number"
+          ],
+          "isUnique": true
         },
         "tickets_reporter_active": {
           "name": "tickets_reporter_active",
