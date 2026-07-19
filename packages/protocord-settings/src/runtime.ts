@@ -125,6 +125,7 @@ type ResolvedRoute<Context> = Readonly<{
   category: SettingsCategory<Context>;
   subcategory: SettingsSubcategory<Context>;
   field?: SettingsField<Context>;
+  fieldPath?: readonly SettingsField<Context>[];
 }>;
 
 export function createSettingsRuntime<Context>(
@@ -394,7 +395,7 @@ async function showSettingsModal<Context>(
     throw new SettingsViewError("stale", "settings modal is stale");
   }
   await beforeModalDeadline(
-    () => requireFieldVisible(field, context),
+    () => requireRouteFieldVisible(resolved, context),
     deadline,
   );
   const view = await beforeModalDeadline(() => field.load(context), deadline);
@@ -518,7 +519,7 @@ async function mutateButton<Context>(
   if (field?.kind !== "button") {
     throw new SettingsViewError("stale", "settings button is stale");
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings button is disabled");
@@ -538,7 +539,7 @@ async function mutateStringSelect<Context>(
   if (field?.kind !== "string-select") {
     throw new SettingsViewError("stale", "settings select is stale");
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings select is disabled");
@@ -576,7 +577,7 @@ async function mutateMentionables<Context>(
       "settings mentionable select is stale",
     );
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context, "mutation");
   if (view.disabled === true) {
     throw new SettingsViewError(
@@ -631,7 +632,7 @@ async function mutateChannels<Context>(
   if (field?.kind !== "channel-select") {
     throw new SettingsViewError("stale", "settings channel select is stale");
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings channel select is disabled");
@@ -691,7 +692,7 @@ async function submitModal<Context>(
   if (field?.kind !== "modal") {
     throw new SettingsViewError("stale", "settings modal is stale");
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings modal is disabled");
@@ -800,10 +801,11 @@ function resolveRoute<Context>(
   if (category === undefined || subcategory === undefined) {
     return undefined;
   }
-  const field =
+  const fieldPath =
     route.fieldId === undefined
       ? undefined
-      : findRouteField(subcategory.fields, route.fieldId);
+      : findRouteFieldPath(subcategory.fields, route.fieldId);
+  const field = fieldPath?.[fieldPath.length - 1];
   if (route.fieldId !== undefined && field === undefined) {
     return undefined;
   }
@@ -812,22 +814,23 @@ function resolveRoute<Context>(
     category,
     subcategory,
     ...(field === undefined ? {} : { field }),
+    ...(fieldPath === undefined ? {} : { fieldPath }),
   };
 }
 
-function findRouteField<Context>(
+function findRouteFieldPath<Context>(
   fields: readonly SettingsField<Context>[],
   fieldId: string,
-): SettingsField<Context> | undefined {
+): readonly SettingsField<Context>[] | undefined {
   for (const field of fields) {
-    if (field.id === fieldId) return field;
+    if (field.id === fieldId) return [field];
     if (field.kind === "action-row") {
       const item = field.items.find(({ id }) => id === fieldId);
-      if (item !== undefined) return item;
+      if (item !== undefined) return [field, item];
     }
     if (field.kind === "container") {
-      const child = findRouteField(field.fields, fieldId);
-      if (child !== undefined) return child;
+      const childPath = findRouteFieldPath(field.fields, fieldId);
+      if (childPath !== undefined) return [field, ...childPath];
     }
   }
   return undefined;
@@ -859,6 +862,15 @@ async function requireFieldVisible<Context>(
 ): Promise<void> {
   if (field.visible !== undefined && !(await field.visible(context))) {
     throw new SettingsViewError("stale", "settings field is no longer visible");
+  }
+}
+
+async function requireRouteFieldVisible<Context>(
+  resolved: ResolvedRoute<Context>,
+  context: Context,
+): Promise<void> {
+  for (const field of resolved.fieldPath ?? []) {
+    await requireFieldVisible(field, context);
   }
 }
 

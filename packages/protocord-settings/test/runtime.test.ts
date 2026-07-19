@@ -803,6 +803,60 @@ describe("Discord settings runtime", () => {
     expect(mutate).toHaveBeenCalledOnce();
   });
 
+  it("rejects stale nested controls when their parent becomes hidden", async () => {
+    let editorVisible = true;
+    const mutate = vi.fn();
+    const nestedRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Conditional nested settings",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "container",
+                    id: "editor",
+                    label: "Editor",
+                    visible: () => editorVisible,
+                    fields: [
+                      {
+                        kind: "action-row",
+                        id: "actions",
+                        label: "Actions",
+                        items: [
+                          {
+                            kind: "button",
+                            id: "delete",
+                            label: "Delete",
+                            load: () => ({}),
+                            mutate,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const deletion = mockInteraction("button", route("button", "delete"));
+    editorVisible = false;
+
+    await expect(
+      nestedRuntime.handle(deletion.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "stale" });
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
   it("renders, submits, and preserves native checkbox modal values", async () => {
     const mutate = vi.fn();
     const checkboxRuntime = createSettingsRuntime<Context>({
