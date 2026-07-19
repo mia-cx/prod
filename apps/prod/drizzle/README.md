@@ -6,6 +6,4 @@ Installed extensions expose Drizzle tables through public `./schema` entrypoints
 tables. Run `pnpm db:generate` from the repository root to diff that aggregate
 schema and write generated migrations here.
 
-Extensions must not publish or apply a parallel migration history. The checked-in
-empty journal allows startup to run Drizzle's real migrator before the first table
-is implemented.
+Extensions must not publish or apply a parallel migration history.
