@@ -1,40 +1,79 @@
-# #9 Administer permission presets and custom rules
+# #9 Administer permission presets
 
 ## Summary
 
-Deliver Prod's Permissions settings category. Guild administrators can manage support-staff, assignment-manager, and configurator presets through combined user/role selectors, and can stage, preview, confirm, inspect, paginate, and remove guild-wide or ticket-specific allow/deny rules without exposing category/channel authorization contexts.
+Deliver one direct Permissions settings page with three stateful Discord
+mentionable selects: Support staff, Assignment managers, and Configurators.
+Users and roles can be selected together; native select state handles additions,
+removals, and clearing without separate current-state or removal controls.
+
+On a guild's first setup, when it has no permission-rule records, every
+user-managed role with Manage Server is selected in all three presets.
+`@everyone`, bot/integration-managed roles, and roles without Manage Server are
+excluded. Once any permission record exists, automatic initialization never
+overwrites the guild's selections, including after every selection is cleared.
+
+Custom-rule and provenance concepts remain internal persistence details. They
+are not exposed as arbitrary rule configuration, inspection, or pagination UI.
 
 ## Acceptance criteria
 
-- [x] Each preset expands into the specified individual allow rules.
-- [x] Users and roles coexist in one mentionable control with explicit rendered types.
-- [x] Custom object, verb, and permit selections preview before persistence.
-- [x] Removing preset membership does not delete independently configured rules.
-- [x] Rule inspection, individual removal, clear confirmation, and pagination work.
-- [x] All changes are authorized, audited, and rechecked immediately before mutation.
-- [x] Prod does not expose category- or channel-context rule administration.
+- [x] The Permissions category is one page containing exactly three combined
+  user/role mentionable selects.
+- [x] Each select loads its persisted membership as Discord-native defaults and
+  applies selection deltas without separate add, remove, clear, or current-state
+  controls.
+- [x] Each preset expands into its specified individual allow rules, and removing
+  membership preserves independently owned rule contributions.
+- [x] Mutations are authorized, audited, and rechecked immediately before write.
+- [x] A guild with no permission records initializes every non-managed,
+  non-`@everyone` Manage Server role into all three presets.
+- [x] Existing or previously cleared guild configuration is never overwritten by
+  initialization.
+- [x] Custom rules and category/channel authorization contexts are not exposed in
+  the settings UI.
+- [x] The database uses a freshly generated Drizzle baseline after the requested
+  development database reset.
 
 ## TODOs
 
-- [x] Add app-owned permission-rule provenance persistence and migration coverage so preset removal can preserve independent custom rules.
-- [x] Implement and test a permission administration service for preset expansion, custom allow/deny rules, inspection, removal, and audited mutations.
-- [x] Compose and test the Permissions settings category with combined mentionables, explicit subject types, confirmation, previews, and pagination.
-- [x] Wire current Discord-member authorization and the permission store into application startup, then run focused and repository-wide validation.
+- [x] Add app-owned permission-rule provenance persistence and migration coverage
+  so preset removal preserves independently owned contributions.
+- [x] Implement audited permission administration with atomic preset expansion and
+  delta mutations.
+- [x] Compose the direct three-select Permissions page and remove separate
+  current/removal/clear/rule-management surfaces.
+- [x] Bootstrap eligible Manage Server roles once for guilds without permission
+  records, excluding Discord-managed roles.
+- [x] Reset the development database, generate the fresh Drizzle baseline, apply
+  it, and run repository-wide validation.
 
 ## Human validation
 
 - [x] Automated checks pass before requesting credentials or human action.
-- [ ] Provide development Discord credentials and representative users/roles. Configure every preset and custom allow/deny combinations, then validate effective permissions from separate accounts after live role changes. Confirm category/channel controls are absent.
-- [ ] Record the validation outcome without secrets, raw tokens, private ticket content, or unredacted diagnostics.
+- [ ] In a development Discord server, create representative user-managed Manage
+  Server, ordinary, and bot-managed roles. Start Prod with a fresh database and
+  confirm only the user-managed Manage Server role appears in all three selects.
+- [ ] Add and remove users/roles with the native selectors, clear all selections,
+  restart Prod, and confirm the persisted state is not automatically repopulated.
+- [ ] Validate effective permissions from separate accounts after live membership
+  changes and confirm no custom-rule or category/channel controls are present.
+- [ ] Record the result without secrets, raw tokens, private ticket content, or
+  unredacted diagnostics.
 
 ## Notes
 
-- 2026-07-17: Fast-forwarded `main` in `/home/mia/mia-cx/prod` with `git pull --ff-only origin main`; it was already aligned with `origin/main` at `73f94d2`.
-- 2026-07-17: The supplied worktree is clean on `t3code/fast-forward-main`; blockers #4, #5, and #6 are closed.
-- 2026-07-17: Issue #9 requires a real-Discord HITL gate. The implementation PR must reference rather than close #9 until a human records a redacted passing result.
-- 2026-07-17: Ticket-specific scope means an exact ticket object ID inside the guild-only authorization context. Prod will continue rejecting and hiding category/channel context administration.
-- 2026-07-17: Added `permission_rule_origins` with identity-plus-source uniqueness and a SQLite provenance store. Preset, custom, and pre-existing independent ownership can coexist, be queried deterministically, and be removed separately. Generated migration `0003`; all 82 app tests, app typecheck, app lint, and the repository build pass.
-- 2026-07-17: Added the permission administration service with the canonical 9/11/13-rule preset expansions, user/role subjects, guild-wide and exact-ticket custom rules, object-specific verb validation, deterministic inspection pages, individual removal, provenance-aware preset clearing, and an injected authorization recheck before each effective mutation. The package audit store records every created, updated, and removed rule. All 89 app tests and 37 permissions-package tests pass with both packages' typecheck and lint clean.
-- 2026-07-17: Added the Permissions category with separate preset subcategories, additive combined mentionable selectors, explicit `User`/`Role` rendering, paginated individual removal, two-click clear confirmation, a staged custom-rule object/scope/verb/permit preview, exact-ticket IDs, and paginated rule inspection/removal. The settings runtime now paginates only dynamically visible fields and rejects stale interactions after a field disappears. All 95 app tests and 46 settings-package tests pass; both packages' typecheck and lint are clean.
-- 2026-07-17: Wired the migrated SQLite rule/provenance stores into application startup and gated both Setup and Permissions through the embedded authorization service after bootstrap. Each view and mutation reconstructs the actor from the guild's current member/roles; the integration test proves that removing a configurator role immediately blocks the next mutation. `pnpm check` passes all 32 tasks with 96 app tests, and `pnpm pack:check` passes all 15 package checks.
-- 2026-07-17: Automated acceptance is complete. The issue must remain open until a human supplies development Discord access, executes the issue's real-environment checklist, and records a redacted passing result.
+- 2026-07-17: Fast-forwarded `main` in `/home/mia/mia-cx/prod` with
+  `git pull --ff-only origin main`; it was already aligned with `origin/main` at
+  `73f94d2`.
+- 2026-07-17: The supplied worktree is on `t3code/fast-forward-main`; blockers #4,
+  #5, and #6 are closed.
+- 2026-07-19: Product direction simplified the settings surface to three native
+  selectors. Custom-rule terminology and provenance remain internal only.
+- 2026-07-19: The development database and prior migration history were explicitly
+  reset. Drizzle generated and successfully applied one fresh baseline migration.
+- 2026-07-19: First-run initialization seeds user-managed Manage Server roles into
+  all three presets. Persistent active or inactive permission rows prevent later
+  reinitialization.
+- 2026-07-19: Issue #9 retains a real-Discord HITL gate. The PR references rather
+  than closes it until a human records a redacted passing result.
