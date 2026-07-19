@@ -138,9 +138,6 @@ describe("SQLite ticket store", () => {
       );
       await store.markFailed(second.id, "controlled failure");
       expect(await store.hasOtherActiveTicket(first)).toBe(false);
-      expect(await store.listManagedThreadIds("guild-1", "hub-1")).toEqual([
-        "thread-failed",
-      ]);
       const otherHub = await store.create({
         id: "ticket-3",
         guildId: "guild-1",

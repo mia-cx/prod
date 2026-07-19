@@ -84,7 +84,6 @@ const setup = async (overrides: Partial<SupportHubDiscord> = {}) => {
     restoreHub: vi.fn(async () => undefined),
     releaseHub: vi.fn(async () => undefined),
     releaseFormerHub: vi.fn(async () => undefined),
-    deletePublicThreads: vi.fn(async () => 0),
     upsertInformationMessage: vi.fn(async () => informationMessageId),
     deleteInformationMessage: vi.fn(async () => undefined),
     ...overrides,
@@ -368,7 +367,7 @@ describe("guild setup settings integration", () => {
     ).not.toHaveProperty("max_length");
   });
 
-  it("recovers a promoted hub transition before resuming the replacement hub", async () => {
+  it("recovers a promoted hub transition without globally reasserting access", async () => {
     const { runtime, store, supportHub } = await setup();
     await store.configureHub(guildId, hubChannelId, ownership(hubChannelId));
     const transition: HubTransition = {
@@ -393,7 +392,7 @@ describe("guild setup settings integration", () => {
     } as unknown as Client<true>;
 
     await expect(runtime.reconcile!(client)).rejects.toThrow(
-      "One or more support hubs",
+      "Prod could not reconcile startup state",
     );
     expect(supportHub.releaseFormerHub).not.toHaveBeenCalled();
     expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
@@ -408,16 +407,7 @@ describe("guild setup settings integration", () => {
       guild,
       ownership(hubChannelId),
     );
-    expect(ticketProvisioningService.resumeHubAccess).toHaveBeenCalledWith(
-      guild,
-      replacementHubChannelId,
-    );
-    expect(
-      vi.mocked(supportHub.releaseFormerHub).mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      vi.mocked(ticketProvisioningService.resumeHubAccess).mock
-        .invocationCallOrder[0]!,
-    );
+    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
     await expect(store.getHubTransition(guildId)).resolves.toBeUndefined();
   });
 

@@ -165,7 +165,6 @@ describe("ticket provisioning", () => {
       guild,
       "hub-new",
       reporter,
-      new Set(),
     );
     connection.close();
   });
@@ -728,13 +727,11 @@ describe("ticket provisioning", () => {
         guild,
         "hub-1",
         reporters.get("reporter-1"),
-        new Set(),
       );
       expect(discord.grantReporterAccess).toHaveBeenCalledWith(
         guild,
         "hub-1",
         reporters.get("reporter-2"),
-        new Set(),
       );
     } finally {
       connection.close();
@@ -811,7 +808,6 @@ describe("ticket provisioning", () => {
         guild,
         "hub-1",
         remainingReporter,
-        new Set(),
       );
     } finally {
       connection.close();
@@ -885,16 +881,7 @@ describe("ticket provisioning", () => {
       originatingAlias: "issue",
     });
     const findTicketThread = vi.fn().mockResolvedValue("thread-legacy");
-    const grantReporterAccess = vi.fn(
-      async (
-        _guild: Guild,
-        _hubChannelId: string,
-        _reporter: GuildMember,
-        managedThreadIds: ReadonlySet<string>,
-      ) => {
-        expect(managedThreadIds).toContain("thread-legacy");
-      },
-    );
+    const grantReporterAccess = vi.fn().mockResolvedValue(undefined);
     const discord = discordFixture({
       findTicketThread,
       grantReporterAccess,
@@ -1181,7 +1168,6 @@ describe("Discord ticket privacy adapter", () => {
       mockGuild,
       "hub-1",
       reporter,
-      new Set(["managed-private"]),
     );
 
     expect(edit).toHaveBeenCalledWith(
@@ -1205,7 +1191,7 @@ describe("Discord ticket privacy adapter", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("refuses reporter access after a conflicting hub overwrite drifts", async () => {
+  it("does not police moderator-managed hub overwrites", async () => {
     const edit = vi.fn();
     const mockGuild = {
       roles: {
@@ -1261,13 +1247,12 @@ describe("Discord ticket privacy adapter", () => {
         mockGuild,
         "hub-1",
         reporter,
-        new Set(),
       ),
-    ).rejects.toThrow("channel-specific role or member allows");
-    expect(edit).not.toHaveBeenCalled();
+    ).resolves.toBeUndefined();
+    expect(edit).toHaveBeenCalledOnce();
   });
 
-  it("refuses reporter access while the hub contains a public thread", async () => {
+  it("does not police moderator-created public threads", async () => {
     const edit = vi.fn();
     const mockGuild = {
       roles: { everyone: { id: "everyone" }, cache: new Collection() },
@@ -1313,13 +1298,12 @@ describe("Discord ticket privacy adapter", () => {
         mockGuild,
         "hub-1",
         reporter,
-        new Set(),
       ),
-    ).rejects.toThrow("public thread");
-    expect(edit).not.toHaveBeenCalled();
+    ).resolves.toBeUndefined();
+    expect(edit).toHaveBeenCalledOnce();
   });
 
-  it("refuses reporter access while the hub contains an unmanaged private thread", async () => {
+  it("does not police moderator-created private threads", async () => {
     const edit = vi.fn();
     const mockGuild = {
       roles: { everyone: { id: "everyone" }, cache: new Collection() },
@@ -1370,13 +1354,12 @@ describe("Discord ticket privacy adapter", () => {
         mockGuild,
         "hub-1",
         reporter,
-        new Set(),
       ),
-    ).rejects.toThrow("unmanaged private thread");
-    expect(edit).not.toHaveBeenCalled();
+    ).resolves.toBeUndefined();
+    expect(edit).toHaveBeenCalledOnce();
   });
 
-  it("refuses reporter access while the hub contains unmanaged history", async () => {
+  it("does not police moderator-managed hub history", async () => {
     const edit = vi.fn();
     const mockGuild = {
       roles: { everyone: { id: "everyone" }, cache: new Collection() },
@@ -1428,10 +1411,9 @@ describe("Discord ticket privacy adapter", () => {
         mockGuild,
         "hub-1",
         reporter,
-        new Set(),
       ),
-    ).rejects.toThrow("unmanaged messages");
-    expect(edit).not.toHaveBeenCalled();
+    ).resolves.toBeUndefined();
+    expect(edit).toHaveBeenCalledOnce();
   });
 
   it("ignores only a missing thread during cleanup", async () => {

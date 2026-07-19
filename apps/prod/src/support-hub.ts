@@ -1,9 +1,7 @@
 import {
   ChannelType,
-  OverwriteType,
   PermissionFlagsBits,
   RESTJSONErrorCodes,
-  type AnyThreadChannel,
   type Guild,
   type GuildMember,
   type Message,
@@ -20,7 +18,6 @@ import {
   type HubPermissionState,
   type HubProtectedPermissionName,
 } from "./hub-permission-ownership.js";
-import { isManagedReporterHubAccess } from "./reporter-hub-access.js";
 
 export const EMPTY_HUB_REPORTER_OVERWRITE = Object.freeze({
   SendMessages: false,
@@ -99,7 +96,6 @@ export interface SupportHubDiscord {
     guild: Guild,
     ownership: HubPermissionOwnership,
   ): Promise<void>;
-  deletePublicThreads(guild: Guild, channelId: string): Promise<number>;
   upsertInformationMessage(input: UpsertHubInformationInput): Promise<string>;
   deleteInformationMessage(
     guild: Guild,
@@ -112,141 +108,12 @@ type HubResolution =
   | Readonly<{ valid: true; channel: TextChannel; botMember: GuildMember }>
   | Readonly<{ valid: false; issues: readonly string[] }>;
 
-export const findPublicSupportHubThreads = async (
-  channel: TextChannel,
-): Promise<readonly AnyThreadChannel[]> => {
-  const found: AnyThreadChannel[] = [];
-  const active = await channel.threads.fetchActive();
-  found.push(
-    ...active.threads
-      .filter((thread) => thread.type === ChannelType.PublicThread)
-      .values(),
-  );
-  let before: AnyThreadChannel | undefined;
-  for (let page = 0; page < 10; page += 1) {
-    const archived = await channel.threads.fetchArchived({
-      type: "public",
-      fetchAll: true,
-      limit: 100,
-      ...(before === undefined ? {} : { before }),
-    });
-    found.push(
-      ...archived.threads
-        .filter((thread) => thread.type === ChannelType.PublicThread)
-        .values(),
-    );
-    if (!archived.hasMore) return Object.freeze(found);
-    const oldest = archived.threads.last();
-    if (oldest === undefined) {
-      throw new Error("Discord public-thread pagination did not advance");
-    }
-    before = oldest;
-  }
-  throw new Error("Public support-hub thread scan exceeded its safe limit");
-};
-
-export const findPrivateSupportHubThreads = async (
-  channel: TextChannel,
-): Promise<readonly AnyThreadChannel[]> => {
-  const active = await channel.threads.fetchActive();
-  const found = [
-    ...active.threads
-      .filter((thread) => thread.type === ChannelType.PrivateThread)
-      .values(),
-  ];
-  let before: AnyThreadChannel | undefined;
-  for (let page = 0; page < 10; page += 1) {
-    const archived = await channel.threads.fetchArchived({
-      type: "private",
-      fetchAll: true,
-      limit: 100,
-      ...(before === undefined ? {} : { before }),
-    });
-    found.push(
-      ...archived.threads
-        .filter((thread) => thread.type === ChannelType.PrivateThread)
-        .values(),
-    );
-    if (!archived.hasMore) return Object.freeze(found);
-    const oldest = archived.threads.last();
-    if (oldest === undefined) {
-      throw new Error("Discord private-thread pagination did not advance");
-    }
-    before = oldest;
-  }
-  throw new Error("Private support-hub thread scan exceeded its safe limit");
-};
-
-export const findUnmanagedActivePrivateSupportHubThreads = async (
-  channel: TextChannel,
-  managedThreadIds: ReadonlySet<string>,
-): Promise<readonly AnyThreadChannel[]> => {
-  const active = await channel.threads.fetchActive();
-  return Object.freeze(
-    [
-      ...active.threads
-        .filter(
-          (thread) =>
-            thread.type === ChannelType.PrivateThread &&
-            !managedThreadIds.has(thread.id),
-        )
-        .values(),
-    ],
-  );
-};
-
 const isManagedInformationMessage = (
   message: Message,
   botUserId: string,
 ): boolean =>
   message.author.id === botUserId &&
   message.content.includes(SUPPORT_HUB_INFORMATION_MARKER);
-
-export const findUnmanagedSupportHubMessages = async (
-  channel: TextChannel,
-  botUserId: string,
-): Promise<readonly Message[]> => {
-  const found: Message[] = [];
-  let before: string | undefined;
-  for (let page = 0; page < 10; page += 1) {
-    const messages = await channel.messages.fetch({
-      limit: 100,
-      ...(before === undefined ? {} : { before }),
-    });
-    found.push(
-      ...messages
-        .filter((message) => !isManagedInformationMessage(message, botUserId))
-        .values(),
-    );
-    if (messages.size < 100) return Object.freeze(found);
-    const oldest = messages.last();
-    if (oldest === undefined) {
-      throw new Error("Discord support-hub message pagination did not advance");
-    }
-    before = oldest.id;
-  }
-  throw new Error("Support-hub message scan exceeded its safe limit");
-};
-
-const PUBLIC_THREAD_DELETE_ATTEMPTS = 3;
-
-export const deletePublicSupportHubThread = async (
-  thread: AnyThreadChannel,
-): Promise<void> => {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < PUBLIC_THREAD_DELETE_ATTEMPTS; attempt += 1) {
-    try {
-      await thread.delete(
-        "Public threads are not allowed in a Prod support hub",
-      );
-      return;
-    } catch (error) {
-      if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownChannel)) return;
-      lastError = error;
-    }
-  }
-  throw lastError;
-};
 
 const isDiscordErrorCode = (error: unknown, code: number): boolean =>
   typeof error === "object" &&
@@ -268,29 +135,6 @@ const fetchTextChannel = async (
 ): Promise<TextChannel | undefined> => {
   const channel = await guild.channels.fetch(channelId, { force });
   return channel?.type === ChannelType.GuildText ? channel : undefined;
-};
-
-export const supportHubOverwriteConflict = (
-  channel: TextChannel,
-  guild: Guild,
-  botMember: GuildMember,
-): string | undefined => {
-  const hasConflict = channel.permissionOverwrites.cache.some(
-    (overwrite) =>
-      overwrite.id !== guild.roles.everyone.id &&
-      overwrite.id !== botMember.id &&
-      guild.roles.cache.get(overwrite.id)?.tags?.botId !== botMember.id &&
-      !(
-        overwrite.type === OverwriteType.Member &&
-        isManagedReporterHubAccess(overwrite)
-      ) &&
-      HUB_PROTECTED_PERMISSION_NAMES.some((name) =>
-        overwrite.allow.has(protectedPermissionBits[name]),
-      ),
-  );
-  return hasConflict
-    ? "Remove channel-specific role or member allows for sending messages, creating threads, or managing threads before using this channel as the support hub."
-    : undefined;
 };
 
 const resolveHub = async (
@@ -318,30 +162,11 @@ const resolveHub = async (
   const missing = requiredBotPermissions
     .filter(([, permission]) => permissions?.has(permission) !== true)
     .map(([name]) => name);
-  const conflict = supportHubOverwriteConflict(channel, guild, botMember);
-  const [publicThreads, unmanagedMessages] =
-    missing.length === 0
-      ? await Promise.all([
-          findPublicSupportHubThreads(channel),
-          findUnmanagedSupportHubMessages(channel, botMember.id),
-        ])
-      : [[], []];
   const issues = [
     ...(missing.length === 0
       ? []
       : [
           `Prod is missing required permissions in this channel: ${missing.join(", ")}.`,
-        ]),
-    ...(conflict === undefined ? [] : [conflict]),
-    ...(publicThreads.length === 0
-      ? []
-      : [
-          "Remove public threads before using this channel as the support hub.",
-        ]),
-    ...(unmanagedMessages.length === 0
-      ? []
-      : [
-          "Remove all messages except Prod's managed information message before using this channel as the support hub.",
         ]),
   ];
   return issues.length === 0
@@ -491,7 +316,6 @@ const informationMessageContent = (assistantIdentity: string): string =>
   [
     `## ${assistantIdentity} support`,
     "Use `/issue`, `/report`, or `/debugshare` to open an invite-only private support thread.",
-    "Keep this channel empty, and do not post support details here.",
     SUPPORT_HUB_INFORMATION_MARKER,
   ].join("\n\n");
 
@@ -673,19 +497,6 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
           "Existing support hub permission ownership does not match this channel and bot",
         );
       }
-      if (existingOwnership === undefined || existingOwnership.version === 1) {
-        const privateThreads = await findPrivateSupportHubThreads(
-          resolution.channel,
-        );
-        if (privateThreads.length > 0) {
-          return {
-            valid: false as const,
-            issues: [
-              "Remove private threads before using this channel as the support hub.",
-            ],
-          };
-        }
-      }
       const ownership =
         existingOwnership === undefined
           ? captureOwnership(resolution.channel, guild, resolution.botMember)
@@ -719,13 +530,6 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
     restoreHub,
     releaseHub,
     releaseFormerHub,
-    deletePublicThreads: async (guild: Guild, channelId: string) => {
-      const channel = await fetchTextChannel(guild, channelId, true);
-      if (channel === undefined) return 0;
-      const publicThreads = await findPublicSupportHubThreads(channel);
-      await Promise.all(publicThreads.map(deletePublicSupportHubThread));
-      return publicThreads.length;
-    },
     upsertInformationMessage: async (input: UpsertHubInformationInput) => {
       const resolution = await resolveHub(input.guild, input.channelId);
       if (!resolution.valid) {

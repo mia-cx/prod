@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, inArray, isNotNull, max, ne } from "drizzle-orm";
+import { and, eq, gte, inArray, max, ne } from "drizzle-orm";
 
 import type { ProdDatabase } from "./database.js";
 import {
@@ -55,10 +55,6 @@ export interface TicketStore {
   listProvisioning(): Promise<readonly Ticket[]>;
   listOpen(): Promise<readonly Ticket[]>;
   hasActiveTickets(guildId: string, hubChannelId: string): Promise<boolean>;
-  listManagedThreadIds(
-    guildId: string,
-    hubChannelId: string,
-  ): Promise<readonly string[]>;
   hasOtherActiveTicket(ticket: Ticket): Promise<boolean>;
   beginReporterAccess(
     ticket: Ticket,
@@ -352,19 +348,6 @@ export const createSqliteTicketStore = (
           ),
         )
         .get() !== undefined,
-    listManagedThreadIds: async (guildId: string, hubChannelId: string) =>
-      database
-        .select({ threadId: tickets.threadId })
-        .from(tickets)
-        .where(
-          and(
-            eq(tickets.guildId, guildId),
-            eq(tickets.hubChannelId, hubChannelId),
-            isNotNull(tickets.threadId),
-          ),
-        )
-        .all()
-        .flatMap(({ threadId }) => (threadId === null ? [] : [threadId])),
     hasOtherActiveTicket: async (ticket: Ticket) =>
       database
         .select({ id: tickets.id })
