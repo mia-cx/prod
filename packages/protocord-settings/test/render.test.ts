@@ -737,6 +737,46 @@ describe("Components v2 settings rendering", () => {
     }
   });
 
+  it("paginates multi-button action rows before the message limit", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Action row settings",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: Array.from({ length: 7 }, (_, rowIndex) => ({
+            kind: "action-row" as const,
+            id: `row-${String(rowIndex)}`,
+            label: `Row ${String(rowIndex)}`,
+            items: Array.from({ length: 5 }, (_, itemIndex) => ({
+              kind: "button" as const,
+              id: `button-${String(rowIndex)}-${String(itemIndex)}`,
+              label: `Button ${String(itemIndex)}`,
+              load: () => ({ value: "Ready" }),
+              mutate: () => undefined,
+            })),
+          })),
+        },
+      ],
+    });
+
+    const first = await renderer.render(
+      { categoryId: "setup", page: 0 },
+      { userId: "admin" },
+    );
+    const last = await renderer.render(
+      { categoryId: "setup", page: 6 },
+      { userId: "admin" },
+    );
+
+    expect(first.location.pageCount).toBe(7);
+    expect(last.location.pageCount).toBe(7);
+    expect(JSON.stringify(first.components)).toContain("button-0-0");
+    expect(JSON.stringify(first.components)).not.toContain("button-1-0");
+    expect(JSON.stringify(last.components)).toContain("button-6-0");
+  });
+
   it("keeps page routes stable while transient notices are rendered", async () => {
     const value: SettingsDefinition<Context> = {
       title: "Stable pages",

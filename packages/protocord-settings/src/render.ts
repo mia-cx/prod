@@ -418,6 +418,9 @@ function paginateFields<Context>(
 function fieldComponentCost<Context>(
   field: SettingsContainerChildField<Context>,
 ): number {
+  if (field.kind === "action-row") {
+    return 1 + field.items.length;
+  }
   if (field.kind === "modal" && field.presentation?.kind === "preview") {
     return 2;
   }
