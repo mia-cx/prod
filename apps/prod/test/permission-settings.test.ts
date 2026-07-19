@@ -4,7 +4,6 @@ import {
   type SettingsField,
   type SettingsMentionable,
 } from "@protocord/settings";
-import type { PermissionRule } from "@protocord/permissions";
 
 import {
   createPermissionSettingsCategory,
@@ -24,38 +23,12 @@ const context: Context = {
   settingsSessionId: "message-1",
 };
 
-const makeRule = (index: number): PermissionRule => ({
-  id: `rule-${String(index).padStart(2, "0")}`,
-  context: { guildId: "guild-1" },
-  subject: {
-    subjectType: index % 2 === 0 ? "user" : "role",
-    subjectId: `subject-${String(index).padStart(2, "0")}`,
-  },
-  object: { objectType: "ticket", objectId: "*" },
-  verb: "close",
-  permit: "allow",
-  createdByUserId: "admin-1",
-  createdAt: "2026-07-17T10:00:00.000Z",
-  updatedAt: "2026-07-17T10:00:00.000Z",
-});
-
-const setup = (
-  initialSubjects: readonly PermissionSubject[] = [],
-  rules: readonly PermissionRule[] = [],
-) => {
+const setup = (initialSubjects: readonly PermissionSubject[] = []) => {
   const subjects = new Map<PermissionPreset, readonly PermissionSubject[]>([
     ["support_staff", initialSubjects],
     ["assignment_manager", []],
     ["configurator", []],
   ]);
-  const setPresetSubjects = vi.fn(
-    async (input: {
-      preset: PermissionPreset;
-      subjects: readonly PermissionSubject[];
-    }) => {
-      subjects.set(input.preset, input.subjects);
-    },
-  );
   const updatePresetSubjects = vi.fn(
     async (input: {
       preset: PermissionPreset;
@@ -77,45 +50,33 @@ const setup = (
       subjects.set(input.preset, [...updated.values()]);
     },
   );
-  const applyCustomRules = vi.fn(async () => undefined);
-  const removeRule = vi.fn(async () => undefined);
   const service: PermissionAdministrationService = {
     listPresetSubjects: async (_guildId, preset) => subjects.get(preset) ?? [],
-    setPresetSubjects,
+    setPresetSubjects: async () => undefined,
     updatePresetSubjects,
-    applyCustomRules,
+    applyCustomRules: async () => undefined,
     listRules: async ({ offset = 0, limit = 10 }) => ({
-      items: rules.slice(offset, offset + limit),
-      total: rules.length,
+      items: [],
+      total: 0,
       offset,
       limit,
     }),
-    removeRule,
+    removeRule: async () => undefined,
   };
   const category = createPermissionSettingsCategory<Context>({
     service,
     authorize: () => true,
     requireAuthorization: async () => undefined,
   });
-  return {
-    category,
-    setPresetSubjects,
-    updatePresetSubjects,
-    applyCustomRules,
-    removeRule,
-  };
+  return { category, updatePresetSubjects };
 };
 
 const field = (
   category: ReturnType<typeof setup>["category"],
-  subcategoryId: string,
-  fieldId: string,
+  fieldId: PermissionPreset,
 ): SettingsField<Context> => {
-  const found = category.subcategories
-    ?.find(({ id }) => id === subcategoryId)
-    ?.fields.find(({ id }) => id === fieldId);
-  if (found === undefined)
-    throw new Error(`Missing ${subcategoryId}/${fieldId}`);
+  const found = category.fields?.find(({ id }) => id === fieldId);
+  if (found === undefined) throw new Error(`Missing ${fieldId}`);
   return found;
 };
 
@@ -133,13 +94,47 @@ const mentionables: readonly SettingsMentionable[] = [
 ];
 
 describe("permission settings category", () => {
+  it("renders one direct page with three native mentionable selects", async () => {
+    const { category } = setup();
+    const renderer = createSettingsRenderer({
+      title: "Prod settings",
+      categories: [category],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "permissions" },
+      context,
+    );
+    const payload = JSON.stringify(rendered.components);
+
+    expect(rendered.location).toEqual({
+      categoryId: "permissions",
+      subcategoryId: "permissions",
+      page: 0,
+      pageCount: 1,
+    });
+    expect(category.fields?.map(({ id }) => id)).toEqual([
+      "support_staff",
+      "assignment_manager",
+      "configurator",
+    ]);
+    expect(category.subcategories).toBeUndefined();
+    expect(payload).toContain("Support staff");
+    expect(payload).toContain("Assignment managers");
+    expect(payload).toContain("Configurators");
+    expect(payload).not.toContain("Advanced");
+    expect(payload).not.toContain("Inspect");
+    expect(payload).not.toContain("rules");
+  });
+
   it("edits users and roles through one preset mentionable control", async () => {
     const { category, updatePresetSubjects } = setup([
       { subjectType: "role", subjectId: "role-1" },
     ]);
-    const subjects = field(category, "support_staff", "subjects");
-    if (subjects.kind !== "mentionable-select")
+    const subjects = field(category, "support_staff");
+    if (subjects.kind !== "mentionable-select") {
       throw new Error("Expected mentionable select");
+    }
 
     expect(await subjects.load(context)).toMatchObject({
       defaults: [{ kind: "role", id: "role-1" }],
@@ -160,39 +155,34 @@ describe("permission settings category", () => {
   });
 
   it("encodes explicit subject types in the native preset selector", async () => {
-    const subjects = Array.from({ length: 2 }, (_, index) => ({
+    const initial = Array.from({ length: 2 }, (_, index) => ({
       subjectType: index % 2 === 0 ? ("user" as const) : ("role" as const),
       subjectId: `12345678901234567${String(index)}`,
     }));
-    const { category } = setup(subjects);
+    const { category } = setup(initial);
     const renderer = createSettingsRenderer({
       title: "Prod settings",
       categories: [category],
     });
 
     const rendered = await renderer.render(
-      {
-        categoryId: "permissions",
-        subcategoryId: "support_staff",
-        page: 0,
-      },
+      { categoryId: "permissions" },
       context,
     );
+    const payload = JSON.stringify(rendered.components);
 
-    expect(rendered.location.pageCount).toBe(1);
-    const content = JSON.stringify(rendered.components);
-    expect(content).toContain(
+    expect(payload).toContain(
       '"default_values":[{"id":"123456789012345670","type":"user"},{"id":"123456789012345671","type":"role"}]',
     );
-    expect(content).not.toContain("Current subjects");
-    expect(content).not.toContain("configured");
+    expect(payload).not.toContain("Current subjects");
+    expect(payload).not.toContain("configured");
   });
 
   it("clears a preset by removing every mentionable selection", async () => {
     const { category, updatePresetSubjects } = setup([
       { subjectType: "role", subjectId: "role-1" },
     ]);
-    const subjects = field(category, "support_staff", "subjects");
+    const subjects = field(category, "support_staff");
     if (subjects.kind !== "mentionable-select") {
       throw new Error("Expected mentionable select");
     }
@@ -208,17 +198,12 @@ describe("permission settings category", () => {
         actorUserId: "admin-1",
       }),
     );
-    expect(
-      category.subcategories
-        ?.find(({ id }) => id === "support_staff")
-        ?.fields.map(({ id }) => id),
-    ).toEqual(["subjects"]);
   });
 
   it("preserves unseen additions from another settings message", async () => {
     const initial = { subjectType: "role" as const, subjectId: "role-1" };
     const { category, updatePresetSubjects } = setup([initial]);
-    const subjects = field(category, "support_staff", "subjects");
+    const subjects = field(category, "support_staff");
     if (subjects.kind !== "mentionable-select") {
       throw new Error("Expected mentionable select");
     }
@@ -259,7 +244,7 @@ describe("permission settings category", () => {
     const { category, updatePresetSubjects } = setup([
       { subjectType: "role", subjectId: "role-1" },
     ]);
-    const subjects = field(category, "support_staff", "subjects");
+    const subjects = field(category, "support_staff");
     if (subjects.kind !== "mentionable-select") {
       throw new Error("Expected mentionable select");
     }
@@ -277,7 +262,7 @@ describe("permission settings category", () => {
     const { category, updatePresetSubjects } = setup([
       { subjectType: "role", subjectId: "role-1" },
     ]);
-    const subjects = field(category, "support_staff", "subjects");
+    const subjects = field(category, "support_staff");
     if (subjects.kind !== "mentionable-select") {
       throw new Error("Expected mentionable select");
     }
@@ -307,16 +292,9 @@ describe("permission settings category", () => {
     });
 
     await expect(
-      renderer.render(
-        {
-          categoryId: "permissions",
-          subcategoryId: "support_staff",
-          page: 0,
-        },
-        context,
-      ),
+      renderer.render({ categoryId: "permissions" }, context),
     ).resolves.toBeDefined();
-    const subjects = field(category, "support_staff", "subjects");
+    const subjects = field(category, "support_staff");
     if (subjects.kind !== "mentionable-select") {
       throw new Error("Expected mentionable select");
     }
@@ -327,212 +305,5 @@ describe("permission settings category", () => {
     expect(updatePresetSubjects).toHaveBeenCalledWith(
       expect.objectContaining({ add: [], remove: initial.slice(0, 25) }),
     );
-  });
-
-  it("previews a staged exact-ticket deny before confirmation", async () => {
-    const { category, applyCustomRules } = setup();
-    const subjects = field(category, "advanced", "subjects");
-    const scope = field(category, "advanced", "scope");
-    const ticket = field(category, "advanced", "ticket-id");
-    const verbs = field(category, "advanced", "verbs");
-    const permit = field(category, "advanced", "permit");
-    const preview = field(category, "advanced", "preview");
-    const confirm = field(category, "advanced", "confirm");
-    if (
-      subjects.kind !== "mentionable-select" ||
-      scope.kind !== "string-select" ||
-      ticket.kind !== "modal" ||
-      verbs.kind !== "string-select" ||
-      permit.kind !== "string-select" ||
-      preview.kind !== "display" ||
-      confirm.kind !== "button"
-    ) {
-      throw new Error("Unexpected advanced field types");
-    }
-
-    await subjects.mutate(mentionables, context);
-    await scope.mutate(["ticket"], context);
-    await ticket.mutate({ ticket: "ticket-42" }, context);
-    await verbs.mutate(["label", "close"], context);
-    await permit.mutate(["deny"], context);
-
-    expect(await preview.load(context)).toMatchObject({
-      value: expect.stringContaining("Object: ticket/ticket-42"),
-    });
-    expect((await preview.load(context)).value).toContain("Permit: DENY");
-    expect((await confirm.load(context)).disabled).toBe(false);
-    await confirm.mutate(context);
-    expect(applyCustomRules).toHaveBeenCalledWith(
-      expect.objectContaining({
-        guildId: "guild-1",
-        subjects: [
-          { subjectType: "user", subjectId: "user-1" },
-          { subjectType: "role", subjectId: "role-1" },
-        ],
-        object: { objectType: "ticket", objectId: "ticket-42" },
-        verbs: ["label", "close"],
-        permit: "deny",
-        actorUserId: "admin-1",
-      }),
-    );
-  });
-
-  it("isolates staged rules between settings messages", async () => {
-    const { category, applyCustomRules } = setup();
-    const subjects = field(category, "advanced", "subjects");
-    const verbs = field(category, "advanced", "verbs");
-    const permit = field(category, "advanced", "permit");
-    const confirm = field(category, "advanced", "confirm");
-    if (
-      subjects.kind !== "mentionable-select" ||
-      verbs.kind !== "string-select" ||
-      permit.kind !== "string-select" ||
-      confirm.kind !== "button"
-    ) {
-      throw new Error("Unexpected advanced field types");
-    }
-    const otherMessage = { ...context, settingsSessionId: "message-2" };
-    await subjects.mutate([mentionables[0]!], context);
-    await verbs.mutate(["close"], context);
-    await subjects.mutate([mentionables[1]!], otherMessage);
-    await verbs.mutate(["reopen"], otherMessage);
-    await permit.mutate(["deny"], otherMessage);
-
-    await confirm.mutate(context);
-    expect(applyCustomRules).toHaveBeenCalledWith(
-      expect.objectContaining({
-        subjects: [{ subjectType: "user", subjectId: "user-1" }],
-        verbs: ["close"],
-        permit: "allow",
-      }),
-    );
-  });
-
-  it("evicts abandoned settings-session state at a fixed bound", async () => {
-    const { category, applyCustomRules } = setup();
-    const subjects = field(category, "advanced", "subjects");
-    const verbs = field(category, "advanced", "verbs");
-    const confirm = field(category, "advanced", "confirm");
-    if (
-      subjects.kind !== "mentionable-select" ||
-      verbs.kind !== "string-select" ||
-      confirm.kind !== "button"
-    ) {
-      throw new Error("Unexpected advanced field types");
-    }
-    await subjects.mutate([mentionables[0]!], context);
-    await verbs.mutate(["close"], context);
-    for (let index = 0; index < 100; index += 1) {
-      await subjects.mutate([mentionables[1]!], {
-        ...context,
-        settingsSessionId: `abandoned-${String(index)}`,
-      });
-    }
-
-    expect(await confirm.mutate(context)).toMatchObject({ status: "invalid" });
-    expect(applyCustomRules).not.toHaveBeenCalled();
-  });
-
-  it.each(["*", "  *  "])(
-    "rejects wildcard %j as an exact ticket ID",
-    async (ticketId) => {
-      const { category, applyCustomRules } = setup();
-      const subjects = field(category, "advanced", "subjects");
-      const scope = field(category, "advanced", "scope");
-      const ticket = field(category, "advanced", "ticket-id");
-      const verbs = field(category, "advanced", "verbs");
-      const confirm = field(category, "advanced", "confirm");
-      if (
-        subjects.kind !== "mentionable-select" ||
-        scope.kind !== "string-select" ||
-        ticket.kind !== "modal" ||
-        verbs.kind !== "string-select" ||
-        confirm.kind !== "button"
-      ) {
-        throw new Error("Unexpected advanced field types");
-      }
-      await subjects.mutate(mentionables, context);
-      await scope.mutate(["ticket"], context);
-      expect(
-        await ticket.validate?.({ ticket: ticketId }, context),
-      ).not.toEqual([]);
-      await ticket.mutate({ ticket: ticketId }, context);
-      await verbs.mutate(["close"], context);
-
-      expect((await confirm.load(context)).disabled).toBe(true);
-      await confirm.mutate(context);
-      expect(applyCustomRules).not.toHaveBeenCalled();
-    },
-  );
-
-  it("paginates inspection controls and removes one selected rule", async () => {
-    const rules = Array.from({ length: 520 }, (_, index) => makeRule(index));
-    const { category, removeRule } = setup([], rules);
-    const renderer = createSettingsRenderer({
-      title: "Prod settings",
-      categories: [category],
-    });
-    const rendered = await renderer.render(
-      { categoryId: "permissions", subcategoryId: "rules", page: 0 },
-      context,
-    );
-    expect(rendered.location.pageCount).toBe(1);
-    expect(JSON.stringify(rendered.components)).toContain("ALLOW · user");
-
-    const next = field(category, "rules", "rules-next");
-    const ruleSelect = field(category, "rules", "rules");
-    if (next.kind !== "button" || ruleSelect.kind !== "string-select") {
-      throw new Error("Expected rule pagination controls");
-    }
-    for (let page = 0; page < 20; page += 1) await next.mutate(context);
-    expect(await ruleSelect.load(context)).toMatchObject({
-      options: expect.arrayContaining([
-        expect.objectContaining({ value: rules[500]!.id }),
-      ]),
-    });
-    await ruleSelect.mutate([rules[500]!.id], context);
-    expect(removeRule).toHaveBeenCalledWith(
-      expect.objectContaining({
-        guildId: "guild-1",
-        ruleId: rules[500]!.id,
-        actorUserId: "admin-1",
-      }),
-    );
-  });
-
-  it("renders an empty rule inspector without summaries or pagination", async () => {
-    const { category } = setup();
-    const renderer = createSettingsRenderer({
-      title: "Prod settings",
-      categories: [category],
-    });
-
-    const rendered = await renderer.render(
-      { categoryId: "permissions", subcategoryId: "rules", page: 0 },
-      context,
-    );
-    const payload = JSON.stringify(rendered.components);
-
-    expect(payload).toContain("## Rules");
-    expect(payload).toContain("Select one active rule to remove.");
-    expect(payload).toContain("No rules in this range");
-    expect(payload).not.toContain("Active rules");
-    expect(payload).not.toContain("Previous page");
-    expect(payload).not.toContain("Next page");
-    expect(payload).not.toContain("**Current:**");
-  });
-
-  it("exposes no category- or channel-context administration control", () => {
-    const { category } = setup();
-    const serialized = JSON.stringify(category);
-    expect(serialized).not.toContain("categoryId");
-    expect(serialized).not.toContain("channelId");
-    expect(category.subcategories?.map(({ id }) => id)).toEqual([
-      "support_staff",
-      "assignment_manager",
-      "configurator",
-      "advanced",
-      "rules",
-    ]);
   });
 });

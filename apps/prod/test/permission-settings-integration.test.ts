@@ -194,20 +194,9 @@ describe("permission settings integration", () => {
         {
           action: "category",
           categoryId: "setup",
-          subcategoryId: "hub",
+          subcategoryId: "setup",
         },
         "permissions",
-      ) as unknown as Interaction,
-    );
-    await runtime.handleInteraction(
-      navigationInteraction(
-        guild,
-        {
-          action: "subcategory",
-          categoryId: "permissions",
-          subcategoryId: "support_staff",
-        },
-        "configurator",
       ) as unknown as Interaction,
     );
     const bootstrap = mentionableInteraction(guild, "configurator", [
@@ -222,17 +211,6 @@ describe("permission settings integration", () => {
     guildRecord.ownerId = "123456789012345698";
 
     const fetchesBeforeMutation = fetchMember.mock.calls.length;
-    await runtime.handleInteraction(
-      navigationInteraction(
-        guild,
-        {
-          action: "subcategory",
-          categoryId: "permissions",
-          subcategoryId: "support_staff",
-        },
-        "support_staff",
-      ) as unknown as Interaction,
-    );
     const supportStaff = mentionableInteraction(guild, "support_staff", [
       targetUserId,
       targetRoleId,
@@ -326,8 +304,8 @@ const mentionableInteraction = (
     customId: encodeSettingsCustomId({
       action: "mentionable-select",
       categoryId: "permissions",
-      subcategoryId: preset,
-      fieldId: "subjects",
+      subcategoryId: "permissions",
+      fieldId: preset,
       page: 0,
     }),
     values,
