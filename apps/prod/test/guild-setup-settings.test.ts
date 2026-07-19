@@ -446,6 +446,10 @@ describe("guild setup settings integration", () => {
     );
     expect(labelsPage).toContain("Current labels");
     expect(labelsPage).toContain("Select a label to manage it.");
+    expect(labelsPage).not.toContain("## Labels");
+    expect(labelsPage).toContain(
+      '"type":14,"divider":true,"spacing":1},{"type":10,"content":"Select a label to manage it."',
+    );
     expect(labelsPage).toContain("Choose a label");
     expect(labelsPage).toContain("Create label");
     expect(labelsPage).not.toContain("## Create label");

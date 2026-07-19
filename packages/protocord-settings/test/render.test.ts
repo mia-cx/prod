@@ -279,6 +279,54 @@ describe("Components v2 settings rendering", () => {
     });
   });
 
+  it("renders a plain string select after an optional separator", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Plain select settings",
+      categories: [
+        {
+          id: "labels",
+          label: "Labels",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "string-select",
+              id: "label",
+              label: "Redundant heading",
+              description: "Select a label to manage it.",
+              presentation: { kind: "plain", separator: true },
+              load: () => ({
+                placeholder: "Choose a label",
+                options: [{ label: "Bug", value: "bug" }],
+              }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = await renderer.render(
+      { categoryId: "labels" },
+      { userId: "admin" },
+    );
+    const [, category] = view.components;
+    const payload = JSON.stringify(category);
+
+    expect(payload).not.toContain("## Redundant heading");
+    expect(category).toMatchObject({
+      components: [
+        { type: ComponentType.TextDisplay },
+        { type: ComponentType.Separator },
+        { type: ComponentType.Separator },
+        {
+          type: ComponentType.TextDisplay,
+          content: "Select a label to manage it.",
+        },
+        { type: ComponentType.ActionRow },
+      ],
+    });
+  });
+
   it("uses native state instead of current-value text for every select type", async () => {
     const renderer = createSettingsRenderer<Context>({
       title: "Stateful selects",

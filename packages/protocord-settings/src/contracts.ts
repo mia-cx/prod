@@ -73,9 +73,15 @@ export type SettingsStringSelectView = SettingsFieldView &
     maxValues?: number;
   }>;
 
+export type SettingsStringSelectPresentation = Readonly<{
+  kind: "plain";
+  separator?: boolean;
+}>;
+
 export type SettingsStringSelectField<Context> =
   SettingsFieldBase<"string-select", Context> &
     Readonly<{
+      presentation?: SettingsStringSelectPresentation;
       load(context: Context): Awaitable<SettingsStringSelectView>;
       validate?(
         values: readonly string[],

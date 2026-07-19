@@ -629,6 +629,7 @@ export function createGuildSetupSettingsConsumer(
             id: "label-select",
             label: "Labels",
             description: "Select a label to manage it.",
+            presentation: { kind: "plain", separator: true },
             visible: async (context) =>
               (await labelStore.list(requireGuild(context).id)).length > 0,
             load: async (context) => {

@@ -421,6 +421,13 @@ function fieldComponentCost<Context>(
   if (field.kind === "modal" && field.presentation?.kind === "preview") {
     return 2;
   }
+  if (
+    field.kind === "string-select" &&
+    field.presentation?.kind === "plain" &&
+    field.presentation.separator === true
+  ) {
+    return 3;
+  }
   return ["string-select", "mentionable-select", "channel-select"].includes(
     field.kind,
   )
@@ -609,10 +616,17 @@ function renderStringSelect<Context>(
     ...(view.maxValues === undefined ? {} : { max_values: view.maxValues }),
     ...(view.disabled === undefined ? {} : { disabled: view.disabled }),
   };
-  return [
-    textDisplay(fieldText(field, view.value)),
-    actionRow(component),
-  ];
+  if (field.presentation?.kind === "plain") {
+    const content = [view.value, field.description]
+      .filter((part): part is string => part !== undefined)
+      .join("\n");
+    return [
+      ...(field.presentation.separator === true ? [separator()] : []),
+      ...(content.length > 0 ? [textDisplay(content)] : []),
+      actionRow(component),
+    ];
+  }
+  return [textDisplay(fieldText(field, view.value)), actionRow(component)];
 }
 
 function renderMentionableSelect<Context>(
