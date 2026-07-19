@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { GuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
+import type { LabelTaxonomyStore } from "../src/label-taxonomy.js";
 import {
   createProdActionRuntime,
   logProdActionResult,
@@ -107,9 +108,27 @@ const ticketProvisioningService: TicketProvisioningService = {
   suspendHubAccess: vi.fn().mockResolvedValue(0),
   resumeHubAccess: vi.fn().mockResolvedValue(0),
 };
+const labelTaxonomyStore: LabelTaxonomyStore = {
+  ensureDefaults: async () => undefined,
+  list: async () => [],
+  findById: async () => undefined,
+  findByName: async () => undefined,
+  create: async () => {
+    throw new Error("not used");
+  },
+  update: async () => {
+    throw new Error("not used");
+  },
+  delete: async () => {
+    throw new Error("not used");
+  },
+  selectForTicket: async () => undefined,
+  listForTicket: async () => [],
+};
 const runtimeOptions = {
   textCommandPrefix: "!",
   guildSettingsStore,
+  labelTaxonomyStore,
   supportHubDiscord,
   ticketProvisioningService,
 };
@@ -303,6 +322,7 @@ describe("Prod action runtime", () => {
       options: expect.arrayContaining([
         expect.objectContaining({ value: "setup" }),
         expect.objectContaining({ value: "identity" }),
+        expect.objectContaining({ value: "labels" }),
       ]),
     });
     expect(JSON.stringify(payload)).not.toContain("Support channel");

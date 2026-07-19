@@ -25,6 +25,7 @@ import type {
   SettingsDefinition,
   SettingsField,
   SettingsMentionable,
+  SettingsModalValues,
   SettingsMutationCallbackResult,
   SettingsMutationResult,
   SettingsSubcategory,
@@ -58,7 +59,7 @@ const MODAL_DRAFT_LIMIT = 1_000;
 const MODAL_RESPONSE_TIMEOUT_MS = 2_500;
 
 type ModalDraft = Readonly<{
-  values: Readonly<Record<string, string>>;
+  values: SettingsModalValues;
   expiresAt: number;
 }>;
 
@@ -124,6 +125,7 @@ type ResolvedRoute<Context> = Readonly<{
   category: SettingsCategory<Context>;
   subcategory: SettingsSubcategory<Context>;
   field?: SettingsField<Context>;
+  fieldPath?: readonly SettingsField<Context>[];
 }>;
 
 export function createSettingsRuntime<Context>(
@@ -393,16 +395,25 @@ async function showSettingsModal<Context>(
     throw new SettingsViewError("stale", "settings modal is stale");
   }
   await beforeModalDeadline(
-    () => requireFieldVisible(field, context),
+    () => requireRouteFieldVisible(resolved, context),
     deadline,
   );
   const view = await beforeModalDeadline(() => field.load(context), deadline);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings modal is disabled");
   }
+  const draftScope = await beforeModalDeadline(
+    () => resolveModalDraftScope(field, context),
+    deadline,
+  );
   const draft = readDraft(
     drafts,
-    draftKey(interaction.user.id, interaction.message.id, resolved.route),
+    draftKey(
+      interaction.user.id,
+      interaction.message.id,
+      resolved.route,
+      draftScope,
+    ),
   );
   const values = draft?.values ?? view.values ?? {};
   validateModalValues(field, values);
@@ -410,31 +421,44 @@ async function showSettingsModal<Context>(
     custom_id: encodeSettingsCustomId({
       ...resolved.route,
       action: "modal-submit",
+      ...(draftScope === undefined ? {} : { modalScope: draftScope }),
     }),
     title: field.title,
-    components: field.inputs.map((input): APILabelComponent => ({
-      type: ComponentType.Label,
-      label: input.label,
-      ...(input.description === undefined
-        ? {}
-        : { description: input.description }),
-      component: {
-        type: ComponentType.TextInput,
-        custom_id: input.id,
-        style: input.style ?? TextInputStyle.Short,
-        ...(input.placeholder === undefined
+    components: field.inputs.map((input): APILabelComponent => {
+      const value = values[input.id];
+      return {
+        type: ComponentType.Label,
+        label: input.label,
+        ...(input.description === undefined
           ? {}
-          : { placeholder: input.placeholder }),
-        ...(input.required === undefined ? {} : { required: input.required }),
-        ...(input.minLength === undefined
-          ? {}
-          : { min_length: input.minLength }),
-        ...(input.maxLength === undefined
-          ? {}
-          : { max_length: input.maxLength }),
-        ...(values[input.id] === undefined ? {} : { value: values[input.id] }),
-      },
-    })),
+          : { description: input.description }),
+        component:
+          input.kind === "checkbox"
+            ? {
+                type: ComponentType.Checkbox,
+                custom_id: input.id,
+                ...(typeof value === "boolean" ? { default: value } : {}),
+              }
+            : {
+                type: ComponentType.TextInput,
+                custom_id: input.id,
+                style: input.style ?? TextInputStyle.Short,
+                ...(input.placeholder === undefined
+                  ? {}
+                  : { placeholder: input.placeholder }),
+                ...(input.required === undefined
+                  ? {}
+                  : { required: input.required }),
+                ...(input.minLength === undefined
+                  ? {}
+                  : { min_length: input.minLength }),
+                ...(input.maxLength === undefined
+                  ? {}
+                  : { max_length: input.maxLength }),
+                ...(typeof value === "string" ? { value } : {}),
+              },
+      };
+    }),
   } satisfies APIModalInteractionResponseCallbackData);
   return { matched: true, status: "modal-shown" };
 }
@@ -465,12 +489,27 @@ async function beforeModalDeadline<Value>(
 
 function validateModalValues<Context>(
   field: Extract<SettingsField<Context>, { kind: "modal" }>,
-  values: Readonly<Record<string, string>>,
+  values: SettingsModalValues,
 ): void {
   for (const input of field.inputs) {
     const value = values[input.id];
+    if (input.kind === "checkbox") {
+      if (value !== undefined && typeof value !== "boolean") {
+        throw new SettingsViewError(
+          "invalid-view",
+          `settings modal ${field.id} value for ${input.id} must be boolean`,
+        );
+      }
+      continue;
+    }
     const maximum = Math.min(input.maxLength ?? 4_000, 4_000);
-    if (value !== undefined && value.length > maximum) {
+    if (value !== undefined && typeof value !== "string") {
+      throw new SettingsViewError(
+        "invalid-view",
+        `settings modal ${field.id} value for ${input.id} must be text`,
+      );
+    }
+    if (typeof value === "string" && value.length > maximum) {
       throw new SettingsViewError(
         "invalid-view",
         `settings modal ${field.id} value for ${input.id} exceeds ${String(maximum)} characters`,
@@ -490,7 +529,7 @@ async function mutateButton<Context>(
   if (field?.kind !== "button") {
     throw new SettingsViewError("stale", "settings button is stale");
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings button is disabled");
@@ -510,7 +549,7 @@ async function mutateStringSelect<Context>(
   if (field?.kind !== "string-select") {
     throw new SettingsViewError("stale", "settings select is stale");
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings select is disabled");
@@ -548,7 +587,7 @@ async function mutateMentionables<Context>(
       "settings mentionable select is stale",
     );
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context, "mutation");
   if (view.disabled === true) {
     throw new SettingsViewError(
@@ -603,7 +642,7 @@ async function mutateChannels<Context>(
   if (field?.kind !== "channel-select") {
     throw new SettingsViewError("stale", "settings channel select is stale");
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings channel select is disabled");
@@ -663,7 +702,7 @@ async function submitModal<Context>(
   if (field?.kind !== "modal") {
     throw new SettingsViewError("stale", "settings modal is stale");
   }
-  await requireFieldVisible(field, context);
+  await requireRouteFieldVisible(resolved, context);
   const view = await field.load(context);
   if (view.disabled === true) {
     throw new SettingsViewError("stale", "settings modal is disabled");
@@ -671,19 +710,25 @@ async function submitModal<Context>(
   const values = Object.fromEntries(
     field.inputs.map((input) => [
       input.id,
-      interaction.fields.getTextInputValue(input.id),
+      input.kind === "checkbox"
+        ? interaction.fields.getCheckbox(input.id)
+        : interaction.fields.getTextInputValue(input.id),
     ]),
+  ) as SettingsModalValues;
+  const modalScope =
+    resolved.route.modalScope ?? (await resolveModalDraftScope(field, context));
+  const key = draftKey(
+    interaction.user.id,
+    interaction.message.id,
+    resolved.route,
+    modalScope,
   );
   const result = await validateAndMutate(
     values,
     context,
     field.validate,
     field.mutate,
-  );
-  const key = draftKey(
-    interaction.user.id,
-    interaction.message.id,
-    resolved.route,
+    modalScope,
   );
   if (result.status === "invalid") {
     rememberDraft(drafts, key, values);
@@ -700,18 +745,30 @@ async function validateAndMutate<Value, Context>(
     | ((
         value: Value,
         context: Context,
+        modalScope?: string,
       ) => Awaitable<readonly SettingsValidationIssue[]>)
     | undefined,
   mutate: (
     value: Value,
     context: Context,
+    modalScope?: string,
   ) => Awaitable<SettingsMutationCallbackResult>,
+  modalScope?: string,
 ): Promise<SettingsMutationResult> {
-  const issues = validate === undefined ? [] : await validate(value, context);
+  const issues =
+    validate === undefined
+      ? []
+      : modalScope === undefined
+        ? await validate(value, context)
+        : await validate(value, context, modalScope);
   if (issues.length > 0) {
     return { status: "invalid", issues };
   }
-  return normalizeMutationResult(await mutate(value, context));
+  return normalizeMutationResult(
+    modalScope === undefined
+      ? await mutate(value, context)
+      : await mutate(value, context, modalScope),
+  );
 }
 
 async function finishMutation<Context>(
@@ -770,10 +827,11 @@ function resolveRoute<Context>(
   if (category === undefined || subcategory === undefined) {
     return undefined;
   }
-  const field =
+  const fieldPath =
     route.fieldId === undefined
       ? undefined
-      : subcategory.fields.find(({ id }) => id === route.fieldId);
+      : findRouteFieldPath(subcategory.fields, route.fieldId);
+  const field = fieldPath?.[fieldPath.length - 1];
   if (route.fieldId !== undefined && field === undefined) {
     return undefined;
   }
@@ -782,7 +840,26 @@ function resolveRoute<Context>(
     category,
     subcategory,
     ...(field === undefined ? {} : { field }),
+    ...(fieldPath === undefined ? {} : { fieldPath }),
   };
+}
+
+function findRouteFieldPath<Context>(
+  fields: readonly SettingsField<Context>[],
+  fieldId: string,
+): readonly SettingsField<Context>[] | undefined {
+  for (const field of fields) {
+    if (field.id === fieldId) return [field];
+    if (field.kind === "action-row") {
+      const item = field.items.find(({ id }) => id === fieldId);
+      if (item !== undefined) return [field, item];
+    }
+    if (field.kind === "container") {
+      const childPath = findRouteFieldPath(field.fields, fieldId);
+      if (childPath !== undefined) return [field, ...childPath];
+    }
+  }
+  return undefined;
 }
 
 async function requireAuthorization<Context>(
@@ -811,6 +888,15 @@ async function requireFieldVisible<Context>(
 ): Promise<void> {
   if (field.visible !== undefined && !(await field.visible(context))) {
     throw new SettingsViewError("stale", "settings field is no longer visible");
+  }
+}
+
+async function requireRouteFieldVisible<Context>(
+  resolved: ResolvedRoute<Context>,
+  context: Context,
+): Promise<void> {
+  for (const field of resolved.fieldPath ?? []) {
+    await requireFieldVisible(field, context);
   }
 }
 
@@ -912,6 +998,7 @@ function draftKey(
   userId: string,
   messageId: string,
   route: SettingsRoute,
+  scope: string | undefined,
 ): string {
   return [
     messageId,
@@ -919,13 +1006,28 @@ function draftKey(
     route.categoryId,
     route.subcategoryId,
     route.fieldId ?? "-",
+    scope ?? "-",
   ].join(":");
+}
+
+async function resolveModalDraftScope<Context>(
+  field: Extract<SettingsField<Context>, { kind: "modal" }>,
+  context: Context,
+): Promise<string | undefined> {
+  const scope = await field.draftScope?.(context);
+  if (scope !== undefined && (scope.length === 0 || scope.length > 100)) {
+    throw new SettingsViewError(
+      "invalid-view",
+      `settings modal ${field.id} draft scope must contain between 1 and 100 characters`,
+    );
+  }
+  return scope;
 }
 
 function rememberDraft(
   drafts: Map<string, ModalDraft>,
   key: string,
-  values: Readonly<Record<string, string>>,
+  values: SettingsModalValues,
 ): void {
   drafts.delete(key);
   drafts.set(key, {

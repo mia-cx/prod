@@ -34,6 +34,7 @@ export const openDatabase = (databaseUrl: string): DatabaseConnection => {
   }
 
   const sqlite = new Database(path);
+  sqlite.pragma("foreign_keys = ON");
   sqlite.pragma("journal_mode = WAL");
 
   return Object.freeze({
@@ -41,4 +42,3 @@ export const openDatabase = (databaseUrl: string): DatabaseConnection => {
     close: () => sqlite.close(),
   });
 };
-

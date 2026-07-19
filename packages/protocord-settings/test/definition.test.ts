@@ -65,6 +65,116 @@ describe("consumer settings definitions", () => {
     ).toThrow(/either direct fields or subcategories/);
   });
 
+  it("accepts native checkbox inputs in modals", () => {
+    const definition = validDefinition();
+    const category = definition.categories[0]!;
+
+    expect(() =>
+      defineSettings({
+        ...definition,
+        categories: [
+          {
+            ...category,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "edit",
+                    label: "Edit",
+                    title: "Edit setting",
+                    inputs: [
+                      {
+                        kind: "checkbox",
+                        id: "active",
+                        label: "Active",
+                        description: "Allow this setting to be selected.",
+                      },
+                    ],
+                    load: () => ({ values: { active: true } }),
+                    mutate: () => undefined,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts modal and mutation buttons in one action row", () => {
+    const definition = validDefinition();
+    const category = definition.categories[0]!;
+    const actionRow = {
+      kind: "action-row" as const,
+      id: "actions",
+      label: "Actions",
+      items: [
+        {
+          kind: "modal" as const,
+          id: "edit",
+          label: "Edit",
+          title: "Edit setting",
+          inputs: [{ id: "name", label: "Name" }],
+          load: () => ({}),
+          mutate: () => undefined,
+        },
+        {
+          kind: "button" as const,
+          id: "delete",
+          label: "Delete",
+          load: () => ({}),
+          mutate: () => undefined,
+        },
+      ],
+    };
+
+    expect(() =>
+      defineSettings({
+        ...definition,
+        categories: [
+          {
+            ...category,
+            subcategories: [
+              { id: "general", label: "General", fields: [actionRow] },
+            ],
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      defineSettings({
+        ...definition,
+        categories: [
+          {
+            ...category,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    ...actionRow,
+                    items: Array.from({ length: 6 }, (_, index) => ({
+                      kind: "button" as const,
+                      id: `button-${String(index)}`,
+                      label: `Button ${String(index)}`,
+                      load: () => ({}),
+                      mutate: () => undefined,
+                    })),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/between 1 and 5 items/);
+  });
+
   it("rejects duplicate and unstable consumer IDs", () => {
     const definition = validDefinition();
     const category = definition.categories[0]!;

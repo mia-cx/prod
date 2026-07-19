@@ -9,7 +9,10 @@ import {
   type Interaction,
   type PermissionResolvable,
 } from "discord.js";
-import { encodeSettingsCustomId } from "@protocord/settings";
+import {
+  decodeSettingsCustomId,
+  encodeSettingsCustomId,
+} from "@protocord/settings";
 import { createSqlitePermissionRuleStore } from "@protocord/permissions";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +23,10 @@ import {
 } from "../src/authorization.js";
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
+import {
+  MAX_LABELS,
+  createSqliteLabelTaxonomyStore,
+} from "../src/label-taxonomy.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import type { HubTransition } from "../src/hub-transition.js";
 import { createLogger } from "../src/logger.js";
@@ -81,6 +88,7 @@ const setup = async (
   connections.push(connection);
   await applyMigrations(connection.database);
   const store = createSqliteGuildSettingsStore(connection.database);
+  const labelStore = createSqliteLabelTaxonomyStore(connection.database);
   const supportHub: SupportHubDiscord = {
     validateHub: vi.fn(async () => ({ valid: true as const })),
     prepareHub: vi.fn(async (_guild, channelId, existingOwnership) => ({
@@ -114,6 +122,7 @@ const setup = async (
   const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
     textCommandPrefix: "",
     guildSettingsStore: store,
+    labelTaxonomyStore: labelStore,
     supportHubDiscord: supportHub,
     ticketProvisioningService,
     ...(withPermissionSettings
@@ -123,6 +132,7 @@ const setup = async (
   return {
     connection,
     store,
+    labelStore,
     supportHub,
     runtime,
     permissionAdministration,
@@ -201,9 +211,11 @@ const component = (
   route: Parameters<typeof encodeSettingsCustomId>[0],
   options: Readonly<{
     userId?: string;
+    messageId?: string;
     allowed?: readonly PermissionResolvable[];
     modalValue?: string;
     selectedValues?: readonly string[];
+    modalValues?: Readonly<Record<string, string>>;
   }> = {},
 ) => {
   const interaction: Record<string, unknown> = {
@@ -220,7 +232,7 @@ const component = (
     ),
     deferred: false,
     replied: false,
-    message: { id: "123456789012345699" },
+    message: { id: options.messageId ?? "123456789012345699" },
     values:
       kind === "channel"
         ? [hubChannelId]
@@ -238,7 +250,8 @@ const component = (
       ],
     ]),
     fields: {
-      getTextInputValue: () => options.modalValue ?? "",
+      getTextInputValue: (inputId: string) =>
+        options.modalValues?.[inputId] ?? options.modalValue ?? "",
     },
     isFromMessage: () => true,
     isAutocomplete: () => false,
@@ -291,6 +304,37 @@ const modalRoute = (
       ? 1
       : 0,
 });
+
+const labelModalRoute = (
+  fieldId: "label-create" | "label-edit",
+) => ({
+  action: "modal-submit" as const,
+  categoryId: "labels",
+  subcategoryId: "labels",
+  fieldId,
+  page: 0,
+});
+
+const labelSelectRoute = {
+  action: "string-select" as const,
+  categoryId: "labels",
+  subcategoryId: "labels",
+  fieldId: "label-select",
+  page: 0,
+};
+
+const labelDeleteRoute = {
+  action: "button" as const,
+  categoryId: "labels",
+  subcategoryId: "labels",
+  fieldId: "label-delete",
+  page: 0,
+};
+
+const labelConfirmDeleteRoute = {
+  ...labelDeleteRoute,
+  fieldId: "label-delete-confirm",
+};
 
 describe("guild setup settings integration", () => {
   it("adds Manage Server roles to every permission preset on first reconciliation", async () => {
@@ -362,7 +406,7 @@ describe("guild setup settings integration", () => {
     }
   });
 
-  it("renders direct Setup fields and nested Identity pages", async () => {
+  it("renders direct Setup and Labels fields and nested Identity pages", async () => {
     const { runtime } = await setup();
     const opened = command(ownerId);
     await runtime.handleInteraction(opened as unknown as Interaction);
@@ -391,6 +435,48 @@ describe("guild setup settings integration", () => {
     expect(setupPage).not.toContain("Choose a settings page");
     expect(setupPage).not.toContain("**Current:**");
     expect(setupPage).not.toContain("Empty-hub privacy");
+
+    const labelsCategory = component(
+      "string",
+      {
+        action: "category",
+        categoryId: "setup",
+        subcategoryId: "setup",
+        page: 0,
+      },
+      { selectedValues: ["labels"] },
+    );
+    await runtime.handleInteraction(labelsCategory as unknown as Interaction);
+    const labelsPage = JSON.stringify(
+      labelsCategory.editReply.mock.calls[0]?.[0],
+    );
+    expect(labelsPage).toContain(
+      "Manage labels used to organize and assign tickets.",
+    );
+    expect(labelsPage).toContain("Current labels");
+    expect(labelsPage).toContain("Select a label to manage it.");
+    expect(labelsPage).not.toContain("## Labels");
+    expect(labelsPage).toContain(
+      '"type":14,"divider":true,"spacing":1},{"type":10,"content":"Select a label to manage it."',
+    );
+    expect(labelsPage).toContain("Choose a label");
+    expect(labelsPage).toContain("Create label");
+    expect(labelsPage).not.toContain("## Create label");
+    expect(labelsPage).toContain("# Current labels");
+    expect(labelsPage).not.toContain("**Current:**");
+    expect(labelsPage).not.toContain("Label list");
+    expect(labelsPage).toContain(
+      '"content":"# Current labels"}],"accessory"',
+    );
+    expect(labelsPage.indexOf("# Current labels")).toBeLessThan(
+      labelsPage.indexOf("`account`:"),
+    );
+    expect(labelsPage.indexOf("`account`:")).toBeLessThan(
+      labelsPage.indexOf("Choose a label"),
+    );
+    expect(labelsPage).not.toContain("Add a label.");
+    expect(labelsPage).not.toContain("Choose a settings page");
+    expect(labelsPage).not.toContain("Ticket labels:");
 
     const identityCategory = component(
       "string",
@@ -656,5 +742,310 @@ describe("guild setup settings integration", () => {
       safetyPrompt: "never request user secrets",
       tone: "lowercase, direct, and concise",
     });
+  });
+
+  it("seeds generic labels when authorized settings are opened", async () => {
+    const { runtime, labelStore } = await setup();
+
+    await runtime.handleInteraction(
+      command(administratorId, [
+        PermissionFlagsBits.Administrator,
+      ]) as unknown as Interaction,
+    );
+
+    await expect(labelStore.list(guildId)).resolves.toEqual([
+      expect.objectContaining({ name: "account" }),
+      expect.objectContaining({ name: "bug" }),
+      expect.objectContaining({ name: "feedback" }),
+      expect.objectContaining({ name: "gameplay" }),
+      expect.objectContaining({ name: "other" }),
+    ]);
+  });
+
+  it("creates, selects, edits, and deletes labels with persisted rerenders", async () => {
+    const { connection, runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+
+    const create = component("modal", labelModalRoute("label-create"), {
+      modalValues: {
+        name: "Connection Issue",
+        description: "",
+      },
+    });
+    await runtime.handleInteraction(create as unknown as Interaction);
+    expect(JSON.stringify(create.editReply.mock.calls[0]?.[0])).toContain(
+      "Connection Issue",
+    );
+    await expect(
+      labelStore.findByName(guildId, "connection issue"),
+    ).resolves.not.toHaveProperty("description");
+
+    const duplicate = component("modal", labelModalRoute("label-create"), {
+      modalValues: {
+        name: "  ＣＯＮＮＥＣＴＩＯＮ   ISSUE ",
+        description: "A normalized duplicate.",
+      },
+    });
+    await runtime.handleInteraction(duplicate as unknown as Interaction);
+    expect(JSON.stringify(duplicate.editReply.mock.calls[0]?.[0])).toContain(
+      "already exists",
+    );
+
+    const edit = component("modal", labelModalRoute("label-edit"), {
+      modalValues: {
+        name: "Connectivity",
+        description: "Network and game-server connectivity problems.",
+      },
+    });
+    await runtime.handleInteraction(edit as unknown as Interaction);
+    expect(JSON.stringify(edit.editReply.mock.calls[0]?.[0])).toContain(
+      "Connectivity",
+    );
+
+    const firstDelete = component("button", labelDeleteRoute);
+    await runtime.handleInteraction(firstDelete as unknown as Interaction);
+    expect(JSON.stringify(firstDelete.editReply.mock.calls[0]?.[0])).toContain(
+      "Confirm delete",
+    );
+
+    const repeatedDelete = component("button", labelDeleteRoute);
+    await runtime.handleInteraction(repeatedDelete as unknown as Interaction);
+    await expect(
+      labelStore.findByName(guildId, "connectivity"),
+    ).resolves.toMatchObject({ id: expect.any(String) });
+
+    const confirmDelete = component("button", labelConfirmDeleteRoute);
+    await runtime.handleInteraction(confirmDelete as unknown as Interaction);
+    expect(
+      JSON.stringify(confirmDelete.editReply.mock.calls[0]?.[0]),
+    ).not.toContain("Connectivity");
+
+    await expect(
+      labelStore.findByName(guildId, "connectivity"),
+    ).resolves.toBeUndefined();
+    const restarted = createSqliteLabelTaxonomyStore(connection.database);
+    await expect(
+      restarted.findByName(guildId, "connectivity"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("edits the label captured when the modal opened", async () => {
+    const { runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+    const account = (await labelStore.findByName(guildId, "account"))!;
+    const bug = (await labelStore.findByName(guildId, "bug"))!;
+
+    const selectAccount = component("string", labelSelectRoute, {
+      selectedValues: [account.id],
+    });
+    await runtime.handleInteraction(selectAccount as unknown as Interaction);
+    const openEdit = component("button", {
+      ...labelModalRoute("label-edit"),
+      action: "modal",
+    });
+    await runtime.handleInteraction(openEdit as unknown as Interaction);
+    const modalCustomId = openEdit.showModal.mock.calls[0]?.[0]?.custom_id;
+    expect(modalCustomId).toEqual(expect.any(String));
+
+    const selectBug = component("string", labelSelectRoute, {
+      selectedValues: [bug.id],
+    });
+    await runtime.handleInteraction(selectBug as unknown as Interaction);
+    const decoded = decodeSettingsCustomId(modalCustomId as string);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) throw new Error("Expected a settings modal route");
+    const submitAccountEdit = component("modal", decoded.route, {
+      modalValues: {
+        name: "account access",
+        description: "Updated account description.",
+      },
+    });
+    await runtime.handleInteraction(
+      submitAccountEdit as unknown as Interaction,
+    );
+
+    await expect(labelStore.findById(guildId, account.id)).resolves.toMatchObject(
+      { name: "account access" },
+    );
+    await expect(labelStore.findById(guildId, bug.id)).resolves.toMatchObject({
+      name: "bug",
+    });
+  });
+
+  it("appends management controls for the selected label", async () => {
+    const { runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+    const bug = (await labelStore.findByName(guildId, "bug"))!;
+    const select = component("string", labelSelectRoute, {
+      selectedValues: [bug.id],
+    });
+
+    await runtime.handleInteraction(select as unknown as Interaction);
+
+    const response = select.editReply.mock.calls[0]?.[0] as
+      | { components?: readonly unknown[] }
+      | undefined;
+    expect(response?.components).toHaveLength(3);
+    expect(JSON.stringify(response?.components?.[1])).not.toContain(
+      '"label":"Edit"',
+    );
+    expect(JSON.stringify(response?.components?.[2])).toContain(
+      "**Name:** `bug`",
+    );
+    expect(JSON.stringify(response?.components?.[2])).toContain(
+      "**Description:** Unexpected behavior, errors, crashes",
+    );
+    const payload = JSON.stringify(select.editReply.mock.calls[0]?.[0]);
+    expect(payload).toContain("Unexpected behavior, errors, crashes");
+    expect(payload).toContain('"label":"Edit"');
+    expect(payload).toContain('"label":"Delete"');
+    expect(payload).not.toContain("## Edit label");
+    expect(payload).not.toContain("## Delete label");
+    expect(payload.indexOf("`account`:")).toBeLessThan(
+      payload.indexOf("Choose a label"),
+    );
+  });
+
+  it("expires stale label-management session state", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-19T12:00:00.000Z"));
+      const { runtime, labelStore } = await setup();
+      await labelStore.ensureDefaults(guildId);
+      const bug = (await labelStore.findByName(guildId, "bug"))!;
+      const messageId = "label-session-1";
+      const select = component("string", labelSelectRoute, {
+        messageId,
+        selectedValues: [bug.id],
+      });
+      await runtime.handleInteraction(select as unknown as Interaction);
+
+      vi.advanceTimersByTime(15 * 60 * 1_000 + 1);
+      const staleDelete = component("button", labelDeleteRoute, { messageId });
+      await runtime.handleInteraction(staleDelete as unknown as Interaction);
+
+      expect(staleDelete.followUp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content:
+            "This settings control is outdated. Reopen settings and try again.",
+        }),
+      );
+      await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject(
+        { id: bug.id },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps label creation available when the taxonomy is empty", async () => {
+    const { runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+    for (const label of await labelStore.list(guildId)) {
+      await labelStore.delete(guildId, label.id);
+    }
+    const labelsCategory = component(
+      "string",
+      {
+        action: "category",
+        categoryId: "setup",
+        subcategoryId: "setup",
+        page: 0,
+      },
+      { selectedValues: ["labels"] },
+    );
+
+    await runtime.handleInteraction(labelsCategory as unknown as Interaction);
+
+    const payload = JSON.stringify(labelsCategory.editReply.mock.calls[0]?.[0]);
+    expect(payload).toContain("Current labels");
+    expect(payload).toContain("Create label");
+    expect(payload).not.toContain("## Create label");
+    expect(payload).toContain("# Current labels");
+    expect(payload).not.toContain("Add a label.");
+    expect(payload).not.toContain("Choose a label");
+  });
+
+  it("rechecks authorization before a label mutation", async () => {
+    const { runtime, store, labelStore } = await setup();
+    await store.configureHub(guildId, hubChannelId, ownership());
+    await labelStore.ensureDefaults(guildId);
+    const bug = (await labelStore.findByName(guildId, "bug"))!;
+    const select = component("string", labelSelectRoute, {
+      selectedValues: [bug.id],
+    });
+    await runtime.handleInteraction(select as unknown as Interaction);
+    const unauthorized = component(
+      "button",
+      labelDeleteRoute,
+      {
+        userId: "ordinary-member",
+        allowed: [],
+      },
+    );
+
+    await runtime.handleInteraction(unauthorized as unknown as Interaction);
+
+    expect(unauthorized.editReply).not.toHaveBeenCalled();
+    expect(unauthorized.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "Manage Server permission or bot operator access is required for settings.",
+        flags: MessageFlags.Ephemeral,
+      }),
+    );
+    await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject(
+      { id: bug.id },
+    );
+  });
+
+  it("keeps every supported label reachable within the Discord select", async () => {
+    const { runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+    const customNames: string[] = [];
+    for (let index = 0; index < MAX_LABELS - 5; index++) {
+      const name = `${String(index).padStart(2, "0")}-${"*".repeat(77)}`;
+      customNames.push(name);
+      await labelStore.create(guildId, {
+        name,
+        description: "x".repeat(500),
+      });
+    }
+
+    const selected = (await labelStore.findByName(
+      guildId,
+      customNames.at(-1)!,
+    ))!;
+    const select = component("string", labelSelectRoute, {
+      selectedValues: [selected.id],
+    });
+    await runtime.handleInteraction(select as unknown as Interaction);
+
+    const edit = component("modal", labelModalRoute("label-edit"), {
+      modalValues: {
+        name: customNames.at(-1)!.replace("19-", "zz-"),
+        description: "Updated at the supported boundary.",
+      },
+    });
+    await runtime.handleInteraction(edit as unknown as Interaction);
+    const payload = JSON.stringify(edit.editReply.mock.calls[0]?.[0]);
+
+    for (let index = 0; index < customNames.length - 1; index++) {
+      expect(payload).toContain(`${String(index).padStart(2, "0")}-`);
+    }
+    expect(payload).toContain(`${"x".repeat(49)}…`);
+    expect(payload).not.toContain("x".repeat(50));
+    expect(payload).toContain("zz-");
+
+    const overflow = component("modal", labelModalRoute("label-create"), {
+      modalValues: {
+        name: "overflow",
+        description: "This exceeds the supported label bound.",
+      },
+    });
+    await runtime.handleInteraction(overflow as unknown as Interaction);
+    expect(JSON.stringify(overflow.editReply.mock.calls[0]?.[0])).toContain(
+      "at most 25 labels",
+    );
   });
 });

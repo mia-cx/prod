@@ -218,6 +218,52 @@ export const permissionRuleOriginEvents = sqliteTable(
   ],
 );
 
+export const labels = sqliteTable(
+  "labels",
+  {
+    id: text().primaryKey(),
+    guildId: text("guild_id").notNull(),
+    name: text().notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    description: text(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("labels_guild_normalized_name_unique").on(
+      table.guildId,
+      table.normalizedName,
+    ),
+  ],
+);
+
+export const guildLabelTaxonomies = sqliteTable("guild_label_taxonomies", {
+  guildId: text("guild_id").primaryKey(),
+  seedVersion: integer("seed_version").notNull(),
+  initializedAt: text("initialized_at").notNull(),
+});
+
+export const ticketLabels = sqliteTable(
+  "ticket_labels",
+  {
+    ticketId: text("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    labelId: text("label_id")
+      .notNull()
+      .references(() => labels.id, { onDelete: "cascade" }),
+    appliedByType: text("applied_by_type", {
+      enum: ["user", "service"],
+    }).notNull(),
+    appliedById: text("applied_by_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.ticketId, table.labelId] }),
+    index("ticket_labels_label").on(table.labelId),
+  ],
+);
+
 export const schemaContributors = Object.freeze([
   permissionsSchemaOwner,
   modelSettingsSchemaOwner,

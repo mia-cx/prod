@@ -279,6 +279,54 @@ describe("Components v2 settings rendering", () => {
     });
   });
 
+  it("renders a plain string select after an optional separator", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Plain select settings",
+      categories: [
+        {
+          id: "labels",
+          label: "Labels",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "string-select",
+              id: "label",
+              label: "Redundant heading",
+              description: "Select a label to manage it.",
+              presentation: { kind: "plain", separator: true },
+              load: () => ({
+                placeholder: "Choose a label",
+                options: [{ label: "Bug", value: "bug" }],
+              }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = await renderer.render(
+      { categoryId: "labels" },
+      { userId: "admin" },
+    );
+    const [, category] = view.components;
+    const payload = JSON.stringify(category);
+
+    expect(payload).not.toContain("## Redundant heading");
+    expect(category).toMatchObject({
+      components: [
+        { type: ComponentType.TextDisplay },
+        { type: ComponentType.Separator },
+        { type: ComponentType.Separator },
+        {
+          type: ComponentType.TextDisplay,
+          content: "Select a label to manage it.",
+        },
+        { type: ComponentType.ActionRow },
+      ],
+    });
+  });
+
   it("uses native state instead of current-value text for every select type", async () => {
     const renderer = createSettingsRenderer<Context>({
       title: "Stateful selects",
@@ -365,6 +413,13 @@ describe("Components v2 settings rendering", () => {
               load: () => ({ value: "Nothing configured." }),
             },
             {
+              kind: "display",
+              id: "plain-summary",
+              label: "Plain summary",
+              presentation: { kind: "plain" },
+              load: () => ({ value: "**bug:** Unexpected behavior." }),
+            },
+            {
               kind: "button",
               id: "refresh",
               label: "Refresh",
@@ -383,8 +438,117 @@ describe("Components v2 settings rendering", () => {
     const payload = JSON.stringify(rendered.components);
 
     expect(payload).toContain("Nothing configured.");
+    expect(payload).toContain("**bug:** Unexpected behavior.");
+    expect(payload).not.toContain("## Plain summary");
     expect(payload).toContain("Reload the data.");
     expect(payload).not.toContain("**Current:**");
+  });
+
+  it("appends grouped fields in their own container", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Inline actions",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "container",
+              id: "editor",
+              label: "Editor",
+              fields: [
+                {
+                  kind: "display",
+                  id: "details",
+                  label: "Details",
+                  presentation: { kind: "plain" },
+                  load: () => ({ value: "**Name:** `bug`" }),
+                },
+                {
+                  kind: "action-row",
+                  id: "actions",
+                  label: "Actions",
+                  items: [
+                    {
+                      kind: "modal",
+                      id: "edit",
+                      label: "Edit",
+                      title: "Edit setting",
+                      inputs: [{ id: "name", label: "Name" }],
+                      load: () => ({}),
+                      mutate: () => undefined,
+                    },
+                    {
+                      kind: "button",
+                      id: "delete",
+                      label: "Delete",
+                      style: ButtonStyle.Danger,
+                      load: () => ({}),
+                      mutate: () => undefined,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const appended = rendered.components[2];
+    const rows = JSON.stringify(appended).match(
+      /"type":1,"components":\[\{"type":2[^\]]+"label":"Edit"[^\]]+"label":"Delete"[^\]]+\]/g,
+    );
+
+    expect(rendered.components).toHaveLength(3);
+    expect(JSON.stringify(rendered.components[1])).not.toContain("**Name:**");
+    expect(JSON.stringify(appended)).toContain("**Name:** `bug`");
+    expect(rows).toHaveLength(1);
+  });
+
+  it("rejects views above Discord's 40 total component limit", async () => {
+    const definitionWithContainers = (
+      containerCount: number,
+    ): SettingsDefinition<Context> => ({
+      title: "Bounded component settings",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: Array.from({ length: containerCount }, (_, containerIndex) => ({
+            kind: "container" as const,
+            id: `container-${String(containerIndex)}`,
+            label: `Container ${String(containerIndex)}`,
+            fields: Array.from({ length: 9 }, (_, fieldIndex) => ({
+              kind: "display" as const,
+              id: `display-${String(containerIndex)}-${String(fieldIndex)}`,
+              label: `Display ${String(fieldIndex)}`,
+              presentation: { kind: "plain" as const },
+              load: () => ({ value: "Value" }),
+            })),
+          })),
+        },
+      ],
+    });
+
+    await expect(
+      createSettingsRenderer(definitionWithContainers(3)).render(
+        { categoryId: "setup" },
+        { userId: "admin" },
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      createSettingsRenderer(definitionWithContainers(4)).render(
+        { categoryId: "setup" },
+        { userId: "admin" },
+      ),
+    ).rejects.toMatchObject({ reason: "invalid-view" });
   });
 
   it("reserves notice space when paginating direct category fields", async () => {
@@ -470,7 +634,7 @@ describe("Components v2 settings rendering", () => {
     expect(payload).toContain('"label":"Form fallback"');
   });
 
-  it("renders inline modal values and separately truncated previews", async () => {
+  it("renders inline, section, and separately truncated modal presentations", async () => {
     const longPreview = "x".repeat(301);
     const renderer = createSettingsRenderer<Context>({
       title: "Modal presentations",
@@ -480,6 +644,19 @@ describe("Components v2 settings rendering", () => {
           label: "Identity",
           authorize: () => true,
           fields: [
+            {
+              kind: "modal",
+              id: "labels",
+              label: "Current labels",
+              title: "Create label",
+              presentation: { kind: "section" },
+              inputs: [{ id: "name", label: "Name" }],
+              load: () => ({
+                value: "**bug:** Unexpected behavior.",
+                buttonLabel: "Create label",
+              }),
+              mutate: () => undefined,
+            },
             {
               kind: "modal",
               id: "name",
@@ -512,7 +689,13 @@ describe("Components v2 settings rendering", () => {
     const contents = textDisplayContents(view.components);
 
     expect(contents).toContain("**Name:** Prod");
+    expect(contents).toContain(
+      "# Current labels\n**bug:** Unexpected behavior.",
+    );
     expect(contents).toContain("**Style prompt**");
+    expect(JSON.stringify(view.components)).toContain(
+      '"label":"Create label"',
+    );
     expect(contents).toContain(`${"x".repeat(299)}…`);
     expect(contents).not.toContain(longPreview);
   });
@@ -552,6 +735,46 @@ describe("Components v2 settings rendering", () => {
       const ids = customIds(view.components);
       expect(new Set(ids).size).toBe(ids.length);
     }
+  });
+
+  it("paginates multi-button action rows before the message limit", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Action row settings",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: Array.from({ length: 7 }, (_, rowIndex) => ({
+            kind: "action-row" as const,
+            id: `row-${String(rowIndex)}`,
+            label: `Row ${String(rowIndex)}`,
+            items: Array.from({ length: 5 }, (_, itemIndex) => ({
+              kind: "button" as const,
+              id: `button-${String(rowIndex)}-${String(itemIndex)}`,
+              label: `Button ${String(itemIndex)}`,
+              load: () => ({ value: "Ready" }),
+              mutate: () => undefined,
+            })),
+          })),
+        },
+      ],
+    });
+
+    const first = await renderer.render(
+      { categoryId: "setup", page: 0 },
+      { userId: "admin" },
+    );
+    const last = await renderer.render(
+      { categoryId: "setup", page: 6 },
+      { userId: "admin" },
+    );
+
+    expect(first.location.pageCount).toBe(7);
+    expect(last.location.pageCount).toBe(7);
+    expect(JSON.stringify(first.components)).toContain("button-0-0");
+    expect(JSON.stringify(first.components)).not.toContain("button-1-0");
+    expect(JSON.stringify(last.components)).toContain("button-6-0");
   });
 
   it("keeps page routes stable while transient notices are rendered", async () => {

@@ -1,4 +1,6 @@
 import type {
+  SettingsActionRowField,
+  SettingsContainerField,
   SettingsDefinition,
   SettingsField,
   SettingsModalField,
@@ -15,6 +17,7 @@ export const SETTINGS_LIMITS = Object.freeze({
   modalInputs: 5,
   customIdLength: 100,
   containerComponents: 10,
+  messageComponents: 40,
   actionRowButtons: 5,
   textDisplayCharacters: 4_000,
   textDisplayCharactersPerMessage: 4_000,
@@ -120,10 +123,7 @@ function validateFields<Context>(
       `${owner} may define at most ${SETTINGS_LIMITS.fieldsPerSubcategory} fields`,
     );
   }
-  assertUnique(
-    fields.map(({ id }) => id),
-    `field in ${owner}`,
-  );
+  assertUnique(fields.flatMap(fieldIds), `field in ${owner}`);
   for (const field of fields) {
     validateField(field, owner);
   }
@@ -136,8 +136,51 @@ function validateField<Context>(
   assertStableId("field", field.id);
   assertText(`field ${field.id} label`, field.label, 1, 80);
   assertOptionalText(`field ${field.id} description`, field.description, 4_000);
+  if (field.kind === "action-row") {
+    validateActionRowField(field, subcategoryId);
+  }
+  if (field.kind === "container") {
+    validateContainerField(field, subcategoryId);
+  }
   if (field.kind === "modal") {
     validateModalField(field, subcategoryId);
+  }
+}
+
+function fieldIds<Context>(field: SettingsField<Context>): readonly string[] {
+  if (field.kind === "action-row") {
+    return [field.id, ...field.items.map(({ id }) => id)];
+  }
+  if (field.kind === "container") {
+    return [field.id, ...field.fields.flatMap(fieldIds)];
+  }
+  return [field.id];
+}
+
+function validateContainerField<Context>(
+  field: SettingsContainerField<Context>,
+  owner: string,
+): void {
+  if (field.fields.length === 0) {
+    fail(`container field ${field.id} in ${owner} must not be empty`);
+  }
+  validateFields(field.fields, `container field ${field.id}`);
+}
+
+function validateActionRowField<Context>(
+  field: SettingsActionRowField<Context>,
+  owner: string,
+): void {
+  if (
+    field.items.length === 0 ||
+    field.items.length > SETTINGS_LIMITS.actionRowButtons
+  ) {
+    fail(
+      `action row ${field.id} in ${owner} must define between 1 and ${SETTINGS_LIMITS.actionRowButtons} items`,
+    );
+  }
+  for (const item of field.items) {
+    validateField(item, owner);
   }
 }
 
@@ -174,6 +217,7 @@ function validateModalField<Context>(
       input.description,
       100,
     );
+    if (input.kind === "checkbox") continue;
     assertOptionalText(
       `modal input ${input.id} placeholder`,
       input.placeholder,

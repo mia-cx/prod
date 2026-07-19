@@ -26,6 +26,7 @@ import {
 import type { DiscordActionSurface } from "../discord.js";
 import type { GuildSettingsStore } from "../guild-settings.js";
 import type { ExecuteGuildOperation } from "../guild-operation.js";
+import type { LabelTaxonomyStore } from "../label-taxonomy.js";
 import type { PermissionAdministrationService } from "../permission-administration.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
@@ -58,6 +59,7 @@ export type ProdActionRuntime = DiscordActionSurface &
 export type ProdActionRuntimeOptions = Readonly<{
   textCommandPrefix: string;
   guildSettingsStore: GuildSettingsStore;
+  labelTaxonomyStore: LabelTaxonomyStore;
   supportHubDiscord: SupportHubDiscord;
   ticketProvisioningService: TicketProvisioningService;
   executeGuildOperation?: ExecuteGuildOperation;
@@ -92,6 +94,7 @@ export const createProdActionRuntime = (
     logger,
     isApplicationOperator,
     options.guildSettingsStore,
+    options.labelTaxonomyStore,
     options.supportHubDiscord,
     options.ticketProvisioningService,
     options.executeGuildOperation,

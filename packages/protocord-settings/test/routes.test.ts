@@ -39,6 +39,7 @@ describe("versioned settings routes", () => {
       categoryId: "labels",
       subcategoryId: "editor",
       fieldId: "rename",
+      modalScope: "b3f97400-a92e-4f6d-aab8-e2e73a246dcc",
       page: 2,
     },
   ])("round-trips $action routes", (route) => {
@@ -66,6 +67,10 @@ describe("versioned settings routes", () => {
       ok: false,
       reason: "malformed",
     });
+    expect(decodeSettingsCustomId("pcs.1.b.a.b.field.0.c2NvcGU")).toEqual({
+      ok: false,
+      reason: "malformed",
+    });
   });
 
   it("rejects unsafe IDs and pages before encoding", () => {
@@ -85,5 +90,15 @@ describe("versioned settings routes", () => {
         page: -1,
       }),
     ).toThrow(/page/);
+    expect(() =>
+      encodeSettingsCustomId({
+        action: "button",
+        categoryId: "setup",
+        subcategoryId: "general",
+        fieldId: "save",
+        modalScope: "scope",
+        page: 0,
+      }),
+    ).toThrow(/modal scope/);
   });
 });

@@ -1,6 +1,7 @@
 import {
   ChannelType,
   Collection,
+  ComponentType,
   MessageFlags,
   type Interaction,
   type RepliableInteraction,
@@ -13,6 +14,7 @@ import {
   type SettingsChannel,
   type SettingsDefinition,
   type SettingsMentionable,
+  type SettingsModalValues,
   type SettingsRouteAction,
 } from "../src/index.js";
 
@@ -38,8 +40,8 @@ const mutateMentionables = vi.fn((values: readonly SettingsMentionable[]) => {
 const mutateChannels = vi.fn((values: readonly SettingsChannel[]) => {
   state.channels = values;
 });
-const mutateName = vi.fn((values: Readonly<Record<string, string>>) => {
-  state.name = values.name ?? state.name;
+const mutateName = vi.fn((values: SettingsModalValues) => {
+  if (typeof values.name === "string") state.name = values.name;
 });
 
 const definition: SettingsDefinition<Context> = {
@@ -113,7 +115,7 @@ const definition: SettingsDefinition<Context> = {
                 disabled: state.identityDisabled,
               }),
               validate: (values) =>
-                (values.name?.length ?? 0) < 2
+                (typeof values.name !== "string" || values.name.length < 2)
                   ? [
                       {
                         inputId: "name",
@@ -737,6 +739,340 @@ describe("Discord settings runtime", () => {
       runtime.handle(valid.interaction, { userId: "admin" }),
     ).resolves.toEqual({ matched: true, status: "mutated" });
     expect(state.name).toBe("Prod Support");
+  });
+
+  it("isolates modal drafts by their dynamic scope", async () => {
+    type ScopedContext = Context & Readonly<{ scope: string }>;
+    const scopedRuntime = createSettingsRuntime<ScopedContext>({
+      definition: {
+        title: "Scoped drafts",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "identity",
+                    label: "Identity",
+                    title: "Edit identity",
+                    inputs: [{ id: "name", label: "Name" }],
+                    draftScope: (context: ScopedContext) => context.scope,
+                    load: (context: ScopedContext) => ({
+                      values: { name: `Fresh ${context.scope}` },
+                    }),
+                    validate: () => [{ message: "Invalid draft." }],
+                    mutate: () => undefined,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      } as unknown as SettingsDefinition<ScopedContext>,
+    });
+    const invalid = mockInteraction(
+      "modal",
+      route("modal-submit", "identity"),
+      { fields: { getTextInputValue: () => "Draft A" } },
+    );
+    await scopedRuntime.handle(invalid.interaction, {
+      userId: "admin",
+      scope: "a",
+    });
+
+    const differentScope = mockInteraction(
+      "button",
+      route("modal", "identity"),
+    );
+    await scopedRuntime.handle(differentScope.interaction, {
+      userId: "admin",
+      scope: "b",
+    });
+
+    expect(JSON.stringify(differentScope.showModal.mock.calls[0]?.[0])).toContain(
+      '"value":"Fresh b"',
+    );
+    expect(JSON.stringify(differentScope.showModal.mock.calls[0]?.[0])).not.toContain(
+      "Draft A",
+    );
+  });
+
+  it("clears the submitted draft scope before mutation changes it", async () => {
+    let currentScope = "a";
+    let valid = false;
+    const scopedRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Mutable draft scope",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "identity",
+                    label: "Identity",
+                    title: "Edit identity",
+                    inputs: [{ id: "name", label: "Name" }],
+                    draftScope: () => currentScope,
+                    load: () => ({ values: { name: `Fresh ${currentScope}` } }),
+                    validate: () => (valid ? [] : [{ message: "Invalid draft." }]),
+                    mutate: () => {
+                      currentScope = "b";
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const invalid = mockInteraction(
+      "modal",
+      route("modal-submit", "identity"),
+      { fields: { getTextInputValue: () => "Draft A" } },
+    );
+    await scopedRuntime.handle(invalid.interaction, { userId: "admin" });
+
+    valid = true;
+    const committed = mockInteraction(
+      "modal",
+      route("modal-submit", "identity"),
+      { fields: { getTextInputValue: () => "Committed A" } },
+    );
+    await scopedRuntime.handle(committed.interaction, { userId: "admin" });
+    currentScope = "a";
+    const reopened = mockInteraction("button", route("modal", "identity"));
+    await scopedRuntime.handle(reopened.interaction, { userId: "admin" });
+
+    expect(JSON.stringify(reopened.showModal.mock.calls[0]?.[0])).toContain(
+      '"value":"Fresh a"',
+    );
+    expect(JSON.stringify(reopened.showModal.mock.calls[0]?.[0])).not.toContain(
+      "Draft A",
+    );
+  });
+
+  it("routes modal and mutation buttons nested in an appended container", async () => {
+    const mutate = vi.fn();
+    const rowRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Action row settings",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "container",
+                    id: "editor",
+                    label: "Editor",
+                    fields: [
+                      {
+                        kind: "action-row",
+                        id: "actions",
+                        label: "Actions",
+                        items: [
+                          {
+                            kind: "modal",
+                            id: "edit",
+                            label: "Edit",
+                            title: "Edit setting",
+                            inputs: [{ id: "name", label: "Name" }],
+                            load: () => ({ values: { name: "Bug" } }),
+                            mutate: () => undefined,
+                          },
+                          {
+                            kind: "button",
+                            id: "delete",
+                            label: "Delete",
+                            load: () => ({}),
+                            mutate,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const edit = mockInteraction("button", route("modal", "edit"));
+    const deletion = mockInteraction("button", route("button", "delete"));
+
+    await rowRuntime.handle(edit.interaction, { userId: "admin" });
+    await rowRuntime.handle(deletion.interaction, { userId: "admin" });
+
+    expect(edit.showModal).toHaveBeenCalledOnce();
+    expect(mutate).toHaveBeenCalledOnce();
+  });
+
+  it("rejects stale nested controls when their parent becomes hidden", async () => {
+    let editorVisible = true;
+    const mutate = vi.fn();
+    const nestedRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Conditional nested settings",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "container",
+                    id: "editor",
+                    label: "Editor",
+                    visible: () => editorVisible,
+                    fields: [
+                      {
+                        kind: "action-row",
+                        id: "actions",
+                        label: "Actions",
+                        items: [
+                          {
+                            kind: "button",
+                            id: "delete",
+                            label: "Delete",
+                            load: () => ({}),
+                            mutate,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const deletion = mockInteraction("button", route("button", "delete"));
+    editorVisible = false;
+
+    await expect(
+      nestedRuntime.handle(deletion.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "stale" });
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("renders, submits, and preserves native checkbox modal values", async () => {
+    const mutate = vi.fn();
+    const checkboxRuntime = createSettingsRuntime<Context>({
+      definition: {
+        title: "Checkbox settings",
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            subcategories: [
+              {
+                id: "general",
+                label: "General",
+                fields: [
+                  {
+                    kind: "modal",
+                    id: "preferences",
+                    label: "Preferences",
+                    title: "Edit preferences",
+                    inputs: [
+                      { id: "name", label: "Name" },
+                      {
+                        kind: "checkbox",
+                        id: "active",
+                        label: "Active",
+                        description: "Allow this setting to be selected.",
+                      },
+                    ],
+                    load: () => ({
+                      values: { name: "Bug", active: true },
+                    }),
+                    validate: (values) =>
+                      values.name === "x"
+                        ? [{ inputId: "name", message: "Too short." }]
+                        : [],
+                    mutate,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const open = mockInteraction("button", route("modal", "preferences"));
+
+    await checkboxRuntime.handle(open.interaction, { userId: "admin" });
+
+    const payload = JSON.stringify(open.showModal.mock.calls[0]?.[0]);
+    expect(payload).toContain(`"type":${String(ComponentType.Checkbox)}`);
+    expect(payload).toContain('"custom_id":"active"');
+    expect(payload).toContain('"default":true');
+
+    const invalid = mockInteraction(
+      "modal",
+      route("modal-submit", "preferences"),
+      {
+        fields: {
+          getTextInputValue: () => "x",
+          getCheckbox: () => false,
+        },
+      },
+    );
+    await expect(
+      checkboxRuntime.handle(invalid.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "validation-failed" });
+    expect(mutate).not.toHaveBeenCalled();
+
+    const retry = mockInteraction("button", route("modal", "preferences"));
+    await checkboxRuntime.handle(retry.interaction, { userId: "admin" });
+    const retryPayload = JSON.stringify(retry.showModal.mock.calls[0]?.[0]);
+    expect(retryPayload).toContain('"value":"x"');
+    expect(retryPayload).toContain('"default":false');
+
+    const valid = mockInteraction(
+      "modal",
+      route("modal-submit", "preferences"),
+      {
+        fields: {
+          getTextInputValue: () => "Feature",
+          getCheckbox: () => false,
+        },
+      },
+    );
+    await expect(
+      checkboxRuntime.handle(valid.interaction, { userId: "admin" }),
+    ).resolves.toEqual({ matched: true, status: "mutated" });
+    expect(mutate).toHaveBeenCalledWith(
+      { name: "Feature", active: false },
+      { userId: "admin" },
+    );
   });
 
   it("isolates modal drafts to their originating settings message", async () => {
