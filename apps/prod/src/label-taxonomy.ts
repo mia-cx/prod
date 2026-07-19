@@ -39,7 +39,7 @@ export type TicketLabel = Readonly<{
   guildId: string;
   name: string;
   normalizedName: string;
-  description: string;
+  description?: string;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -56,12 +56,12 @@ export interface LabelTaxonomyStore {
   findByName(guildId: string, name: string): Promise<TicketLabel | undefined>;
   create(
     guildId: string,
-    input: { name: string; description: string },
+    input: { name: string; description?: string },
   ): Promise<TicketLabel>;
   update(
     guildId: string,
     labelId: string,
-    input: { name: string; description: string },
+    input: { name: string; description?: string },
   ): Promise<TicketLabel>;
   delete(guildId: string, labelId: string): Promise<void>;
   selectForTicket(input: {
@@ -105,15 +105,15 @@ const cleanLabelName = (name: string): string => {
 export const normalizeLabelName = (name: string): string =>
   cleanLabelName(name).toLowerCase();
 
-const cleanDescription = (description: string): string => {
-  const cleaned = description.normalize("NFKC").trim();
+const cleanDescription = (description: string | undefined): string | null => {
+  const cleaned = description?.normalize("NFKC").trim() ?? "";
   const length = visibleLength(cleaned);
-  if (length < 1 || length > 500) {
+  if (length > 500) {
     throw new LabelValidationError(
-      "Label descriptions must contain between 1 and 500 visible characters.",
+      "Label descriptions may contain at most 500 visible characters.",
     );
   }
-  return cleaned;
+  return cleaned.length === 0 ? null : cleaned;
 };
 
 const assertId = (name: string, value: string): void => {
@@ -122,8 +122,13 @@ const assertId = (name: string, value: string): void => {
   }
 };
 
-const rowToLabel = (row: typeof labels.$inferSelect): TicketLabel =>
-  Object.freeze({ ...row });
+const rowToLabel = (row: typeof labels.$inferSelect): TicketLabel => {
+  const { description, ...required } = row;
+  return Object.freeze({
+    ...required,
+    ...(description === null ? {} : { description }),
+  });
+};
 
 const duplicate = (normalizedName: string): DuplicateLabelNameError =>
   new DuplicateLabelNameError(

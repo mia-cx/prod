@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f17fc897-4f42-43cf-97e4-df092b956fbe",
+  "id": "45f28fc8-9df5-491b-9217-cd18de415715",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "guild_label_taxonomies": {
@@ -124,7 +124,7 @@
           "name": "description",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {

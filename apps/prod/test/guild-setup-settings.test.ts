@@ -442,8 +442,9 @@ describe("guild setup settings integration", () => {
       labelsCategory.editReply.mock.calls[0]?.[0],
     );
     expect(labelsPage).toContain(
-      "Manage the internal ticket taxonomy used by staff and AI triage.",
+      "Manage labels used to organize and assign tickets.",
     );
+    expect(labelsPage).toContain("Current labels");
     expect(labelsPage).toContain("Select a label to manage it.");
     expect(labelsPage).toContain("Choose a label");
     expect(labelsPage).toContain("Create label");
@@ -741,13 +742,16 @@ describe("guild setup settings integration", () => {
     const create = component("modal", labelModalRoute("label-create"), {
       modalValues: {
         name: "Connection Issue",
-        description: "Problems connecting to a game server.",
+        description: "",
       },
     });
     await runtime.handleInteraction(create as unknown as Interaction);
     expect(JSON.stringify(create.editReply.mock.calls[0]?.[0])).toContain(
       "Connection Issue",
     );
+    await expect(
+      labelStore.findByName(guildId, "connection issue"),
+    ).resolves.not.toHaveProperty("description");
 
     const duplicate = component("modal", labelModalRoute("label-create"), {
       modalValues: {
@@ -804,8 +808,38 @@ describe("guild setup settings integration", () => {
 
     const payload = JSON.stringify(select.editReply.mock.calls[0]?.[0]);
     expect(payload).toContain("Unexpected behavior, errors, crashes");
-    expect(payload).toContain("Edit label");
-    expect(payload).toContain("Delete label");
+    expect(payload).toContain('"label":"Edit"');
+    expect(payload).toContain('"label":"Delete"');
+    expect(payload).not.toContain("## Edit label");
+    expect(payload).not.toContain("## Delete label");
+    expect(payload.indexOf("**account:**")).toBeLessThan(
+      payload.indexOf("Choose a label"),
+    );
+  });
+
+  it("keeps label creation available when the taxonomy is empty", async () => {
+    const { runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+    for (const label of await labelStore.list(guildId)) {
+      await labelStore.delete(guildId, label.id);
+    }
+    const labelsCategory = component(
+      "string",
+      {
+        action: "category",
+        categoryId: "setup",
+        subcategoryId: "setup",
+        page: 0,
+      },
+      { selectedValues: ["labels"] },
+    );
+
+    await runtime.handleInteraction(labelsCategory as unknown as Interaction);
+
+    const payload = JSON.stringify(labelsCategory.editReply.mock.calls[0]?.[0]);
+    expect(payload).toContain("Current labels");
+    expect(payload).toContain("Create label");
+    expect(payload).not.toContain("Choose a label");
   });
 
   it("rechecks authorization before a label mutation", async () => {

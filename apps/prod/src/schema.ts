@@ -225,7 +225,7 @@ export const labels = sqliteTable(
     guildId: text("guild_id").notNull(),
     name: text().notNull(),
     normalizedName: text("normalized_name").notNull(),
-    description: text().notNull(),
+    description: text(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

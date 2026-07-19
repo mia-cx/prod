@@ -3,16 +3,17 @@
 ## Summary
 
 Add the app-owned guild label taxonomy with idempotent generic defaults,
-normalized per-guild uniqueness, AI-facing descriptions, and settings flows
-that create, select, edit, delete, persist, and rerender labels. A label exists
-or it does not; there is no inactive state. Deleting a label removes only its
-ticket associations and never deletes a ticket.
+normalized per-guild uniqueness, optional descriptions for anyone assigning
+labels, and settings flows that create, select, edit, delete, persist, and
+rerender labels. A label exists or it does not; there is no inactive state.
+Deleting a label removes only its ticket associations and never deletes a
+ticket.
 
 ## Acceptance criteria
 
 - [x] New guilds seed bug, account, gameplay, feedback, and other exactly once.
 - [x] Names are normalized and unique per guild.
-- [x] Descriptions are available for later AI use.
+- [x] Descriptions are optional context for anyone interacting with labels.
 - [x] Deleting a label cascades its ticket associations without deleting tickets.
 - [x] Settings interactions authorize, validate, persist, and rerender.
 - [x] Concurrent deletion and selection cannot leave orphaned associations.
@@ -45,3 +46,4 @@ ticket associations and never deletes a ticket.
 - 2026-07-17: A follow-up review found direct first-write store callers could bypass initialization. Resolution shares one transaction-scoped initializer across explicit initialization and creation, including domain-error commits.
 - 2026-07-19: Labels now have no inactive state. The settings UI uses one string select (maximum 25 labels) and appends edit/delete controls for the selected label. Deletion cascades only through `ticket_labels`, preserving tickets and their other labels.
 - 2026-07-19: Full `pnpm check` passes all 32 tasks with 177 app tests; `pnpm pack:check` passes all 15 tasks.
+- 2026-07-19: The Labels page lists every label above its selector, then renders Edit and Delete together in one Action Row for the selected label. Descriptions are optional and no longer framed as AI-specific.

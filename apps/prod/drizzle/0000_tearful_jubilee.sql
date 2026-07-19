@@ -18,7 +18,7 @@ CREATE TABLE `labels` (
 	`guild_id` text NOT NULL,
 	`name` text NOT NULL,
 	`normalized_name` text NOT NULL,
-	`description` text NOT NULL,
+	`description` text,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );

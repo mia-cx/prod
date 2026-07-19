@@ -48,9 +48,12 @@ describe("SQLite guild label taxonomy", () => {
     expect(labels.map(({ name }) => name).sort()).toEqual(
       DEFAULT_LABELS.map(({ name }) => name).sort(),
     );
-    expect(labels.every(({ description }) => description.length > 0)).toBe(
-      true,
-    );
+    expect(
+      labels.every(
+        ({ description }) =>
+          description !== undefined && description.length > 0,
+      ),
+    ).toBe(true);
     const restarted = createSqliteLabelTaxonomyStore(connection.database);
     await restarted.ensureDefaults("guild-1");
     await expect(
@@ -147,6 +150,16 @@ describe("SQLite guild label taxonomy", () => {
       normalizedName: "connection issue",
       description: "Trouble connecting to a server.",
     });
+    const undescribed = await store.create("guild-1", {
+      name: "needs review",
+    });
+    expect(undescribed).not.toHaveProperty("description");
+    await expect(
+      store.update("guild-1", undescribed.id, {
+        name: "reviewed",
+        description: "   ",
+      }),
+    ).resolves.not.toHaveProperty("description");
     await expect(
       store.create("guild-1", {
         name: "ＣＯＮＮＥＣＴＩＯＮ issue",

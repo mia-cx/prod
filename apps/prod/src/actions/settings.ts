@@ -88,6 +88,11 @@ const modalText = (values: SettingsModalValues, inputId: string): string => {
 const labelSummary = (description: string): string =>
   Array.from(description).slice(0, 100).join("");
 
+const labelListItem = (label: TicketLabel): string =>
+  label.description === undefined
+    ? `**${escapeMarkdown(label.name)}**`
+    : `**${escapeMarkdown(label.name)}:** ${escapeMarkdown(label.description)}`;
+
 const requireGuild = (context: GuildSetupSettingsContext): Guild => {
   if (context.guild === undefined) {
     throw new TypeError("Guild settings require a guild interaction");
@@ -553,10 +558,19 @@ export function createGuildSetupSettingsConsumer(
       {
         id: "labels",
         label: "Labels",
-        description:
-          "Manage the internal ticket taxonomy used by staff and AI triage.",
+        description: "Manage labels used to organize and assign tickets.",
         authorize: authorizeLabels,
         fields: [
+          {
+            kind: "display",
+            id: "label-list",
+            label: "Current labels",
+            load: async (context) => ({
+              value: (await labelStore.list(requireGuild(context).id))
+                .map(labelListItem)
+                .join("\n"),
+            }),
+          },
           {
             kind: "modal",
             id: "label-create",
@@ -572,15 +586,15 @@ export function createGuildSetupSettingsConsumer(
               },
               {
                 id: "description",
-                label: "AI-facing description",
+                label: "Description",
                 style: TextInputStyle.Paragraph,
-                placeholder: "When this label should be applied",
-                minLength: 1,
+                placeholder: "What this label is for (optional)",
+                required: false,
                 maxLength: 500,
               },
             ],
             load: () => ({
-              value: "Add a label with an AI-facing description.",
+              value: "Add a label.",
               buttonLabel: "Create",
             }),
             mutate: (values, context) =>
@@ -600,6 +614,8 @@ export function createGuildSetupSettingsConsumer(
             id: "label-select",
             label: "Labels",
             description: "Select a label to manage it.",
+            visible: async (context) =>
+              (await labelStore.list(requireGuild(context).id)).length > 0,
             load: async (context) => {
               const allLabels = await labelStore.list(requireGuild(context).id);
               const storedSelectedId = selectedLabelIds.get(
@@ -620,7 +636,9 @@ export function createGuildSetupSettingsConsumer(
                 options: allLabels.map((label) => ({
                   label: label.name,
                   value: label.id,
-                  description: labelSummary(label.description),
+                  ...(label.description === undefined
+                    ? {}
+                    : { description: labelSummary(label.description) }),
                   default: label.id === selectedId,
                 })),
                 selectedValues:
@@ -647,82 +665,84 @@ export function createGuildSetupSettingsConsumer(
             load: async (context) => {
               const label = await requireSelectedLabel(context);
               return {
-                value: `**${escapeMarkdown(label.name)}**\n${escapeMarkdown(label.description)}`,
+                value: labelListItem(label),
               };
             },
           },
           {
-            kind: "modal",
-            id: "label-edit",
-            label: "Edit label",
-            title: "Edit ticket label",
+            kind: "action-row",
+            id: "label-actions",
+            label: "Label actions",
             visible: async (context) => (await selectedLabel(context)) !== undefined,
-            inputs: [
+            items: [
               {
-                id: "name",
-                label: "Name",
-                minLength: 1,
-                maxLength: 80,
+                kind: "modal",
+                id: "label-edit",
+                label: "Edit",
+                title: "Edit ticket label",
+                inputs: [
+                  {
+                    id: "name",
+                    label: "Name",
+                    minLength: 1,
+                    maxLength: 80,
+                  },
+                  {
+                    id: "description",
+                    label: "Description",
+                    style: TextInputStyle.Paragraph,
+                    required: false,
+                    maxLength: 500,
+                  },
+                ],
+                load: async (context) => {
+                  const label = await requireSelectedLabel(context);
+                  return {
+                    values: {
+                      name: label.name,
+                      description: label.description ?? "",
+                    },
+                    buttonLabel: "Edit",
+                  };
+                },
+                mutate: (values, context) =>
+                  labelMutation(async () => {
+                    const label = await requireSelectedLabel(context);
+                    await labelStore.update(requireGuild(context).id, label.id, {
+                      name: modalText(values, "name"),
+                      description: modalText(values, "description"),
+                    });
+                  }),
               },
               {
-                id: "description",
-                label: "AI-facing description",
-                style: TextInputStyle.Paragraph,
-                minLength: 1,
-                maxLength: 500,
+                kind: "button",
+                id: "label-delete",
+                label: "Delete",
+                style: ButtonStyle.Danger,
+                load: async (context) => {
+                  const label = await requireSelectedLabel(context);
+                  const pending = pendingLabelDeletions.has(
+                    deletionKey(context, label.id),
+                  );
+                  return {
+                    buttonLabel: pending ? "Confirm delete" : "Delete",
+                  };
+                },
+                mutate: async (context) => {
+                  const label = await requireSelectedLabel(context);
+                  const key = deletionKey(context, label.id);
+                  if (!pendingLabelDeletions.has(key)) {
+                    pendingLabelDeletions.add(key);
+                    return { status: "success" };
+                  }
+                  return labelMutation(async () => {
+                    await labelStore.delete(requireGuild(context).id, label.id);
+                    pendingLabelDeletions.delete(key);
+                    selectedLabelIds.delete(context.settingsSessionId);
+                  });
+                },
               },
             ],
-            load: async (context) => {
-              const label = await requireSelectedLabel(context);
-              return {
-                value: label.name,
-                values: {
-                  name: label.name,
-                  description: label.description,
-                },
-                buttonLabel: "Edit",
-              };
-            },
-            mutate: (values, context) =>
-              labelMutation(async () => {
-                const label = await requireSelectedLabel(context);
-                await labelStore.update(requireGuild(context).id, label.id, {
-                  name: modalText(values, "name"),
-                  description: modalText(values, "description"),
-                });
-              }),
-          },
-          {
-            kind: "button",
-            id: "label-delete",
-            label: "Delete label",
-            style: ButtonStyle.Danger,
-            visible: async (context) => (await selectedLabel(context)) !== undefined,
-            load: async (context) => {
-              const label = await requireSelectedLabel(context);
-              const pending = pendingLabelDeletions.has(
-                deletionKey(context, label.id),
-              );
-              return {
-                value: pending
-                  ? `Delete **${escapeMarkdown(label.name)}** and remove it from every ticket?`
-                  : "Permanently delete this label.",
-                buttonLabel: pending ? "Confirm delete" : "Delete",
-              };
-            },
-            mutate: async (context) => {
-              const label = await requireSelectedLabel(context);
-              const key = deletionKey(context, label.id);
-              if (!pendingLabelDeletions.has(key)) {
-                pendingLabelDeletions.add(key);
-                return { status: "success" };
-              }
-              return labelMutation(async () => {
-                await labelStore.delete(requireGuild(context).id, label.id);
-                pendingLabelDeletions.delete(key);
-                selectedLabelIds.delete(context.settingsSessionId);
-              });
-            },
           },
         ],
       },
