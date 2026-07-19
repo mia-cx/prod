@@ -820,6 +820,19 @@ describe("guild setup settings integration", () => {
 
     await runtime.handleInteraction(select as unknown as Interaction);
 
+    const response = select.editReply.mock.calls[0]?.[0] as
+      | { components?: readonly unknown[] }
+      | undefined;
+    expect(response?.components).toHaveLength(3);
+    expect(JSON.stringify(response?.components?.[1])).not.toContain(
+      '"label":"Edit"',
+    );
+    expect(JSON.stringify(response?.components?.[2])).toContain(
+      "**Name:** `bug`",
+    );
+    expect(JSON.stringify(response?.components?.[2])).toContain(
+      "**Description:** Unexpected behavior, errors, crashes",
+    );
     const payload = JSON.stringify(select.editReply.mock.calls[0]?.[0]);
     expect(payload).toContain("Unexpected behavior, errors, crashes");
     expect(payload).toContain('"label":"Edit"');

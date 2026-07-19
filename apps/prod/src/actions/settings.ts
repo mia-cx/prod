@@ -2,6 +2,7 @@ import {
   ButtonStyle,
   ChannelType,
   escapeMarkdown,
+  inlineCode,
   PermissionFlagsBits,
   TextInputStyle,
   type ChatInputCommandInteraction,
@@ -672,89 +673,100 @@ export function createGuildSetupSettingsConsumer(
             },
           },
           {
-            kind: "display",
-            id: "selected-label",
-            label: "Selected label",
+            kind: "container",
+            id: "label-editor",
+            label: "Label editor",
             visible: async (context) => (await selectedLabel(context)) !== undefined,
-            load: async (context) => {
-              const label = await requireSelectedLabel(context);
-              return {
-                value: labelListItem(label),
-              };
-            },
-          },
-          {
-            kind: "action-row",
-            id: "label-actions",
-            label: "Label actions",
-            visible: async (context) => (await selectedLabel(context)) !== undefined,
-            items: [
+            fields: [
               {
-                kind: "modal",
-                id: "label-edit",
-                label: "Edit",
-                title: "Edit ticket label",
-                inputs: [
-                  {
-                    id: "name",
-                    label: "Name",
-                    minLength: 1,
-                    maxLength: 80,
-                  },
-                  {
-                    id: "description",
-                    label: "Description",
-                    style: TextInputStyle.Paragraph,
-                    required: false,
-                    maxLength: 500,
-                  },
-                ],
+                kind: "display",
+                id: "label-details",
+                label: "Label details",
+                presentation: { kind: "plain" },
                 load: async (context) => {
                   const label = await requireSelectedLabel(context);
                   return {
-                    values: {
-                      name: label.name,
-                      description: label.description ?? "",
-                    },
-                    buttonLabel: "Edit",
+                    value: `**Name:** ${inlineCode(label.name)}\n**Description:** ${
+                      label.description === undefined
+                        ? "_No description_"
+                        : escapeMarkdown(label.description)
+                    }`,
                   };
                 },
-                mutate: (values, context) =>
-                  labelMutation(async () => {
-                    const label = await requireSelectedLabel(context);
-                    await labelStore.update(requireGuild(context).id, label.id, {
-                      name: modalText(values, "name"),
-                      description: modalText(values, "description"),
-                    });
-                  }),
               },
               {
-                kind: "button",
-                id: "label-delete",
-                label: "Delete",
-                style: ButtonStyle.Danger,
-                load: async (context) => {
-                  const label = await requireSelectedLabel(context);
-                  const pending = pendingLabelDeletions.has(
-                    deletionKey(context, label.id),
-                  );
-                  return {
-                    buttonLabel: pending ? "Confirm delete" : "Delete",
-                  };
-                },
-                mutate: async (context) => {
-                  const label = await requireSelectedLabel(context);
-                  const key = deletionKey(context, label.id);
-                  if (!pendingLabelDeletions.has(key)) {
-                    pendingLabelDeletions.add(key);
-                    return { status: "success" };
-                  }
-                  return labelMutation(async () => {
-                    await labelStore.delete(requireGuild(context).id, label.id);
-                    pendingLabelDeletions.delete(key);
-                    selectedLabelIds.delete(context.settingsSessionId);
-                  });
-                },
+                kind: "action-row",
+                id: "label-actions",
+                label: "Label actions",
+                items: [
+                  {
+                    kind: "modal",
+                    id: "label-edit",
+                    label: "Edit",
+                    title: "Edit ticket label",
+                    inputs: [
+                      {
+                        id: "name",
+                        label: "Name",
+                        minLength: 1,
+                        maxLength: 80,
+                      },
+                      {
+                        id: "description",
+                        label: "Description",
+                        style: TextInputStyle.Paragraph,
+                        required: false,
+                        maxLength: 500,
+                      },
+                    ],
+                    load: async (context) => {
+                      const label = await requireSelectedLabel(context);
+                      return {
+                        values: {
+                          name: label.name,
+                          description: label.description ?? "",
+                        },
+                        buttonLabel: "Edit",
+                      };
+                    },
+                    mutate: (values, context) =>
+                      labelMutation(async () => {
+                        const label = await requireSelectedLabel(context);
+                        await labelStore.update(requireGuild(context).id, label.id, {
+                          name: modalText(values, "name"),
+                          description: modalText(values, "description"),
+                        });
+                      }),
+                  },
+                  {
+                    kind: "button",
+                    id: "label-delete",
+                    label: "Delete",
+                    style: ButtonStyle.Danger,
+                    load: async (context) => {
+                      const label = await requireSelectedLabel(context);
+                      const pending = pendingLabelDeletions.has(
+                        deletionKey(context, label.id),
+                      );
+                      return {
+                        buttonLabel: pending ? "Confirm delete" : "Delete",
+                      };
+                    },
+                    mutate: async (context) => {
+                      const label = await requireSelectedLabel(context);
+                      const key = deletionKey(context, label.id);
+                      if (!pendingLabelDeletions.has(key)) {
+                        pendingLabelDeletions.add(key);
+                        return { status: "success" };
+                      }
+                      return labelMutation(async () => {
+                        await labelStore.delete(requireGuild(context).id, label.id);
+                        pendingLabelDeletions.delete(key);
+                        selectedLabelIds.delete(context.settingsSessionId);
+                      });
+                    },
+                  },
+                ],
               },
             ],
           },
