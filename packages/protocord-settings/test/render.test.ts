@@ -365,6 +365,13 @@ describe("Components v2 settings rendering", () => {
               load: () => ({ value: "Nothing configured." }),
             },
             {
+              kind: "display",
+              id: "plain-summary",
+              label: "Plain summary",
+              presentation: { kind: "plain" },
+              load: () => ({ value: "**bug:** Unexpected behavior." }),
+            },
+            {
               kind: "button",
               id: "refresh",
               label: "Refresh",
@@ -383,6 +390,8 @@ describe("Components v2 settings rendering", () => {
     const payload = JSON.stringify(rendered.components);
 
     expect(payload).toContain("Nothing configured.");
+    expect(payload).toContain("**bug:** Unexpected behavior.");
+    expect(payload).not.toContain("## Plain summary");
     expect(payload).toContain("Reload the data.");
     expect(payload).not.toContain("**Current:**");
   });

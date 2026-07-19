@@ -400,7 +400,13 @@ async function renderField<Context>(
   switch (field.kind) {
     case "display": {
       const view = await field.load(context);
-      return [textDisplay(fieldText(field, view.value))];
+      return [
+        textDisplay(
+          field.presentation?.kind === "plain"
+            ? view.value
+            : fieldText(field, view.value),
+        ),
+      ];
     }
     case "button": {
       const view = await field.load(context);

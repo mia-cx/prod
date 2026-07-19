@@ -584,10 +584,7 @@ export function createGuildSetupSettingsConsumer(
                 maxLength: 500,
               },
             ],
-            load: async (context) => ({
-              value: (await labelStore.list(requireGuild(context).id))
-                .map(labelListItem)
-                .join("\n"),
+            load: () => ({
               buttonLabel: "Create label",
             }),
             mutate: (values, context) =>
@@ -601,6 +598,19 @@ export function createGuildSetupSettingsConsumer(
                 );
                 selectedLabelIds.set(context.settingsSessionId, created.id);
               }),
+          },
+          {
+            kind: "display",
+            id: "label-list",
+            label: "Label list",
+            presentation: { kind: "plain" },
+            visible: async (context) =>
+              (await labelStore.list(requireGuild(context).id)).length > 0,
+            load: async (context) => ({
+              value: (await labelStore.list(requireGuild(context).id))
+                .map(labelListItem)
+                .join("\n"),
+            }),
           },
           {
             kind: "string-select",

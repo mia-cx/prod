@@ -43,6 +43,7 @@ type SettingsFieldBase<Kind extends string, Context> = Readonly<{
 
 export type SettingsDisplayField<Context> = SettingsFieldBase<"display", Context> &
   Readonly<{
+    presentation?: Readonly<{ kind: "plain" }>;
     load(context: Context): Awaitable<SettingsFieldView & { value: string }>;
   }>;
 

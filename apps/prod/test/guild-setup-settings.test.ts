@@ -450,6 +450,16 @@ describe("guild setup settings integration", () => {
     expect(labelsPage).toContain("Create label");
     expect(labelsPage).not.toContain("## Create label");
     expect(labelsPage).toContain("# Current labels");
+    expect(labelsPage).not.toContain("**Current:**");
+    expect(labelsPage).toContain(
+      '"content":"# Current labels"}],"accessory"',
+    );
+    expect(labelsPage.indexOf("# Current labels")).toBeLessThan(
+      labelsPage.indexOf("**account:**"),
+    );
+    expect(labelsPage.indexOf("**account:**")).toBeLessThan(
+      labelsPage.indexOf("Choose a label"),
+    );
     expect(labelsPage).not.toContain("Add a label.");
     expect(labelsPage).not.toContain("Choose a settings page");
     expect(labelsPage).not.toContain("Ticket labels:");
