@@ -306,7 +306,7 @@ const labelModalRoute = (
 ) => ({
   action: "modal-submit" as const,
   categoryId: "labels",
-  subcategoryId: "taxonomy",
+  subcategoryId: "labels",
   fieldId,
   page: 0,
 });
@@ -381,7 +381,7 @@ describe("guild setup settings integration", () => {
     }
   });
 
-  it("renders direct Setup fields and nested Identity pages", async () => {
+  it("renders direct Setup and Labels fields and nested Identity pages", async () => {
     const { runtime } = await setup();
     const opened = command(ownerId);
     await runtime.handleInteraction(opened as unknown as Interaction);
@@ -410,6 +410,28 @@ describe("guild setup settings integration", () => {
     expect(setupPage).not.toContain("Choose a settings page");
     expect(setupPage).not.toContain("**Current:**");
     expect(setupPage).not.toContain("Empty-hub privacy");
+
+    const labelsCategory = component(
+      "string",
+      {
+        action: "category",
+        categoryId: "setup",
+        subcategoryId: "setup",
+        page: 0,
+      },
+      { selectedValues: ["labels"] },
+    );
+    await runtime.handleInteraction(labelsCategory as unknown as Interaction);
+    const labelsPage = JSON.stringify(
+      labelsCategory.editReply.mock.calls[0]?.[0],
+    );
+    expect(labelsPage).toContain(
+      "Manage the internal ticket taxonomy used by staff and AI triage.",
+    );
+    expect(labelsPage).toContain("Current taxonomy");
+    expect(labelsPage).toContain("Create label");
+    expect(labelsPage).not.toContain("Choose a settings page");
+    expect(labelsPage).not.toContain("Ticket labels:");
 
     const identityCategory = component(
       "string",

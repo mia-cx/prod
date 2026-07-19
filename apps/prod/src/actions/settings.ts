@@ -515,132 +515,124 @@ export function createGuildSetupSettingsConsumer(
         description:
           "Manage the internal ticket taxonomy used by staff and AI triage.",
         authorize: authorizeLabels,
-        subcategories: [
+        fields: [
           {
-            id: "taxonomy",
-            label: "Ticket labels",
-            description:
-              "Names are unique after normalization. Deactivation removes future choices while preserving ticket history.",
-            fields: [
+            kind: "display",
+            id: "label-list",
+            label: "Current taxonomy",
+            load: async (context) => {
+              const activeLabels = await labelStore.list(
+                requireGuild(context).id,
+              );
+              return {
+                value: activeLabels
+                  .map((label) => `- **${escapeMarkdown(label.name)}**`)
+                  .join("\n"),
+              };
+            },
+          },
+          {
+            kind: "modal",
+            id: "label-create",
+            label: "Create label",
+            title: "Create ticket label",
+            inputs: [
               {
-                kind: "display",
-                id: "label-list",
-                label: "Current taxonomy",
-                load: async (context) => {
-                  const activeLabels = await labelStore.list(
-                    requireGuild(context).id,
-                  );
-                  return {
-                    value: activeLabels
-                      .map((label) => `- **${escapeMarkdown(label.name)}**`)
-                      .join("\n"),
-                  };
-                },
+                id: "name",
+                label: "Name",
+                placeholder: "connection issue",
+                minLength: 1,
+                maxLength: 80,
               },
               {
-                kind: "modal",
-                id: "label-create",
-                label: "Create label",
-                title: "Create ticket label",
-                inputs: [
-                  {
-                    id: "name",
-                    label: "Name",
-                    placeholder: "connection issue",
-                    minLength: 1,
-                    maxLength: 80,
-                  },
-                  {
-                    id: "description",
-                    label: "AI-facing description",
-                    style: TextInputStyle.Paragraph,
-                    placeholder: "When this label should be applied",
-                    minLength: 1,
-                    maxLength: 500,
-                  },
-                ],
-                load: () => ({
-                  value: "Add an active label with an AI-facing description.",
-                  buttonLabel: "Create",
-                }),
-                mutate: (values, context) =>
-                  labelMutation(() =>
-                    labelStore.create(requireGuild(context).id, {
-                      name: values.name ?? "",
-                      description: values.description ?? "",
-                    }),
-                  ),
-              },
-              {
-                kind: "modal",
-                id: "label-edit",
-                label: "Edit label",
-                title: "Edit ticket label",
-                inputs: [
-                  {
-                    id: "current-name",
-                    label: "Current name",
-                    minLength: 1,
-                    maxLength: 80,
-                  },
-                  {
-                    id: "name",
-                    label: "New name",
-                    minLength: 1,
-                    maxLength: 80,
-                  },
-                  {
-                    id: "description",
-                    label: "AI-facing description",
-                    style: TextInputStyle.Paragraph,
-                    minLength: 1,
-                    maxLength: 500,
-                  },
-                ],
-                load: () => ({
-                  value:
-                    "Identify an active label by its current name, then replace its display name and description.",
-                  buttonLabel: "Edit",
-                }),
-                mutate: (values, context) =>
-                  labelMutation(() =>
-                    labelStore.update(
-                      requireGuild(context).id,
-                      values["current-name"] ?? "",
-                      {
-                        name: values.name ?? "",
-                        description: values.description ?? "",
-                      },
-                    ),
-                  ),
-              },
-              {
-                kind: "modal",
-                id: "label-deactivate",
-                label: "Deactivate label",
-                title: "Deactivate ticket label",
-                inputs: [
-                  {
-                    id: "name",
-                    label: "Name",
-                    minLength: 1,
-                    maxLength: 80,
-                  },
-                ],
-                load: () => ({
-                  value:
-                    "Hide an active label from future choices without deleting ticket history.",
-                  buttonLabel: "Deactivate",
-                }),
-                mutate: (values, context) =>
-                  labelMutation(() =>
-                    labelStore.deactivate(
-                      requireGuild(context).id,
-                      values.name ?? "",
-                    ),
-                  ),
+                id: "description",
+                label: "AI-facing description",
+                style: TextInputStyle.Paragraph,
+                placeholder: "When this label should be applied",
+                minLength: 1,
+                maxLength: 500,
               },
             ],
+            load: () => ({
+              value: "Add an active label with an AI-facing description.",
+              buttonLabel: "Create",
+            }),
+            mutate: (values, context) =>
+              labelMutation(() =>
+                labelStore.create(requireGuild(context).id, {
+                  name: values.name ?? "",
+                  description: values.description ?? "",
+                }),
+              ),
+          },
+          {
+            kind: "modal",
+            id: "label-edit",
+            label: "Edit label",
+            title: "Edit ticket label",
+            inputs: [
+              {
+                id: "current-name",
+                label: "Current name",
+                minLength: 1,
+                maxLength: 80,
+              },
+              {
+                id: "name",
+                label: "New name",
+                minLength: 1,
+                maxLength: 80,
+              },
+              {
+                id: "description",
+                label: "AI-facing description",
+                style: TextInputStyle.Paragraph,
+                minLength: 1,
+                maxLength: 500,
+              },
+            ],
+            load: () => ({
+              value:
+                "Identify an active label by its current name, then replace its display name and description.",
+              buttonLabel: "Edit",
+            }),
+            mutate: (values, context) =>
+              labelMutation(() =>
+                labelStore.update(
+                  requireGuild(context).id,
+                  values["current-name"] ?? "",
+                  {
+                    name: values.name ?? "",
+                    description: values.description ?? "",
+                  },
+                ),
+              ),
+          },
+          {
+            kind: "modal",
+            id: "label-deactivate",
+            label: "Deactivate label",
+            title: "Deactivate ticket label",
+            inputs: [
+              {
+                id: "name",
+                label: "Name",
+                minLength: 1,
+                maxLength: 80,
+              },
+            ],
+            load: () => ({
+              value:
+                "Hide an active label from future choices without deleting ticket history.",
+              buttonLabel: "Deactivate",
+            }),
+            mutate: (values, context) =>
+              labelMutation(() =>
+                labelStore.deactivate(
+                  requireGuild(context).id,
+                  values.name ?? "",
+                ),
+              ),
           },
         ],
       },
