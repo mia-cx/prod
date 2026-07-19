@@ -1,6 +1,7 @@
 import {
   ChannelType,
   Collection,
+  OverwriteType,
   PermissionFlagsBits,
   PermissionsBitField,
   RESTJSONErrorCodes,
@@ -8,6 +9,7 @@ import {
   type PermissionResolvable,
 } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
+import { REPORTER_TICKET_HUB_OVERWRITE } from "../src/reporter-hub-access.js";
 
 import {
   createSupportHubDiscord,
@@ -36,6 +38,7 @@ const fixture = (
     string,
     {
       id: string;
+      type: OverwriteType;
       allow: PermissionsBitField;
       deny: PermissionsBitField;
     }
@@ -48,6 +51,7 @@ const fixture = (
       const id = typeof target === "string" ? target : target.id;
       const overwrite = overwriteCache.get(id) ?? {
         id,
+        type: roleCache.has(id) ? OverwriteType.Role : OverwriteType.Member,
         allow: new PermissionsBitField(),
         deny: new PermissionsBitField(),
       };
@@ -78,6 +82,8 @@ const fixture = (
     delete: ReturnType<typeof vi.fn>;
   };
   const messageCache = new Collection<string, TestMessage>();
+  const activeThreads = new Collection();
+  const archivedThreads = new Collection();
   let nextMessage = 1;
   const addMessage = (
     id: string,
@@ -143,6 +149,13 @@ const fixture = (
       effectiveFor(member.id),
     ),
     permissionOverwrites: { edit: editOverwrite, cache: overwriteCache },
+    threads: {
+      fetchActive: vi.fn().mockResolvedValue({ threads: activeThreads }),
+      fetchArchived: vi.fn().mockResolvedValue({
+        threads: archivedThreads,
+        hasMore: false,
+      }),
+    },
     messages: { fetch: fetchMessage },
     send,
   };
@@ -159,6 +172,7 @@ const fixture = (
   ) => {
     overwriteCache.set(id, {
       id,
+      type: roleCache.has(id) ? OverwriteType.Role : OverwriteType.Member,
       allow: new PermissionsBitField(allow),
       deny: new PermissionsBitField(deny),
     });
@@ -173,6 +187,8 @@ const fixture = (
     fetchMessage,
     send,
     messageCache,
+    activeThreads,
+    archivedThreads,
     addMessage,
     roleCache,
     effectiveFor,
@@ -196,6 +212,9 @@ describe("Discord support hub", () => {
     });
 
     const missing = fixture([]);
+    missing.channel.threads.fetchArchived.mockRejectedValue(
+      new Error("Discord denied thread history access"),
+    );
     const result = await hub.validateHub(missing.guild, "hub-1");
     expect(result).toEqual({
       valid: false,
@@ -204,6 +223,8 @@ describe("Discord support hub", () => {
     for (const permissionName of REQUIRED_HUB_BOT_PERMISSION_NAMES) {
       expect(result.valid ? "" : result.issues[0]).toContain(permissionName);
     }
+    expect(missing.channel.threads.fetchActive).not.toHaveBeenCalled();
+    expect(missing.channel.threads.fetchArchived).not.toHaveBeenCalled();
   });
 
   it("applies the empty-hub reporter overwrite idempotently", async () => {
@@ -240,28 +261,114 @@ describe("Discord support hub", () => {
     expect(reporter.has(PermissionFlagsBits.SendMessagesInThreads)).toBe(false);
     expect(reporter.has(PermissionFlagsBits.CreatePublicThreads)).toBe(false);
     expect(reporter.has(PermissionFlagsBits.CreatePrivateThreads)).toBe(false);
+    expect(reporter.has(PermissionFlagsBits.ManageThreads)).toBe(false);
     expect(EMPTY_HUB_REPORTER_OVERWRITE).toEqual({
       SendMessages: false,
       SendMessagesInThreads: false,
       CreatePublicThreads: false,
       CreatePrivateThreads: false,
+      ManageThreads: false,
     });
   });
 
-  it("rejects non-bot role and member allows that would bypass hub privacy", async () => {
+  it("does not police moderator-managed hub state", async () => {
     const hub = createSupportHubDiscord();
-    for (const targetId of ["role-1", "reporter-1"]) {
-      const conflict = fixture();
-      conflict.addOverwrite(targetId, [PermissionFlagsBits.SendMessages]);
+    const state = fixture();
+    state.addMessage("history-1", "Moderator-managed history");
+    state.addOverwrite("role-1", [PermissionFlagsBits.ManageThreads]);
+    state.activeThreads.set("public-1", {
+      id: "public-1",
+      type: ChannelType.PublicThread,
+    });
+    state.archivedThreads.set("private-1", {
+      id: "private-1",
+      type: ChannelType.PrivateThread,
+    });
 
-      const result = await hub.validateHub(conflict.guild, "hub-1");
+    await expect(hub.validateHub(state.guild, "hub-1")).resolves.toEqual({
+      valid: true,
+    });
+    await expect(hub.prepareHub(state.guild, "hub-1")).resolves.toMatchObject({
+      valid: true,
+    });
+  });
 
-      expect(result).toEqual({
-        valid: false,
-        issues: [expect.stringContaining("channel-specific role or member")],
-      });
-      expect(conflict.editOverwrite).not.toHaveBeenCalled();
-    }
+  it("accepts the exact managed reporter ticket overwrite", async () => {
+    const hub = createSupportHubDiscord();
+    const managed = fixture();
+    managed.addOverwrite(
+      "reporter-1",
+      [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.SendMessagesInThreads,
+        PermissionFlagsBits.UseApplicationCommands,
+      ],
+      [
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.CreatePublicThreads,
+        PermissionFlagsBits.CreatePrivateThreads,
+        PermissionFlagsBits.ManageThreads,
+      ],
+    );
+
+    await expect(hub.validateHub(managed.guild, "hub-1")).resolves.toEqual({
+      valid: true,
+    });
+    expect(REPORTER_TICKET_HUB_OVERWRITE.SendMessagesInThreads).toBe(true);
+  });
+
+  it("upgrades version-one ownership without losing Manage Threads state", async () => {
+    const hub = createSupportHubDiscord();
+    const state = fixture();
+    state.addOverwrite(state.everyone.id, [PermissionFlagsBits.ManageThreads]);
+    state.addOverwrite(
+      state.botMember.id,
+      [PermissionFlagsBits.ManageThreads],
+    );
+    const versionOneOwnership = {
+      version: 1 as const,
+      channelId: "hub-1",
+      botMemberId: "bot-1",
+      everyone: {
+        SendMessages: "unset" as const,
+        SendMessagesInThreads: "unset" as const,
+        CreatePublicThreads: "unset" as const,
+        CreatePrivateThreads: "unset" as const,
+      },
+      bot: {
+        SendMessages: "unset" as const,
+        SendMessagesInThreads: "unset" as const,
+        CreatePublicThreads: "unset" as const,
+        CreatePrivateThreads: "unset" as const,
+      },
+    };
+
+    const prepared = await hub.prepareHub(
+      state.guild,
+      "hub-1",
+      versionOneOwnership,
+    );
+    expect(prepared.valid).toBe(true);
+    if (!prepared.valid) return;
+    expect(prepared.permissionOwnership).toMatchObject({
+      version: 2,
+      everyone: { ManageThreads: "allow" },
+      bot: { ManageThreads: "allow" },
+    });
+
+    await hub.applyHub(state.guild, prepared.permissionOwnership);
+    await hub.releaseHub(state.guild, prepared.permissionOwnership);
+    expect(
+      state.overwriteCache
+        .get(state.everyone.id)
+        ?.allow.has(PermissionFlagsBits.ManageThreads),
+    ).toBe(true);
+    expect(
+      state.overwriteCache
+        .get(state.botMember.id)
+        ?.allow.has(PermissionFlagsBits.ManageThreads),
+    ).toBe(true);
   });
 
   it("accepts the bot's managed integration role overwrite", async () => {
@@ -370,37 +477,12 @@ describe("Discord support hub", () => {
     expect(send).toHaveBeenCalledOnce();
     const content = messageCache.get("message-1")?.content ?? "";
     expect(content).toContain("## Support Guide support");
-    expect(content).toContain("Ticket intake is not enabled yet");
-    expect(content).not.toMatch(/\/(issue|report|debugshare)\b/);
+    expect(content).toContain("`/issue`, `/report`, or `/debugshare`");
+    expect(content).not.toContain("Opening summary:");
     expect(messageCache.get("message-1")?.edit).toHaveBeenLastCalledWith({
       content,
       allowedMentions: { parse: [] },
     });
-  });
-
-  it("recovers an unpersisted managed message without touching unrelated messages", async () => {
-    const hub = createSupportHubDiscord();
-    const state = fixture();
-    const unrelated = state.addMessage(
-      "unrelated",
-      "A different bot-authored message",
-    );
-
-    const firstId = await hub.upsertInformationMessage({
-      guild: state.guild,
-      channelId: "hub-1",
-      assistantIdentity: "Prod",
-    });
-    const recoveredId = await hub.upsertInformationMessage({
-      guild: state.guild,
-      channelId: "hub-1",
-      assistantIdentity: "Prod",
-    });
-
-    expect(recoveredId).toBe(firstId);
-    expect(state.send).toHaveBeenCalledOnce();
-    expect(state.messageCache.has("unrelated")).toBe(true);
-    expect(unrelated.delete).not.toHaveBeenCalled();
   });
 
   it("reconciles duplicate marked messages and prefers the persisted one", async () => {

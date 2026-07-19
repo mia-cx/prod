@@ -6,6 +6,10 @@ import type {
   GuildSetupSettings,
 } from "./guild-settings.js";
 import type { HubTransition } from "./hub-transition.js";
+import {
+  createGuildOperationExecutor,
+  type ExecuteGuildOperation,
+} from "./guild-operation.js";
 import type { SupportHubDiscord, SupportHubValidation } from "./support-hub.js";
 
 export interface GuildSetupService {
@@ -14,31 +18,17 @@ export interface GuildSetupService {
   configureHub(guild: Guild, channelId: string): Promise<SupportHubValidation>;
   refreshInformationMessage(guild: Guild): Promise<SupportHubValidation>;
   setAssistantIdentity(guild: Guild, identity: string): Promise<void>;
+  setSystemPrompt(guild: Guild, prompt: string): Promise<void>;
+  setProductKnowledgePrompt(guild: Guild, prompt: string): Promise<void>;
+  setSupportWorkflowPrompt(guild: Guild, prompt: string): Promise<void>;
+  setSafetyPrompt(guild: Guild, prompt: string): Promise<void>;
   setTone(guild: Guild, tone: string): Promise<void>;
 }
 
-const createKeyedExecutor = () => {
-  const tails = new Map<string, Promise<void>>();
-  return async <Value>(
-    key: string,
-    task: () => Promise<Value>,
-  ): Promise<Value> => {
-    const previous = tails.get(key) ?? Promise.resolve();
-    let release = (): void => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const tail = previous.catch(() => undefined).then(() => gate);
-    tails.set(key, tail);
-    await previous.catch(() => undefined);
-    try {
-      return await task();
-    } finally {
-      release();
-      if (tails.get(key) === tail) tails.delete(key);
-    }
-  };
-};
+export interface ReporterHubAccessSuspender {
+  suspendHubAccess(guild: Guild, hubChannelId: string): Promise<number>;
+  canReleaseHub(guildId: string, hubChannelId: string): Promise<boolean>;
+}
 
 const throwTransitionFailure = (
   error: unknown,
@@ -54,8 +44,10 @@ const throwTransitionFailure = (
 export const createGuildSetupService = (
   store: GuildSettingsStore,
   discord: SupportHubDiscord,
+  reporterAccess: ReporterHubAccessSuspender,
+  executeGuildOperation: ExecuteGuildOperation = createGuildOperationExecutor(),
 ): GuildSetupService => {
-  const execute = createKeyedExecutor();
+  const execute = executeGuildOperation;
 
   const compensate = async (
     guild: Guild,
@@ -112,6 +104,7 @@ export const createGuildSetupService = (
       previous.hubChannelId !== undefined &&
       previous.hubPermissionOwnership !== undefined
     ) {
+      await reporterAccess.suspendHubAccess(guild, previous.hubChannelId);
       await discord.deleteInformationMessage(
         guild,
         previous.hubChannelId,
@@ -145,6 +138,21 @@ export const createGuildSetupService = (
         await recoverPendingTransition(guild);
         const previous = await store.get(guild.id);
         const sameHub = previous.hubChannelId === channelId;
+        if (
+          !sameHub &&
+          previous.hubChannelId !== undefined &&
+          !(await reporterAccess.canReleaseHub(
+            guild.id,
+            previous.hubChannelId,
+          ))
+        ) {
+          return {
+            valid: false as const,
+            issues: [
+              "The support hub cannot be changed while tickets remain active.",
+            ],
+          };
+        }
         const prepared = await discord.prepareHub(
           guild,
           channelId,
@@ -246,6 +254,26 @@ export const createGuildSetupService = (
       execute(guild.id, async () => {
         await recoverPendingTransition(guild);
         await store.setTone(guild.id, tone);
+      }),
+    setSystemPrompt: (guild: Guild, prompt: string) =>
+      execute(guild.id, async () => {
+        await recoverPendingTransition(guild);
+        await store.setSystemPrompt(guild.id, prompt);
+      }),
+    setProductKnowledgePrompt: (guild: Guild, prompt: string) =>
+      execute(guild.id, async () => {
+        await recoverPendingTransition(guild);
+        await store.setProductKnowledgePrompt(guild.id, prompt);
+      }),
+    setSupportWorkflowPrompt: (guild: Guild, prompt: string) =>
+      execute(guild.id, async () => {
+        await recoverPendingTransition(guild);
+        await store.setSupportWorkflowPrompt(guild.id, prompt);
+      }),
+    setSafetyPrompt: (guild: Guild, prompt: string) =>
+      execute(guild.id, async () => {
+        await recoverPendingTransition(guild);
+        await store.setSafetyPrompt(guild.id, prompt);
       }),
   });
 };

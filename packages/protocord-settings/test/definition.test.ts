@@ -39,6 +39,32 @@ describe("consumer settings definitions", () => {
     expect(defineSettings(definition)).toBe(definition);
   });
 
+  it("accepts direct category fields and rejects ambiguous layouts", () => {
+    const definition = validDefinition();
+    const category = definition.categories[0]!;
+    const fields = category.subcategories![0]!.fields;
+
+    expect(() =>
+      defineSettings({
+        ...definition,
+        categories: [
+          {
+            id: "setup",
+            label: "Setup",
+            authorize: () => true,
+            fields,
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      defineSettings({
+        ...definition,
+        categories: [{ ...category, fields }],
+      }),
+    ).toThrow(/either direct fields or subcategories/);
+  });
+
   it("rejects duplicate and unstable consumer IDs", () => {
     const definition = validDefinition();
     const category = definition.categories[0]!;

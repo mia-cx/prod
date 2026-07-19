@@ -30,6 +30,7 @@ import type {
   SettingsSubcategory,
   SettingsValidationIssue,
 } from "./contracts.js";
+import { categoryPages } from "./category-layout.js";
 import {
   createSettingsRenderer,
   SettingsViewError,
@@ -237,6 +238,31 @@ async function handleSettingsInteraction<Context>(
           return staleInteraction(component);
         }
         return await navigateSubcategory(renderer, resolved, component, context);
+      case "home-page":
+        if (!component.isButton()) {
+          return staleInteraction(component);
+        }
+        return await updateView(
+          renderer,
+          component,
+          context,
+          { homePage: resolved.route.page },
+          "viewed",
+        );
+      case "subcategory-page":
+        if (!component.isButton()) {
+          return staleInteraction(component);
+        }
+        return await updateView(
+          renderer,
+          component,
+          context,
+          {
+            categoryId: resolved.category.id,
+            subcategoryPage: resolved.route.page,
+          },
+          "viewed",
+        );
       case "page":
         if (!component.isButton()) {
           return staleInteraction(component);
@@ -726,9 +752,10 @@ function resolveRoute<Context>(
   route: SettingsRoute,
 ): ResolvedRoute<Context> | undefined {
   const category = definition.categories.find(({ id }) => id === route.categoryId);
-  const subcategory = category?.subcategories.find(
-    ({ id }) => id === route.subcategoryId,
-  );
+  const subcategory =
+    category === undefined
+      ? undefined
+      : categoryPages(category).find(({ id }) => id === route.subcategoryId);
   if (category === undefined || subcategory === undefined) {
     return undefined;
   }
@@ -788,6 +815,8 @@ function routeMatchesInteraction(
     case "subcategory":
     case "string-select":
       return interaction.isStringSelectMenu();
+    case "home-page":
+    case "subcategory-page":
     case "page":
     case "button":
     case "modal":
@@ -852,6 +881,12 @@ function singleSelectedValue(interaction: StringSelectMenuInteraction): string {
 }
 
 function routeRequest(route: SettingsRoute): SettingsViewRequest {
+  if (route.action === "home-page") {
+    return { homePage: route.page };
+  }
+  if (route.action === "subcategory-page") {
+    return { categoryId: route.categoryId, subcategoryPage: route.page };
+  }
   return {
     categoryId: route.categoryId,
     subcategoryId: route.subcategoryId,

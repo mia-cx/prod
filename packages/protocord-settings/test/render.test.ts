@@ -116,8 +116,30 @@ describe("Components v2 settings rendering", () => {
 
     expect(authorize).toHaveBeenCalledOnce();
     expect(homeView.components).toHaveLength(1);
-    expect(homeView.location).toEqual({ page: 0, pageCount: 0 });
+    expect(homeView.location).toEqual({ page: 0, pageCount: 1 });
     expect(JSON.stringify(home)).toContain("Synthetic settings");
+    expect(JSON.stringify(home)).toContain("Choose a category");
+    expect(JSON.stringify(home)).not.toContain("Categories");
+    expect(JSON.stringify(home)).toContain("Configure the synthetic consumer.");
+    expect(JSON.stringify(home)).toContain(
+      "**Setup:** Configure the synthetic consumer.",
+    );
+    expect(home).toMatchObject({
+      type: ComponentType.Container,
+      components: [
+        { type: ComponentType.TextDisplay },
+        { type: ComponentType.TextDisplay },
+        { type: ComponentType.Separator },
+        {
+          type: ComponentType.TextDisplay,
+          content: "Choose a category",
+        },
+        {
+          type: ComponentType.ActionRow,
+          components: [{ type: ComponentType.StringSelect }],
+        },
+      ],
+    });
     expect(JSON.stringify(home)).toContain("Labels");
     expect(JSON.stringify(home)).not.toContain("Private");
     expect(JSON.stringify(home)).not.toContain("Refresh");
@@ -135,7 +157,13 @@ describe("Components v2 settings rendering", () => {
       pageCount: 0,
     });
     expect(JSON.stringify(category)).toContain("Setup");
+    expect(JSON.stringify(category)).toContain("**General**");
+    expect(JSON.stringify(category)).toContain("**Large page**");
+    expect(JSON.stringify(category)).toContain("Choose a settings page");
     expect(JSON.stringify(category)).toContain("Large page");
+    expect(JSON.stringify(category)).toContain(
+      `\"type\":${String(ComponentType.Separator)}`,
+    );
     expect(JSON.stringify(category)).not.toContain("Refresh");
     expect(JSON.stringify(category)).not.toContain('"default":true');
 
@@ -152,7 +180,7 @@ describe("Components v2 settings rendering", () => {
       });
     }
     expect(JSON.stringify(subcategory)).toContain("General");
-    expect(JSON.stringify(subcategory)).toContain("Refresh");
+    expect(JSON.stringify(subcategory)).toContain("## Refresh");
     expect(JSON.stringify(subcategory)).toContain("Friendly");
     expect(view.location).toEqual({
       categoryId: "setup",
@@ -160,6 +188,132 @@ describe("Components v2 settings rendering", () => {
       page: 0,
       pageCount: 1,
     });
+  });
+
+  it("paginates authorized category summaries ten at a time", async () => {
+    const categories = Array.from({ length: 12 }, (_, index) => ({
+      id: `category-${String(index)}`,
+      label: `Category ${String(index)}`,
+      ...(index === 5 ? {} : { description: `Summary ${String(index)}` }),
+      authorize: () => index !== 11,
+      fields: [displayField(index)],
+    }));
+    const renderer = createSettingsRenderer<Context>({
+      title: "Many categories",
+      categories,
+    });
+
+    const first = await renderer.render({}, { userId: "admin" });
+    const second = await renderer.render(
+      { homePage: 1 },
+      { userId: "admin" },
+    );
+    const firstContents = textDisplayContents(first.components).join("\n");
+    const secondContents = textDisplayContents(second.components).join("\n");
+
+    expect(first.location).toEqual({ page: 0, pageCount: 2 });
+    expect(second.location).toEqual({ page: 1, pageCount: 2 });
+    expect(firstContents).toContain("Summary 0");
+    expect(firstContents).toContain("**Category 5**");
+    expect(firstContents).not.toContain("Summary 5");
+    expect(firstContents).toContain("Summary 9");
+    expect(firstContents).not.toContain("Summary 10");
+    expect(secondContents).toContain("Summary 10");
+    expect(secondContents).not.toContain("Summary 0");
+    expect(secondContents).not.toContain("Summary 11");
+    expect(JSON.stringify(first.components)).toContain('"label":"Next"');
+  });
+
+  it("renders direct category fields without redundant navigation or select state text", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Direct settings",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "string-select",
+              id: "mode",
+              label: "Mode",
+              load: () => ({
+                value: "Friendly",
+                selectedValues: ["friendly"],
+                options: [
+                  { label: "Friendly", value: "friendly" },
+                  { label: "Direct", value: "direct" },
+                ],
+              }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const [, category] = view.components;
+    const payload = JSON.stringify(view.components);
+
+    expect(view.components).toHaveLength(2);
+    expect(view.location).toEqual({
+      categoryId: "setup",
+      subcategoryId: "setup",
+      page: 0,
+      pageCount: 1,
+    });
+    expect(payload).not.toContain("Choose a settings page");
+    expect(payload).not.toContain("**Current:** Friendly");
+    expect(payload).toContain('"value":"friendly","default":true');
+    expect(category).toMatchObject({
+      components: [
+        { type: ComponentType.TextDisplay },
+        { type: ComponentType.Separator, divider: true },
+        expect.anything(),
+        expect.anything(),
+      ],
+    });
+  });
+
+  it("reserves notice space when paginating direct category fields", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Direct settings",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: Array.from({ length: 8 }, (_, index) => displayField(index)),
+        },
+      ],
+    });
+
+    const ordinary = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const withNotice = await renderer.render(
+      {
+        categoryId: "setup",
+        notice: { kind: "success", message: "Saved" },
+      },
+      { userId: "admin" },
+    );
+    const category = withNotice.components[1];
+
+    expect(withNotice.location.pageCount).toBe(ordinary.location.pageCount);
+    expect(withNotice.location.pageCount).toBe(2);
+    expect(category?.type).toBe(ComponentType.Container);
+    expect(
+      category?.type === ComponentType.Container
+        ? category.components.length
+        : 0,
+    ).toBeLessThanOrEqual(10);
+    expect(JSON.stringify(category)).toContain("Saved");
   });
 
   it("falls back to field labels for empty dynamic button labels", async () => {
@@ -206,6 +360,53 @@ describe("Components v2 settings rendering", () => {
 
     expect(payload).toContain('"label":"Action fallback"');
     expect(payload).toContain('"label":"Form fallback"');
+  });
+
+  it("renders inline modal values and separately truncated previews", async () => {
+    const longPreview = "x".repeat(301);
+    const renderer = createSettingsRenderer<Context>({
+      title: "Modal presentations",
+      categories: [
+        {
+          id: "identity",
+          label: "Identity",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "modal",
+              id: "name",
+              label: "Name",
+              title: "Edit name",
+              presentation: { kind: "inline" },
+              inputs: [{ id: "name", label: "Name" }],
+              load: () => ({ value: "Prod" }),
+              mutate: () => undefined,
+            },
+            {
+              kind: "modal",
+              id: "style",
+              label: "Style prompt",
+              title: "Edit style prompt",
+              presentation: { kind: "preview", maxLength: 300 },
+              inputs: [{ id: "style", label: "Style prompt" }],
+              load: () => ({ value: longPreview }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = await renderer.render(
+      { categoryId: "identity" },
+      { userId: "admin" },
+    );
+    const contents = textDisplayContents(view.components);
+
+    expect(contents).toContain("**Name:** Prod");
+    expect(contents).toContain("**Style prompt**");
+    expect(contents).toContain(`${"x".repeat(299)}…`);
+    expect(contents).not.toContain(longPreview);
   });
 
   it("paginates fields without exceeding Discord container limits", async () => {
@@ -350,7 +551,7 @@ describe("Components v2 settings rendering", () => {
   it("enforces dynamic select-option limits", async () => {
     const value = definition();
     const setup = value.categories[0]!;
-    const general = setup.subcategories[0]!;
+    const general = setup.subcategories![0]!;
     const oversized: SettingsDefinition<Context> = {
       ...value,
       categories: [
@@ -390,7 +591,7 @@ describe("Components v2 settings rendering", () => {
   it("rejects select payloads that Discord would reject", async () => {
     const value = definition();
     const setup = value.categories[0]!;
-    const general = setup.subcategories[0]!;
+    const general = setup.subcategories![0]!;
     const withField = (
       field: SettingsField<Context>,
     ): SettingsDefinition<Context> => ({
@@ -446,7 +647,7 @@ describe("Components v2 settings rendering", () => {
   it("omits semantically empty defaults for an optional select", async () => {
     const value = definition();
     const setup = value.categories[0]!;
-    const general = setup.subcategories[0]!;
+    const general = setup.subcategories![0]!;
     const renderer = createSettingsRenderer({
       ...value,
       categories: [
@@ -485,7 +686,7 @@ describe("Components v2 settings rendering", () => {
         {
           id: "category",
           label: "Category heading",
-          description: "c".repeat(4_000),
+          description: "c".repeat(100),
           authorize: () => true,
           subcategories: [
             {
@@ -513,7 +714,7 @@ describe("Components v2 settings rendering", () => {
     );
     const contents = textDisplayContents(rendered.components);
 
-    expect(contents).toHaveLength(4);
+    expect(contents).toHaveLength(8);
     expect(contents.every((content) => content.length <= 4_000)).toBe(true);
     expect(contents.reduce((total, content) => total + content.length, 0)).toBe(
       4_000,
@@ -521,13 +722,17 @@ describe("Components v2 settings rendering", () => {
     expect(contents).toEqual([
       expect.stringContaining("Text budgets"),
       expect.stringContaining("Category heading"),
+      "Choose a category",
+      expect.stringContaining("Category heading"),
+      expect.stringContaining("Subcategory heading"),
+      "Choose a settings page",
       expect.stringContaining("Subcategory heading"),
       expect.stringContaining("Field heading"),
     ]);
   });
 
   it("preserves text displays when their combined content fits the budget", async () => {
-    const categoryDescription = "c".repeat(3_000);
+    const categoryDescription = "c".repeat(100);
     const renderer = createSettingsRenderer({
       title: "Under budget",
       categories: [
@@ -553,7 +758,7 @@ describe("Components v2 settings rendering", () => {
     );
     const contents = textDisplayContents(rendered.components);
 
-    expect(contents[1]).toBe(`# Category\n${categoryDescription}`);
+    expect(contents[3]).toBe(`# Category\n${categoryDescription}`);
     expect(contents.reduce((total, content) => total + content.length, 0)).toBeLessThan(
       4_000,
     );

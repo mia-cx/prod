@@ -5,6 +5,9 @@ const discordMock = vi.hoisted(() => ({
   readyHandler: undefined as undefined | ((client: unknown) => void),
   interactionHandler: undefined as undefined | ((interaction: unknown) => void),
   messageHandler: undefined as undefined | ((message: unknown) => void),
+  threadCreateHandler: undefined as undefined | ((thread: unknown) => void),
+  threadUpdateHandler: undefined as
+    undefined | ((oldThread: unknown, newThread: unknown) => void),
   intents: [] as number[],
   applicationOwner: null as
     | null
@@ -19,6 +22,7 @@ const discordMock = vi.hoisted(() => ({
   applicationFetch: vi.fn(),
   login: vi.fn(async (token: string) => token),
   destroy: vi.fn(),
+  guildFetch: vi.fn(async (guildId: string) => ({ id: guildId })),
 }));
 
 vi.mock("discord.js", () => ({
@@ -26,8 +30,15 @@ vi.mock("discord.js", () => ({
     ClientReady: "clientReady",
     InteractionCreate: "interactionCreate",
     MessageCreate: "messageCreate",
+    ThreadCreate: "threadCreate",
+    ThreadUpdate: "threadUpdate",
   },
-  GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4 },
+  GatewayIntentBits: {
+    Guilds: 1,
+    GuildMessages: 2,
+    MessageContent: 4,
+    GuildMembers: 8,
+  },
   TeamMemberMembershipState: { Invited: 1, Accepted: 2 },
   TeamMemberRole: {
     Admin: "admin",
@@ -45,6 +56,7 @@ vi.mock("discord.js", () => ({
         return discordMock.applicationOwner;
       },
     };
+    guilds = { fetch: discordMock.guildFetch };
 
     constructor(options: { intents: number[] }) {
       discordMock.intents = options.intents;
@@ -55,11 +67,18 @@ vi.mock("discord.js", () => ({
       return this;
     }
 
-    on(event: string, handler: (event: unknown) => void): this {
+    on(
+      event: string,
+      handler: (event: unknown, second?: unknown) => void,
+    ): this {
       if (event === "interactionCreate") {
         discordMock.interactionHandler = handler;
       } else if (event === "messageCreate") {
         discordMock.messageHandler = handler;
+      } else if (event === "threadCreate") {
+        discordMock.threadCreateHandler = handler;
+      } else if (event === "threadUpdate") {
+        discordMock.threadUpdateHandler = handler;
       }
       return this;
     }
@@ -93,11 +112,14 @@ describe("createDiscordGateway", () => {
     discordMock.readyHandler = undefined;
     discordMock.interactionHandler = undefined;
     discordMock.messageHandler = undefined;
+    discordMock.threadCreateHandler = undefined;
+    discordMock.threadUpdateHandler = undefined;
     discordMock.intents = [];
     discordMock.applicationOwner = null;
     discordMock.applicationFetch.mockReset().mockResolvedValue(undefined);
     discordMock.login.mockClear();
     discordMock.destroy.mockClear();
+    discordMock.guildFetch.mockClear();
   });
 
   it("resolves the ready identity and destroys the client once", async () => {
@@ -212,6 +234,7 @@ describe("createDiscordGateway", () => {
 
   it("refreshes global commands and dispatches interactions", async () => {
     const refreshCommands = vi.fn(async () => undefined);
+    const reconcile = vi.fn(async () => undefined);
     const handleInteraction = vi.fn(async () => undefined);
     const handleMessage = vi.fn(async () => true);
     const handleError = vi.fn();
@@ -220,6 +243,7 @@ describe("createDiscordGateway", () => {
       actions: {
         setApplicationOperatorUserIds,
         refreshCommands,
+        reconcile,
         handleInteraction,
         handleMessage,
         handleError,
@@ -229,6 +253,10 @@ describe("createDiscordGateway", () => {
     await gateway.connect("development-token", new AbortController().signal);
 
     expect(refreshCommands).toHaveBeenCalledWith(expect.anything());
+    expect(reconcile).toHaveBeenCalledWith(expect.anything());
+    expect(refreshCommands.mock.invocationCallOrder[0]).toBeLessThan(
+      reconcile.mock.invocationCallOrder[0]!,
+    );
     expect(setApplicationOperatorUserIds).toHaveBeenCalledWith([]);
     const interaction = { id: "interaction-1" };
     discordMock.interactionHandler?.(interaction);

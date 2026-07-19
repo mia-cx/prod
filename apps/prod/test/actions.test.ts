@@ -1,5 +1,8 @@
 import {
+  ApplicationCommandOptionType,
   ApplicationCommandType,
+  ChannelType,
+  Collection,
   MessageFlags,
   type ChatInputCommandInteraction,
   type Client,
@@ -19,6 +22,11 @@ import {
 } from "../src/actions/runtime.js";
 import { createLogger } from "../src/logger.js";
 import type { SupportHubDiscord } from "../src/support-hub.js";
+import {
+  TicketSetupRequiredError,
+  type TicketProvisioningService,
+} from "../src/ticket-provisioning.js";
+import { TicketAdmissionError } from "../src/tickets.js";
 
 const noMentions = { parse: [], repliedUser: false };
 const permissionOwnership: HubPermissionOwnership = {
@@ -45,12 +53,20 @@ const guildSettingsStore: GuildSettingsStore = {
     hubChannelId: "123456789012345678",
     hubPermissionOwnership: permissionOwnership,
     assistantIdentity: "Prod",
+    systemPrompt: "support users",
+    productKnowledgePrompt: "poke product knowledge",
+    supportWorkflowPrompt: "collect reproduction details",
+    safetyPrompt: "do not expose secrets",
     tone: "friendly, patient, and concise",
   }),
   initialize: async () => undefined,
   configureHub: async () => undefined,
   setHubInformationMessage: async () => undefined,
   setAssistantIdentity: async () => undefined,
+  setSystemPrompt: async () => undefined,
+  setProductKnowledgePrompt: async () => undefined,
+  setSupportWorkflowPrompt: async () => undefined,
+  setSafetyPrompt: async () => undefined,
   setTone: async () => undefined,
   getHubTransition: async () => undefined,
   beginHubTransition: async () => undefined,
@@ -59,7 +75,7 @@ const guildSettingsStore: GuildSettingsStore = {
   abortHubTransition: async () => undefined,
 };
 const supportHubDiscord: SupportHubDiscord = {
-  validateHub: async () => ({ valid: true }),
+  validateHub: vi.fn(async () => ({ valid: true as const })),
   prepareHub: async () => ({ valid: true, permissionOwnership }),
   applyHub: async () => ({ valid: true, permissionOwnership }),
   restoreHub: async () => undefined,
@@ -68,10 +84,34 @@ const supportHubDiscord: SupportHubDiscord = {
   upsertInformationMessage: async () => "message-1",
   deleteInformationMessage: async () => undefined,
 };
+const ticketProvisioningService: TicketProvisioningService = {
+  open: vi.fn().mockResolvedValue({
+    id: "ticket-1",
+    guildId: "guild-1",
+    hubChannelId: "channel-1",
+    reporterUserId: "user-1",
+    originatingAlias: "issue",
+    status: "open",
+    triageStatus: "collecting",
+    threadId: "thread-1",
+    openingMessageId: "message-1",
+    createdAt: "2026-07-17T10:00:00.000Z",
+    updatedAt: "2026-07-17T10:00:00.000Z",
+  }),
+  discoverRecoveryThreads: vi.fn().mockResolvedValue({
+    discovered: 0,
+    failed: 0,
+  }),
+  recover: vi.fn().mockResolvedValue({ recovered: 0, failed: 0 }),
+  canReleaseHub: vi.fn().mockResolvedValue(true),
+  suspendHubAccess: vi.fn().mockResolvedValue(0),
+  resumeHubAccess: vi.fn().mockResolvedValue(0),
+};
 const runtimeOptions = {
   textCommandPrefix: "!",
   guildSettingsStore,
   supportHubDiscord,
+  ticketProvisioningService,
 };
 
 function componentWithCustomId(
@@ -131,7 +171,7 @@ describe("Prod action runtime", () => {
       runtimeOptions,
     );
 
-    expect(runtime.actionCount).toBe(2);
+    expect(runtime.actionCount).toBe(3);
     expect(runtime.commands).toEqual([
       {
         type: ApplicationCommandType.ChatInput,
@@ -139,6 +179,20 @@ describe("Prod action runtime", () => {
         description: "Check whether Prod is responsive",
         options: [],
       },
+      ...(["issue", "report", "debugshare"] as const).map((name) => ({
+        type: ApplicationCommandType.ChatInput,
+        name,
+        description: "Open a private support ticket",
+        options: [
+          {
+            type: ApplicationCommandOptionType.String,
+            name: "summary",
+            description: "A short summary of the problem",
+            required: false,
+            maxLength: 200,
+          },
+        ],
+      })),
       {
         type: ApplicationCommandType.ChatInput,
         name: "settings",
@@ -230,7 +284,7 @@ describe("Prod action runtime", () => {
       }),
     );
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
-      "Prod settings",
+      "Choose a category",
     );
     const payload = interaction.editReply.mock.calls[0]?.[0];
     expect(
@@ -239,16 +293,19 @@ describe("Prod action runtime", () => {
         encodeSettingsCustomId({
           action: "category",
           categoryId: "setup",
-          subcategoryId: "hub",
+          subcategoryId: "setup",
           page: 0,
         }),
       ),
     ).toMatchObject({
       min_values: 1,
       max_values: 1,
-      options: [expect.objectContaining({ value: "setup" })],
+      options: expect.arrayContaining([
+        expect.objectContaining({ value: "setup" }),
+        expect.objectContaining({ value: "identity" }),
+      ]),
     });
-    expect(JSON.stringify(payload)).not.toContain("Support hub channel");
+    expect(JSON.stringify(payload)).not.toContain("Support channel");
     expect(JSON.stringify(payload)).not.toContain('"default":true');
   });
 
@@ -257,13 +314,13 @@ describe("Prod action runtime", () => {
       createLogger({ level: "fatal" }),
       runtimeOptions,
     );
-    const interaction = settingsButton(true);
+    const interaction = settingsChannelSelect(true);
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
     expect(interaction.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(interaction.editReply.mock.calls[0]?.[0])).toContain(
-      "Hub information message",
+      "Support channel",
     );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
@@ -279,18 +336,18 @@ describe("Prod action runtime", () => {
     await runtime.handleInteraction(open as unknown as Interaction);
     expect(open.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(open.editReply.mock.calls[0]?.[0])).toContain(
-      "Prod settings",
+      "Choose a category",
     );
 
-    const mutation = settingsButton(false);
+    const mutation = settingsChannelSelect(false);
     await runtime.handleInteraction(mutation as unknown as Interaction);
     expect(mutation.editReply).toHaveBeenCalledOnce();
     expect(JSON.stringify(mutation.editReply.mock.calls[0]?.[0])).toContain(
-      "Hub information message",
+      "Support channel",
     );
 
     runtime.setApplicationOperatorUserIds([]);
-    const expiredMutation = settingsButton(false);
+    const expiredMutation = settingsChannelSelect(false);
     await runtime.handleInteraction(expiredMutation as unknown as Interaction);
     expect(expiredMutation.editReply).not.toHaveBeenCalled();
     expect(expiredMutation.followUp).toHaveBeenCalledWith(
@@ -322,7 +379,7 @@ describe("Prod action runtime", () => {
       createLogger({ level: "fatal" }),
       runtimeOptions,
     );
-    const interaction = settingsButton(false);
+    const interaction = settingsChannelSelect(false);
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
@@ -389,6 +446,114 @@ describe("Prod action runtime", () => {
     });
   });
 
+  it.each(["issue", "report", "debugshare"] as const)(
+    "opens a private ticket ephemerally through /%s",
+    async (alias) => {
+      vi.mocked(ticketProvisioningService.open).mockClear();
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        runtimeOptions,
+      );
+      const interaction = ticketInteraction(alias, "Poke crashes");
+
+      await runtime.handleInteraction(interaction as unknown as Interaction);
+
+      expect(interaction.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
+      expect(ticketProvisioningService.open).toHaveBeenCalledWith({
+        guild: interaction.guild,
+        reporterUserId: "user-1",
+        originatingAlias: alias,
+        summary: "Poke crashes",
+      });
+      expect(interaction.editReply).toHaveBeenCalledWith({
+        content: "https://discord.com/channels/guild-1/thread-1",
+        allowedMentions: { parse: [] },
+      });
+    },
+  );
+
+  it("presents persistent ticket admission rejection without provisioning", async () => {
+    vi.mocked(ticketProvisioningService.open).mockRejectedValueOnce(
+      new TicketAdmissionError(
+        "rate_limited",
+        "Please wait a minute before opening another private ticket.",
+      ),
+    );
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = ticketInteraction("issue", null);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Please wait a minute before opening another private ticket.",
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it("tells ticket openers when support staff must configure the hub", async () => {
+    vi.mocked(ticketProvisioningService.open).mockRejectedValueOnce(
+      new TicketSetupRequiredError(),
+    );
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const interaction = ticketInteraction("issue", null);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content:
+        "Support staff must configure a support hub before private tickets can be opened.",
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it("returns a minimal text-command link and deletes it after 30 seconds", async () => {
+    vi.useFakeTimers();
+    vi.mocked(ticketProvisioningService.open).mockClear();
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const deleteReply = vi.fn().mockResolvedValue(undefined);
+    const reply = vi.fn().mockResolvedValue({ delete: deleteReply });
+    const message = {
+      content: "!issue Poke crashes",
+      author: {
+        id: "user-1",
+        username: "reporter",
+        globalName: "Reporter",
+        bot: false,
+      },
+      webhookId: null,
+      channelId: "channel-1",
+      guildId: "guild-1",
+      guild: { id: "guild-1" },
+      reply,
+    } as unknown as Message;
+
+    await expect(runtime.handleMessage!(message)).resolves.toBe(true);
+    expect(ticketProvisioningService.open).toHaveBeenCalledWith({
+      guild: message.guild,
+      reporterUserId: "user-1",
+      originatingAlias: "issue",
+    });
+    expect(reply).toHaveBeenCalledWith({
+      content: "https://discord.com/channels/guild-1/thread-1",
+      allowedMentions: { parse: [], repliedUser: false },
+    });
+    expect(deleteReply).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(deleteReply).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it("removes the text capability when the configured prefix is empty", () => {
     const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
       ...runtimeOptions,
@@ -396,7 +561,40 @@ describe("Prod action runtime", () => {
     });
 
     expect(runtime.handleMessage).toBeUndefined();
-    expect(runtime.commands).toHaveLength(4);
+    expect(runtime.commands).toHaveLength(7);
+  });
+
+  it("resolves guilds through the ready client during startup reconciliation", async () => {
+    vi.mocked(ticketProvisioningService.discoverRecoveryThreads).mockClear();
+    vi.mocked(ticketProvisioningService.resumeHubAccess).mockClear();
+    vi.mocked(ticketProvisioningService.suspendHubAccess).mockClear();
+    const fetchGuild = vi.fn().mockResolvedValue({ id: "guild-stale" });
+    vi.mocked(ticketProvisioningService.recover).mockImplementationOnce(
+      async (resolveGuild) => {
+        expect(await resolveGuild("guild-stale")).toEqual({
+          id: "guild-stale",
+        });
+        return { recovered: 1, failed: 0 };
+      },
+    );
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      runtimeOptions,
+    );
+    const client = {
+      guilds: {
+        fetch: fetchGuild,
+        cache: new Map([["guild-1", { id: "guild-1" }]]),
+      },
+    } as unknown as Client<true>;
+
+    await runtime.reconcile!(client);
+
+    expect(ticketProvisioningService.recover).toHaveBeenCalledOnce();
+    expect(ticketProvisioningService.discoverRecoveryThreads).toHaveBeenCalledOnce();
+    expect(ticketProvisioningService.resumeHubAccess).not.toHaveBeenCalled();
+    expect(ticketProvisioningService.suspendHubAccess).not.toHaveBeenCalled();
+    expect(fetchGuild).toHaveBeenCalledWith("guild-stale");
   });
 
   it.each([
@@ -487,15 +685,51 @@ const settingsCommand = (canManageGuild: boolean) => {
   };
 };
 
-const settingsButton = (canManageGuild: boolean) => {
+const ticketInteraction = (
+  alias: "issue" | "report" | "debugshare",
+  summary: string | null,
+) => {
+  const interaction: Record<string, unknown> = {
+    commandName: alias,
+    channelId: "channel-1",
+    guildId: "guild-1",
+    guild: { id: "guild-1" },
+    user: { id: "user-1", username: "reporter", globalName: "Reporter" },
+    options: { getString: () => summary },
+    deferred: false,
+    replied: false,
+    isAutocomplete: () => false,
+    isChatInputCommand: () => true,
+    isMessageContextMenuCommand: () => false,
+    isUserContextMenuCommand: () => false,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
+    deferReply: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+    }),
+    editReply: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
+  };
+  return interaction as typeof interaction & {
+    guild: { id: string };
+    deferReply: ReturnType<typeof vi.fn>;
+    editReply: ReturnType<typeof vi.fn>;
+  };
+};
+
+const settingsChannelSelect = (canManageGuild: boolean) => {
   const reply = vi.fn().mockResolvedValue(undefined);
   const update = vi.fn().mockResolvedValue(undefined);
   const interaction: Record<string, unknown> = {
     customId: encodeSettingsCustomId({
-      action: "button",
+      action: "channel-select",
       categoryId: "setup",
-      subcategoryId: "hub",
-      fieldId: "hub-information",
+      subcategoryId: "setup",
+      fieldId: "hub-channel",
       page: 0,
     }),
     guildId: "guild-1",
@@ -504,10 +738,21 @@ const settingsButton = (canManageGuild: boolean) => {
     memberPermissions: { has: () => canManageGuild },
     deferred: false,
     replied: false,
-    isButton: () => true,
+    values: ["123456789012345678"],
+    channels: new Collection([
+      [
+        "123456789012345678",
+        {
+          id: "123456789012345678",
+          name: "support",
+          type: ChannelType.GuildText,
+        },
+      ],
+    ]),
+    isButton: () => false,
     isStringSelectMenu: () => false,
     isMentionableSelectMenu: () => false,
-    isChannelSelectMenu: () => false,
+    isChannelSelectMenu: () => true,
     isModalSubmit: () => false,
     reply,
     followUp: vi.fn().mockResolvedValue(undefined),

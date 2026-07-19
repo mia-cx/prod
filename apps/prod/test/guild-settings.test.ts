@@ -5,6 +5,10 @@ import {
   createSqliteGuildSettingsStore,
   DEFAULT_ASSISTANT_IDENTITY,
   DEFAULT_ASSISTANT_TONE,
+  DEFAULT_PRODUCT_KNOWLEDGE_PROMPT,
+  DEFAULT_SAFETY_PROMPT,
+  DEFAULT_SUPPORT_WORKFLOW_PROMPT,
+  DEFAULT_SYSTEM_PROMPT,
   GuildNotConfiguredError,
 } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
@@ -48,6 +52,10 @@ describe("SQLite guild settings", () => {
         guildId: "guild-1",
         initialized: false,
         assistantIdentity: DEFAULT_ASSISTANT_IDENTITY,
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        productKnowledgePrompt: DEFAULT_PRODUCT_KNOWLEDGE_PROMPT,
+        supportWorkflowPrompt: DEFAULT_SUPPORT_WORKFLOW_PROMPT,
+        safetyPrompt: DEFAULT_SAFETY_PROMPT,
         tone: DEFAULT_ASSISTANT_TONE,
       });
     } finally {
@@ -66,6 +74,10 @@ describe("SQLite guild settings", () => {
         guildId: "guild-1",
         initialized: true,
         assistantIdentity: "Helper",
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        productKnowledgePrompt: DEFAULT_PRODUCT_KNOWLEDGE_PROMPT,
+        supportWorkflowPrompt: DEFAULT_SUPPORT_WORKFLOW_PROMPT,
+        safetyPrompt: DEFAULT_SAFETY_PROMPT,
         tone: DEFAULT_ASSISTANT_TONE,
       });
     } finally {
@@ -73,12 +85,16 @@ describe("SQLite guild settings", () => {
     }
   });
 
-  it("persists the hub, message, identity, and tone across store instances", async () => {
+  it("persists the hub, message, identity, and prompts across store instances", async () => {
     const { connection, store } = await createStore();
     try {
       await store.configureHub("guild-1", "channel-1", ownership("channel-1"));
       await store.setHubInformationMessage("guild-1", "message-1");
       await store.setAssistantIdentity("guild-1", "Support Guide");
+      await store.setSystemPrompt("guild-1", "Help users solve problems");
+      await store.setProductKnowledgePrompt("guild-1", "Poke uses messages");
+      await store.setSupportWorkflowPrompt("guild-1", "Collect reproduction steps");
+      await store.setSafetyPrompt("guild-1", "Never request secrets");
       await store.setTone("guild-1", "Warm, direct, and brief");
 
       const restartedStore = createSqliteGuildSettingsStore(
@@ -91,6 +107,10 @@ describe("SQLite guild settings", () => {
         hubInformationMessageId: "message-1",
         hubPermissionOwnership: ownership("channel-1"),
         assistantIdentity: "Support Guide",
+        systemPrompt: "Help users solve problems",
+        productKnowledgePrompt: "Poke uses messages",
+        supportWorkflowPrompt: "Collect reproduction steps",
+        safetyPrompt: "Never request secrets",
         tone: "Warm, direct, and brief",
       });
     } finally {

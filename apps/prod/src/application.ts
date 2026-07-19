@@ -9,8 +9,14 @@ import {
 } from "./database.js";
 import { createDiscordGateway, type DiscordGateway } from "./discord.js";
 import { createSqliteGuildSettingsStore } from "./guild-settings.js";
+import { createGuildOperationExecutor } from "./guild-operation.js";
 import { applyMigrations } from "./migrations.js";
 import { createSupportHubDiscord } from "./support-hub.js";
+import {
+  createTicketProvisioningDiscord,
+  createTicketProvisioningService,
+} from "./ticket-provisioning.js";
+import { createSqliteTicketStore } from "./tickets.js";
 
 export type RunningProd = Readonly<{
   stop: (reason?: string) => Promise<void>;
@@ -58,10 +64,22 @@ export const startProd = async (
   let gateway: DiscordGateway | undefined;
 
   try {
+    const guildSettingsStore = createSqliteGuildSettingsStore(
+      connection.database,
+    );
+    const executeGuildOperation = createGuildOperationExecutor();
+    const ticketProvisioningService = createTicketProvisioningService(
+      guildSettingsStore,
+      createSqliteTicketStore(connection.database),
+      createTicketProvisioningDiscord(),
+      { executeGuildOperation },
+    );
     const actions = createProdActionRuntime(logger, {
       textCommandPrefix: config.textCommandPrefix,
-      guildSettingsStore: createSqliteGuildSettingsStore(connection.database),
+      guildSettingsStore,
       supportHubDiscord: createSupportHubDiscord(),
+      ticketProvisioningService,
+      executeGuildOperation,
     });
     gateway =
       dependencies.gateway ??

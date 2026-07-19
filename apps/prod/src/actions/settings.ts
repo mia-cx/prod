@@ -1,6 +1,7 @@
 import {
   ChannelType,
   PermissionFlagsBits,
+  TextInputStyle,
   type ChatInputCommandInteraction,
   type Guild,
   type Interaction,
@@ -15,9 +16,14 @@ import {
 } from "@protocord/settings";
 import { slashCommand, type Action } from "protocord";
 
-import type { GuildSettingsStore } from "../guild-settings.js";
+import type {
+  GuildSettingsStore,
+  GuildSetupSettings,
+} from "../guild-settings.js";
 import { createGuildSetupService } from "../guild-setup.js";
+import type { ExecuteGuildOperation } from "../guild-operation.js";
 import type { SupportHubDiscord } from "../support-hub.js";
+import type { TicketProvisioningService } from "../ticket-provisioning.js";
 import type { ProdActionContext } from "./runtime.js";
 
 type GuildSetupSettingsContext = Readonly<{
@@ -36,6 +42,7 @@ export type GuildSetupSettingsConsumer = Readonly<{
     ProdActionContext
   >;
   handle(interaction: Interaction): Promise<SettingsDispatchResult>;
+  reconcile(guild: Guild): Promise<GuildSetupSettings>;
 }>;
 
 const invalid = (
@@ -59,8 +66,15 @@ export function createGuildSetupSettingsConsumer(
   isApplicationOperator: (userId: string) => boolean,
   store: GuildSettingsStore,
   supportHub: SupportHubDiscord,
+  ticketProvisioning: TicketProvisioningService,
+  executeGuildOperation?: ExecuteGuildOperation,
 ): GuildSetupSettingsConsumer {
-  const setup = createGuildSetupService(store, supportHub);
+  const setup = createGuildSetupService(
+    store,
+    supportHub,
+    ticketProvisioning,
+    executeGuildOperation,
+  );
   const authorize = async (context: GuildSetupSettingsContext) => {
     if (context.guild === undefined) {
       return {
@@ -90,165 +104,235 @@ export function createGuildSetupSettingsConsumer(
   };
 
   const definition: SettingsDefinition<GuildSetupSettingsContext> = {
-    title: "Prod settings",
+    title: "Settings",
     accentColor: 0x5865f2,
     categories: [
       {
         id: "setup",
         label: "Setup",
-        description:
-          "Configure this server's private support hub and assistant.",
+        description: "Configure basic setup for Prod.",
+        authorize,
+        fields: [
+          {
+            kind: "channel-select",
+            id: "hub-channel",
+            label: "Support channel",
+            description: "Choose where Prod manages support threads.",
+            load: async (context) => {
+              const state = await setup.get(requireGuild(context));
+              return {
+                channelTypes: [ChannelType.GuildText],
+                minValues: 1,
+                maxValues: 1,
+                ...(state.hubChannelId === undefined
+                  ? {}
+                  : { defaultChannelIds: [state.hubChannelId] }),
+              };
+            },
+            validate: async (values, context) => {
+              const selected = values[0];
+              if (selected === undefined) {
+                return [issue("Select one support channel.")];
+              }
+              const result = await setup.validateHub(
+                requireGuild(context),
+                selected.id,
+              );
+              return result.valid ? [] : result.issues.map(issue);
+            },
+            mutate: async (values, context) => {
+              const selected = values[0];
+              if (selected === undefined) {
+                return invalid([issue("Select one support channel.")]);
+              }
+              const guild = requireGuild(context);
+              const result = await setup.configureHub(guild, selected.id);
+              if (!result.valid) return invalid(result.issues.map(issue));
+              return { status: "success" as const };
+            },
+          },
+        ],
+      },
+      {
+        id: "identity",
+        label: "Identity",
+        description: "Configure Prod's personality and knowledge.",
         authorize,
         subcategories: [
           {
-            id: "hub",
-            label: "Support hub",
-            description:
-              "Choose the locked text channel that owns private support threads.",
-            fields: [
-              {
-                kind: "channel-select",
-                id: "hub-channel",
-                label: "Support hub channel",
-                description:
-                  "Prod validates its effective permissions before applying the empty-hub privacy boundary.",
-                load: async (context) => {
-                  const state = await setup.get(requireGuild(context));
-                  return {
-                    value:
-                      state.hubChannelId === undefined
-                        ? "Not configured"
-                        : `<#${state.hubChannelId}>`,
-                    channelTypes: [ChannelType.GuildText],
-                    minValues: 1,
-                    maxValues: 1,
-                    ...(state.hubChannelId === undefined
-                      ? {}
-                      : { defaultChannelIds: [state.hubChannelId] }),
-                  };
-                },
-                validate: async (values, context) => {
-                  const selected = values[0];
-                  if (selected === undefined) {
-                    return [issue("Select one support hub text channel.")];
-                  }
-                  const result = await setup.validateHub(
-                    requireGuild(context),
-                    selected.id,
-                  );
-                  return result.valid ? [] : result.issues.map(issue);
-                },
-                mutate: async (values, context) => {
-                  const selected = values[0];
-                  if (selected === undefined) {
-                    return invalid([
-                      issue("Select one support hub text channel."),
-                    ]);
-                  }
-                  const guild = requireGuild(context);
-                  const result = await setup.configureHub(guild, selected.id);
-                  if (!result.valid) return invalid(result.issues.map(issue));
-                  return { status: "success" as const };
-                },
-              },
-              {
-                kind: "button",
-                id: "hub-information",
-                label: "Hub information message",
-                description:
-                  "Post the support instructions once, or refresh the existing bot-managed message.",
-                load: async (context) => {
-                  const state = await setup.get(requireGuild(context));
-                  return {
-                    value:
-                      state.hubInformationMessageId === undefined
-                        ? "Not posted"
-                        : `[Open message](https://discord.com/channels/${state.guildId}/${state.hubChannelId!}/${state.hubInformationMessageId})`,
-                    buttonLabel:
-                      state.hubInformationMessageId === undefined
-                        ? "Post information"
-                        : "Refresh information",
-                    disabled: state.hubChannelId === undefined,
-                  };
-                },
-                mutate: async (context) => {
-                  const guild = requireGuild(context);
-                  const configured =
-                    await setup.refreshInformationMessage(guild);
-                  if (!configured.valid) {
-                    return invalid(configured.issues.map(issue));
-                  }
-                  return { status: "success" as const };
-                },
-              },
-              {
-                kind: "display",
-                id: "privacy",
-                label: "Empty-hub privacy",
-                load: () => ({
-                  value:
-                    "Reporters cannot send hub messages, send in threads, or create public/private threads. Ticket provisioning grants private-thread participation per reporter.",
-                }),
-              },
-            ],
-          },
-          {
-            id: "assistant",
-            label: "Assistant",
-            description:
-              "Configure the identity and tone used in support messages.",
+            id: "personality",
+            label: "Personality",
+            description: "Configure how Prod communicates with users.",
             fields: [
               {
                 kind: "modal",
-                id: "assistant-identity",
-                label: "Assistant identity",
-                title: "Edit assistant identity",
+                id: "assistant-system-prompt",
+                label: "Role",
+                title: "Edit role",
+                presentation: { kind: "preview", maxLength: 300 },
                 inputs: [
                   {
-                    id: "identity",
-                    label: "Display identity",
-                    placeholder: "Prod",
-                    minLength: 2,
-                    maxLength: 32,
+                    id: "system-prompt",
+                    label: "Role",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 3,
                   },
                 ],
                 load: async (context) => {
                   const value = (await setup.get(requireGuild(context)))
-                    .assistantIdentity;
+                    .systemPrompt;
                   return {
                     value,
-                    values: { identity: value },
+                    values: { "system-prompt": value },
                     buttonLabel: "Edit",
                   };
                 },
                 validate: (values) =>
-                  (values.identity?.trim().length ?? 0) < 2
+                  (values["system-prompt"]?.trim().length ?? 0) < 3
                     ? [
                         {
-                          inputId: "identity",
-                          message: "Use at least two visible characters.",
+                          inputId: "system-prompt",
+                          message: "Use at least three visible characters.",
                         },
                       ]
                     : [],
                 mutate: async (values, context) => {
-                  await setup.setAssistantIdentity(
+                  await setup.setSystemPrompt(
                     requireGuild(context),
-                    values.identity!,
+                    values["system-prompt"]!,
                   );
                 },
               },
               {
                 kind: "modal",
-                id: "assistant-tone",
-                label: "Assistant tone",
-                title: "Edit assistant tone",
+                id: "assistant-product",
+                label: "Product knowledge",
+                title: "Edit product knowledge",
+                presentation: { kind: "preview", maxLength: 300 },
+                inputs: [
+                  {
+                    id: "product-knowledge",
+                    label: "Product knowledge",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 3,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context)))
+                    .productKnowledgePrompt;
+                  return {
+                    value,
+                    values: { "product-knowledge": value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values["product-knowledge"]?.trim().length ?? 0) < 3
+                    ? [
+                        {
+                          inputId: "product-knowledge",
+                          message: "Use at least three visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setProductKnowledgePrompt(
+                    requireGuild(context),
+                    values["product-knowledge"]!,
+                  );
+                },
+              },
+              {
+                kind: "modal",
+                id: "assistant-workflow",
+                label: "Support workflow",
+                title: "Edit support workflow",
+                presentation: { kind: "preview", maxLength: 300 },
+                inputs: [
+                  {
+                    id: "support-workflow",
+                    label: "Support workflow",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 3,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context)))
+                    .supportWorkflowPrompt;
+                  return {
+                    value,
+                    values: { "support-workflow": value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values["support-workflow"]?.trim().length ?? 0) < 3
+                    ? [
+                        {
+                          inputId: "support-workflow",
+                          message: "Use at least three visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setSupportWorkflowPrompt(
+                    requireGuild(context),
+                    values["support-workflow"]!,
+                  );
+                },
+              },
+              {
+                kind: "modal",
+                id: "assistant-safety",
+                label: "Safety",
+                title: "Edit safety",
+                presentation: { kind: "preview", maxLength: 300 },
+                inputs: [
+                  {
+                    id: "safety",
+                    label: "Safety",
+                    style: TextInputStyle.Paragraph,
+                    minLength: 3,
+                  },
+                ],
+                load: async (context) => {
+                  const value = (await setup.get(requireGuild(context)))
+                    .safetyPrompt;
+                  return {
+                    value,
+                    values: { safety: value },
+                    buttonLabel: "Edit",
+                  };
+                },
+                validate: (values) =>
+                  (values.safety?.trim().length ?? 0) < 3
+                    ? [
+                        {
+                          inputId: "safety",
+                          message: "Use at least three visible characters.",
+                        },
+                      ]
+                    : [],
+                mutate: async (values, context) => {
+                  await setup.setSafetyPrompt(
+                    requireGuild(context),
+                    values.safety!,
+                  );
+                },
+              },
+              {
+                kind: "modal",
+                id: "assistant-style-prompt",
+                label: "Style prompt",
+                title: "Edit style prompt",
+                presentation: { kind: "preview", maxLength: 300 },
                 inputs: [
                   {
                     id: "tone",
-                    label: "Tone instruction",
+                    label: "Style prompt",
+                    style: TextInputStyle.Paragraph,
                     placeholder: "friendly, patient, and concise",
                     minLength: 3,
-                    maxLength: 500,
                   },
                 ],
                 load: async (context) => {
@@ -273,6 +357,12 @@ export function createGuildSetupSettingsConsumer(
                 },
               },
             ],
+          },
+          {
+            id: "knowledge-base",
+            label: "Knowledge base",
+            description: "Manage reusable fixes Prod can suggest to users.",
+            fields: [],
           },
         ],
       },
@@ -322,6 +412,7 @@ export function createGuildSetupSettingsConsumer(
 
   return Object.freeze({
     action,
+    reconcile: (guild: Guild) => setup.get(guild),
     handle: (interaction) =>
       runtime.handle(
         interaction,

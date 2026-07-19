@@ -14,6 +14,7 @@ import {
   HUB_BOT_PERMISSION_NAMES,
   HUB_PROTECTED_PERMISSION_NAMES,
   type HubPermissionOwnership,
+  type HubPermissionOwnershipV2,
   type HubPermissionState,
   type HubProtectedPermissionName,
 } from "./hub-permission-ownership.js";
@@ -23,12 +24,14 @@ export const EMPTY_HUB_REPORTER_OVERWRITE = Object.freeze({
   SendMessagesInThreads: false,
   CreatePublicThreads: false,
   CreatePrivateThreads: false,
+  ManageThreads: false,
 } as const);
 
 export const SUPPORT_HUB_BOT_OVERWRITE = Object.freeze({
   SendMessages: true,
   SendMessagesInThreads: true,
   CreatePrivateThreads: true,
+  ManageThreads: true,
 } as const);
 
 export const SUPPORT_HUB_INFORMATION_MARKER =
@@ -39,6 +42,7 @@ const protectedPermissionBits = Object.freeze({
   SendMessagesInThreads: PermissionFlagsBits.SendMessagesInThreads,
   CreatePublicThreads: PermissionFlagsBits.CreatePublicThreads,
   CreatePrivateThreads: PermissionFlagsBits.CreatePrivateThreads,
+  ManageThreads: PermissionFlagsBits.ManageThreads,
 } satisfies Readonly<Record<HubProtectedPermissionName, bigint>>);
 
 const requiredBotPermissions = Object.freeze([
@@ -104,6 +108,13 @@ type HubResolution =
   | Readonly<{ valid: true; channel: TextChannel; botMember: GuildMember }>
   | Readonly<{ valid: false; issues: readonly string[] }>;
 
+const isManagedInformationMessage = (
+  message: Message,
+  botUserId: string,
+): boolean =>
+  message.author.id === botUserId &&
+  message.content.includes(SUPPORT_HUB_INFORMATION_MARKER);
+
 const isDiscordErrorCode = (error: unknown, code: number): boolean =>
   typeof error === "object" &&
   error !== null &&
@@ -124,25 +135,6 @@ const fetchTextChannel = async (
 ): Promise<TextChannel | undefined> => {
   const channel = await guild.channels.fetch(channelId, { force });
   return channel?.type === ChannelType.GuildText ? channel : undefined;
-};
-
-const conflictingOverwriteIssue = (
-  channel: TextChannel,
-  guild: Guild,
-  botMember: GuildMember,
-): string | undefined => {
-  const hasConflict = channel.permissionOverwrites.cache.some(
-    (overwrite) =>
-      overwrite.id !== guild.roles.everyone.id &&
-      overwrite.id !== botMember.id &&
-      guild.roles.cache.get(overwrite.id)?.tags?.botId !== botMember.id &&
-      HUB_PROTECTED_PERMISSION_NAMES.some((name) =>
-        overwrite.allow.has(protectedPermissionBits[name]),
-      ),
-  );
-  return hasConflict
-    ? "Remove channel-specific role or member allows for sending messages or creating threads before using this channel as the support hub."
-    : undefined;
 };
 
 const resolveHub = async (
@@ -170,14 +162,12 @@ const resolveHub = async (
   const missing = requiredBotPermissions
     .filter(([, permission]) => permissions?.has(permission) !== true)
     .map(([name]) => name);
-  const conflict = conflictingOverwriteIssue(channel, guild, botMember);
   const issues = [
     ...(missing.length === 0
       ? []
       : [
           `Prod is missing required permissions in this channel: ${missing.join(", ")}.`,
         ]),
-    ...(conflict === undefined ? [] : [conflict]),
   ];
   return issues.length === 0
     ? { valid: true, channel, botMember }
@@ -199,7 +189,7 @@ const permissionState = (
 const permissionSnapshot = (
   channel: TextChannel,
   targetId: string,
-): HubPermissionOwnership["everyone"] =>
+): HubPermissionOwnershipV2["everyone"] =>
   Object.freeze(
     Object.fromEntries(
       HUB_PROTECTED_PERMISSION_NAMES.map((name) => [
@@ -213,9 +203,9 @@ const captureOwnership = (
   channel: TextChannel,
   guild: Guild,
   botMember: GuildMember,
-): HubPermissionOwnership =>
+): HubPermissionOwnershipV2 =>
   Object.freeze({
-    version: 1,
+    version: 2,
     channelId: channel.id,
     botMemberId: botMember.id,
     everyone: permissionSnapshot(channel, guild.roles.everyone.id),
@@ -231,16 +221,20 @@ const stateValue = (state: HubPermissionState): boolean | null => {
 const restorationPatch = (
   channel: TextChannel,
   targetId: string,
-  original: HubPermissionOwnership["everyone"],
+  original: Readonly<
+    Partial<Record<HubProtectedPermissionName, HubPermissionState>>
+  >,
   ownedNames: readonly HubProtectedPermissionName[],
   ownedState: HubPermissionState,
 ): PermissionOverwriteOptions =>
   Object.fromEntries(
-    ownedNames.flatMap((name) =>
-      permissionState(channel, targetId, name) === ownedState
-        ? [[name, stateValue(original[name])]]
-        : [],
-    ),
+    ownedNames.flatMap((name) => {
+      const originalState = original[name];
+      return originalState !== undefined &&
+        permissionState(channel, targetId, name) === ownedState
+        ? [[name, stateValue(originalState)]]
+        : [];
+    }),
   );
 
 const assertOwnershipIdentity = async (
@@ -260,33 +254,70 @@ const applyOwnedPermissions = async (
   guild: Guild,
   channel: TextChannel,
   botMember: GuildMember,
+  ownership: HubPermissionOwnership,
 ): Promise<void> => {
+  const protectedNames =
+    ownership.version === 1
+      ? HUB_PROTECTED_PERMISSION_NAMES.filter(
+          (name) => name !== "ManageThreads",
+        )
+      : HUB_PROTECTED_PERMISSION_NAMES;
+  const botNames =
+    ownership.version === 1
+      ? HUB_BOT_PERMISSION_NAMES.filter((name) => name !== "ManageThreads")
+      : HUB_BOT_PERMISSION_NAMES;
   await channel.permissionOverwrites.edit(
     guild.roles.everyone,
-    EMPTY_HUB_REPORTER_OVERWRITE,
+    Object.fromEntries(
+      protectedNames.map((name) => [name, EMPTY_HUB_REPORTER_OVERWRITE[name]]),
+    ),
     { reason: "Configure Prod's empty support hub privacy boundary" },
   );
   await channel.permissionOverwrites.edit(
     botMember,
-    SUPPORT_HUB_BOT_OVERWRITE,
+    Object.fromEntries(
+      botNames.map((name) => [name, SUPPORT_HUB_BOT_OVERWRITE[name]]),
+    ),
     { reason: "Preserve Prod's support hub capabilities" },
   );
 };
 
+const upgradeOwnership = (
+  ownership: HubPermissionOwnership,
+  channel: TextChannel,
+  guild: Guild,
+  botMember: GuildMember,
+): HubPermissionOwnershipV2 =>
+  ownership.version === 2
+    ? ownership
+    : Object.freeze({
+        version: 2,
+        channelId: ownership.channelId,
+        botMemberId: ownership.botMemberId,
+        everyone: Object.freeze({
+          ...ownership.everyone,
+          ManageThreads: permissionState(
+            channel,
+            guild.roles.everyone.id,
+            "ManageThreads",
+          ),
+        }),
+        bot: Object.freeze({
+          ...ownership.bot,
+          ManageThreads: permissionState(
+            channel,
+            botMember.id,
+            "ManageThreads",
+          ),
+        }),
+      });
+
 const informationMessageContent = (assistantIdentity: string): string =>
   [
     `## ${assistantIdentity} support`,
-    "Ticket intake is not enabled yet. Once it is available, Prod will create invite-only private threads for support conversations.",
-    "Keep this channel empty, and do not post support details here.",
+    "Use `/issue`, `/report`, or `/debugshare` to open an invite-only private support thread.",
     SUPPORT_HUB_INFORMATION_MARKER,
   ].join("\n\n");
-
-const isManagedInformationMessage = (
-  message: Message,
-  botMember: GuildMember,
-): boolean =>
-  message.author.id === botMember.id &&
-  message.content.includes(SUPPORT_HUB_INFORMATION_MARKER);
 
 const managedInformationMessages = async (
   channel: TextChannel,
@@ -295,7 +326,7 @@ const managedInformationMessages = async (
 ): Promise<Message[]> => {
   const recent = await channel.messages.fetch({ limit: 100 });
   const managed = [...recent.values()].filter((message) =>
-    isManagedInformationMessage(message, botMember),
+    isManagedInformationMessage(message, botMember.id),
   );
   if (
     storedMessageId !== undefined &&
@@ -303,7 +334,8 @@ const managedInformationMessages = async (
   ) {
     try {
       const stored = await channel.messages.fetch(storedMessageId);
-      if (isManagedInformationMessage(stored, botMember)) managed.push(stored);
+      if (isManagedInformationMessage(stored, botMember.id))
+        managed.push(stored);
     } catch (error) {
       if (!isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMessage)) {
         throw error;
@@ -360,11 +392,22 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
     const channel = await fetchTextChannel(guild, ownership.channelId, true);
     if (channel === undefined) return;
 
+    const protectedNames =
+      ownership.version === 1
+        ? HUB_PROTECTED_PERMISSION_NAMES.filter(
+            (name) => name !== "ManageThreads",
+          )
+        : HUB_PROTECTED_PERMISSION_NAMES;
+    const botNames =
+      ownership.version === 1
+        ? HUB_BOT_PERMISSION_NAMES.filter((name) => name !== "ManageThreads")
+        : HUB_BOT_PERMISSION_NAMES;
+
     const everyonePatch = restorationPatch(
       channel,
       guild.roles.everyone.id,
       ownership.everyone,
-      HUB_PROTECTED_PERMISSION_NAMES,
+      protectedNames,
       "deny",
     );
     if (Object.keys(everyonePatch).length > 0) {
@@ -381,7 +424,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
       refreshed,
       botMember.id,
       ownership.bot,
-      HUB_BOT_PERMISSION_NAMES,
+      botNames,
       "allow",
     );
     if (Object.keys(botPatch).length > 0) {
@@ -424,7 +467,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
     if (channel === undefined) {
       throw new Error("The configured support hub no longer exists");
     }
-    await applyOwnedPermissions(guild, channel, botMember);
+    await applyOwnedPermissions(guild, channel, botMember, ownership);
     const postcondition = await resolveHub(guild, ownership.channelId, true);
     if (!postcondition.valid) {
       throw new Error(postcondition.issues.join(" "));
@@ -455,8 +498,14 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
         );
       }
       const ownership =
-        existingOwnership ??
-        captureOwnership(resolution.channel, guild, resolution.botMember);
+        existingOwnership === undefined
+          ? captureOwnership(resolution.channel, guild, resolution.botMember)
+          : upgradeOwnership(
+              existingOwnership,
+              resolution.channel,
+              guild,
+              resolution.botMember,
+            );
       return { valid: true as const, permissionOwnership: ownership };
     },
     applyHub: async (guild: Guild, ownership: HubPermissionOwnership) => {
@@ -471,6 +520,7 @@ export const createSupportHubDiscord = (): SupportHubDiscord => {
         guild,
         resolution.channel,
         resolution.botMember,
+        ownership,
       );
       const postcondition = await resolveHub(guild, ownership.channelId, true);
       return postcondition.valid

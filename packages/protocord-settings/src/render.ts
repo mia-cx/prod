@@ -1,6 +1,7 @@
 import {
   ButtonStyle,
   ComponentType,
+  SeparatorSpacingSize,
   SelectMenuDefaultValueType,
   type APIActionRowComponent,
   type APIButtonComponentWithCustomId,
@@ -11,6 +12,7 @@ import {
   type APIMentionableSelectComponent,
   type APIMessageTopLevelComponent,
   type APISectionComponent,
+  type APISeparatorComponent,
   type APIStringSelectComponent,
   type APITextDisplayComponent,
 } from "discord.js";
@@ -26,6 +28,10 @@ import type {
   SettingsStringSelectField,
   SettingsSubcategory,
 } from "./contracts.js";
+import {
+  categoryPages,
+  isDirectSettingsCategory,
+} from "./category-layout.js";
 import { SETTINGS_LIMITS, validateSettingsDefinition } from "./definition.js";
 import { encodeSettingsCustomId } from "./routes.js";
 import {
@@ -56,6 +62,8 @@ export type SettingsViewNotice = Readonly<{
 export type SettingsViewRequest = Readonly<{
   categoryId?: string;
   subcategoryId?: string;
+  homePage?: number;
+  subcategoryPage?: number;
   page?: number;
   notice?: SettingsViewNotice;
 }>;
@@ -109,16 +117,42 @@ async function renderSettingsView<Context>(
   }
 
   const routeCategory = authorizedCategories[0]!;
-  const routeSubcategory = routeCategory.subcategories[0]!;
+  const routeSubcategory = categoryPages(routeCategory)[0]!;
+  const homePageCount = Math.ceil(
+    authorizedCategories.length / SETTINGS_LIMITS.categoriesPerHomePage,
+  );
+  const requestedHomePage = request.homePage ?? 0;
+  const homeCategories = authorizedCategories.slice(
+    requestedHomePage * SETTINGS_LIMITS.categoriesPerHomePage,
+    (requestedHomePage + 1) * SETTINGS_LIMITS.categoriesPerHomePage,
+  );
+  if (homeCategories.length === 0) {
+    throw stale("category page", String(requestedHomePage));
+  }
   const homeChildren: APIComponentInContainer[] = [
-    textDisplay(`# ${definition.title}\n## Settings`),
+    textDisplay(`# ${definition.title}`),
+    textDisplay(categorySummaryList(homeCategories)),
+  ];
+  if (homePageCount > 1) {
+    homeChildren.push(
+      homePageNavigation(
+        requestedHomePage,
+        homePageCount,
+        routeCategory.id,
+        routeSubcategory.id,
+      ),
+    );
+  }
+  homeChildren.push(
+    separator(),
+    textDisplay("Choose a category"),
     categoryNavigation(
       authorizedCategories,
       request.categoryId,
       routeCategory.id,
       routeSubcategory.id,
     ),
-  ];
+  );
   if (request.categoryId === undefined) {
     const components = [
       container("home", homeChildren, definition.accentColor),
@@ -126,7 +160,7 @@ async function renderSettingsView<Context>(
     constrainTextDisplays(components);
     return {
       components,
-      location: { page: 0, pageCount: 0 },
+      location: { page: requestedHomePage, pageCount: homePageCount },
     };
   }
 
@@ -146,11 +180,46 @@ async function renderSettingsView<Context>(
     );
   }
 
+  const directCategory = isDirectSettingsCategory(category);
   const categoryChildren: APIComponentInContainer[] = [
     textDisplay(nodeHeading(category.label, category.description)),
-    subcategoryNavigation(category, request.subcategoryId),
   ];
-  if (request.subcategoryId === undefined) {
+  if (!directCategory) {
+    const subcategories = categoryPages(category);
+    const subcategoryPageCount = Math.ceil(
+      subcategories.length / SETTINGS_LIMITS.subcategoriesPerOverviewPage,
+    );
+    const requestedSubcategoryPage = request.subcategoryPage ?? 0;
+    const overviewSubcategories = subcategories.slice(
+      requestedSubcategoryPage * SETTINGS_LIMITS.subcategoriesPerOverviewPage,
+      (requestedSubcategoryPage + 1) *
+        SETTINGS_LIMITS.subcategoriesPerOverviewPage,
+    );
+    if (overviewSubcategories.length === 0) {
+      throw stale("subcategory page", String(requestedSubcategoryPage));
+    }
+    categoryChildren.push(
+      textDisplay(subcategorySummaryList(overviewSubcategories)),
+    );
+    if (subcategoryPageCount > 1) {
+      categoryChildren.push(
+        subcategoryPageNavigation(
+          requestedSubcategoryPage,
+          subcategoryPageCount,
+          category.id,
+          subcategories[0]!.id,
+        ),
+      );
+    }
+    categoryChildren.push(
+      separator(),
+      textDisplay("Choose a settings page"),
+      subcategoryNavigation(category, request.subcategoryId),
+    );
+  } else {
+    categoryChildren.push(separator());
+  }
+  if (!directCategory && request.subcategoryId === undefined) {
     const components = [
       container("home", homeChildren, definition.accentColor),
       container("category", categoryChildren, definition.accentColor),
@@ -162,8 +231,14 @@ async function renderSettingsView<Context>(
     };
   }
 
-  const subcategory = selectSubcategory(category, request.subcategoryId);
-  const fieldPages = paginateFields(subcategory.fields, fixedComponentCount());
+  const subcategory = selectSubcategory(
+    category,
+    request.subcategoryId ?? category.id,
+  );
+  const fieldPages = paginateFields(
+    subcategory.fields,
+    fixedComponentCount(directCategory),
+  );
   const requestedPage = request.page ?? 0;
   const fields = fieldPages[requestedPage];
   if (fields === undefined) {
@@ -176,25 +251,33 @@ async function renderSettingsView<Context>(
     page: requestedPage,
     pageCount: fieldPages.length,
   };
-  const subcategoryChildren: APIComponentInContainer[] = [
-    textDisplay(nodeHeading(subcategory.label, subcategory.description)),
-  ];
+  const fieldChildren: APIComponentInContainer[] = directCategory
+    ? categoryChildren
+    : [textDisplay(nodeHeading(subcategory.label, subcategory.description))];
   if (request.notice !== undefined) {
     const marker = request.notice.kind === "success" ? "✅" : "⚠️";
-    subcategoryChildren.push(
+    fieldChildren.push(
       textDisplay(truncate(`${marker} ${request.notice.message}`, 4_000)),
     );
   }
   for (const field of fields) {
-    subcategoryChildren.push(...(await renderField(field, location, context)));
+    fieldChildren.push(...(await renderField(field, location, context)));
   }
   if (fieldPages.length > 1) {
-    subcategoryChildren.push(pageNavigation(location));
+    fieldChildren.push(pageNavigation(location));
   }
   const components: APIMessageTopLevelComponent[] = [
     container("home", homeChildren, definition.accentColor),
-    container("category", categoryChildren, definition.accentColor),
-    container("subcategory", subcategoryChildren, definition.accentColor),
+    ...(directCategory
+      ? [container("category", fieldChildren, definition.accentColor)]
+      : [
+          container("category", categoryChildren, definition.accentColor),
+          container(
+            "subcategory",
+            fieldChildren,
+            definition.accentColor,
+          ),
+        ]),
   ];
   constrainTextDisplays(components);
   return {
@@ -228,15 +311,19 @@ function selectSubcategory<Context>(
   category: SettingsCategory<Context>,
   requestedId: string,
 ): SettingsSubcategory<Context> {
-  const subcategory = category.subcategories.find(({ id }) => id === requestedId);
+  const subcategory = categoryPages(category).find(
+    ({ id }) => id === requestedId,
+  );
   if (subcategory === undefined) {
     throw stale("subcategory", requestedId);
   }
   return subcategory;
 }
 
-function fixedComponentCount(): number {
-  return 2;
+function fixedComponentCount(directCategory: boolean): number {
+  // Direct pages already contain both their heading and separator. Always
+  // reserve one more slot so a validation notice cannot overflow the page.
+  return directCategory ? 3 : 2;
 }
 
 function paginateFields<Context>(
@@ -288,6 +375,9 @@ function paginateFields<Context>(
 }
 
 function fieldComponentCost<Context>(field: SettingsField<Context>): number {
+  if (field.kind === "modal" && field.presentation?.kind === "preview") {
+    return 2;
+  }
   return ["string-select", "mentionable-select", "channel-select"].includes(
     field.kind,
   )
@@ -333,11 +423,36 @@ function renderModalField<Context>(
   location: ResolvedSettingsLocation,
   view: Awaited<ReturnType<SettingsModalField<Context>["load"]>>,
 ): readonly APIComponentInContainer[] {
+  const buttonLabel = view.buttonLabel || field.label;
+  const customId = encodeFieldRoute("modal", location, field.id);
+  if (field.presentation?.kind === "inline") {
+    return [
+      buttonSection(
+        `**${field.label}:**${view.value === undefined ? "" : ` ${view.value}`}`,
+        buttonLabel,
+        customId,
+        ButtonStyle.Secondary,
+        view.disabled,
+      ),
+    ];
+  }
+  if (field.presentation?.kind === "preview") {
+    return [
+      buttonSection(
+        `**${field.label}**`,
+        buttonLabel,
+        customId,
+        ButtonStyle.Secondary,
+        view.disabled,
+      ),
+      textDisplay(truncate(view.value ?? "", field.presentation.maxLength)),
+    ];
+  }
   return [
     buttonSection(
       fieldText(field, view.value),
-      view.buttonLabel || field.label,
-      encodeFieldRoute("modal", location, field.id),
+      buttonLabel,
+      customId,
       ButtonStyle.Secondary,
       view.disabled,
     ),
@@ -519,7 +634,8 @@ function subcategoryNavigation<Context>(
   category: SettingsCategory<Context>,
   selectedSubcategoryId: string | undefined,
 ): APIActionRowComponent<APIStringSelectComponent> {
-  const routeSubcategory = category.subcategories[0]!;
+  const subcategories = categoryPages(category);
+  const routeSubcategory = subcategories[0]!;
   return actionRow({
     type: ComponentType.StringSelect,
     custom_id: encodeSettingsCustomId({
@@ -531,7 +647,7 @@ function subcategoryNavigation<Context>(
     placeholder: "Choose a settings page",
     min_values: 1,
     max_values: 1,
-    options: category.subcategories.map((subcategory) => ({
+    options: subcategories.map((subcategory) => ({
       label: subcategory.label,
       value: subcategory.id,
       ...(subcategory.description === undefined
@@ -563,6 +679,80 @@ function pageNavigation(
         ? location.pageCount + 1
         : location.page + 1,
       location,
+    ),
+  );
+}
+
+function homePageNavigation(
+  page: number,
+  pageCount: number,
+  routeCategoryId: string,
+  routeSubcategoryId: string,
+): APIActionRowComponent<APIButtonComponentWithCustomId> {
+  const button = (
+    label: string,
+    targetPage: number,
+    disabled: boolean,
+  ): APIButtonComponentWithCustomId => ({
+    type: ComponentType.Button,
+    style: ButtonStyle.Secondary,
+    label,
+    custom_id: encodeSettingsCustomId({
+      action: "home-page",
+      categoryId: routeCategoryId,
+      subcategoryId: routeSubcategoryId,
+      page: targetPage,
+    }),
+    disabled,
+  });
+  return actionRow(
+    button("Previous", page === 0 ? 0 : page - 1, page === 0),
+    button(
+      `Page ${String(page + 1)} of ${String(pageCount)}`,
+      page,
+      true,
+    ),
+    button(
+      "Next",
+      page === pageCount - 1 ? page : page + 1,
+      page === pageCount - 1,
+    ),
+  );
+}
+
+function subcategoryPageNavigation(
+  page: number,
+  pageCount: number,
+  categoryId: string,
+  routeSubcategoryId: string,
+): APIActionRowComponent<APIButtonComponentWithCustomId> {
+  const button = (
+    label: string,
+    targetPage: number,
+    disabled: boolean,
+  ): APIButtonComponentWithCustomId => ({
+    type: ComponentType.Button,
+    style: ButtonStyle.Secondary,
+    label,
+    custom_id: encodeSettingsCustomId({
+      action: "subcategory-page",
+      categoryId,
+      subcategoryId: routeSubcategoryId,
+      page: targetPage,
+    }),
+    disabled,
+  });
+  return actionRow(
+    button("Previous", page === 0 ? 0 : page - 1, page === 0),
+    button(
+      `Page ${String(page + 1)} of ${String(pageCount)}`,
+      page,
+      true,
+    ),
+    button(
+      "Next",
+      page === pageCount - 1 ? page : page + 1,
+      page === pageCount - 1,
     ),
   );
 }
@@ -641,6 +831,14 @@ function textDisplay(content: string): APITextDisplayComponent {
   };
 }
 
+function separator(): APISeparatorComponent {
+  return {
+    type: ComponentType.Separator,
+    divider: true,
+    spacing: SeparatorSpacingSize.Small,
+  };
+}
+
 function constrainTextDisplays(
   components: readonly APIMessageTopLevelComponent[],
 ): void {
@@ -701,13 +899,49 @@ function nodeHeading(label: string, description: string | undefined): string {
     .join("\n");
 }
 
+function categorySummaryList<Context>(
+  categories: readonly SettingsCategory<Context>[],
+): string {
+  return [
+    ...categories.map((category) =>
+      category.description === undefined
+        ? `**${category.label}**`
+        : `**${category.label}:** ${truncate(
+            category.description,
+            SETTINGS_LIMITS.categorySummaryCharacters,
+          )}`,
+    ),
+  ].join("\n");
+}
+
+function subcategorySummaryList<Context>(
+  subcategories: readonly SettingsSubcategory<Context>[],
+): string {
+  return subcategories
+    .map((subcategory) =>
+      subcategory.description === undefined
+        ? `**${subcategory.label}**`
+        : `**${subcategory.label}:** ${truncate(
+            subcategory.description,
+            SETTINGS_LIMITS.categorySummaryCharacters,
+          )}`,
+    )
+    .join("\n");
+}
+
 function fieldText<Context>(
   field: SettingsField<Context>,
   value: string | undefined,
 ): string {
+  const stateIsRenderedByControl =
+    field.kind === "string-select" ||
+    field.kind === "mentionable-select" ||
+    field.kind === "channel-select";
   return [
-    `### ${field.label}`,
-    value === undefined ? undefined : `**Current:** ${value}`,
+    `## ${field.label}`,
+    value === undefined || stateIsRenderedByControl
+      ? undefined
+      : `**Current:** ${value}`,
     field.description,
   ]
     .filter((part) => part !== undefined)

@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { readFileSync } from "node:fs";
 
 import type { ProdDatabase } from "./database.js";
 import {
@@ -8,13 +9,28 @@ import {
 import { parseHubTransition, type HubTransition } from "./hub-transition.js";
 import { guildSettings } from "./schema.js";
 
+const loadPrompt = (filename: string): string =>
+  readFileSync(new URL(`../prompts/${filename}`, import.meta.url), "utf8").trim();
+
 export const DEFAULT_ASSISTANT_IDENTITY = "Prod";
-export const DEFAULT_ASSISTANT_TONE = "friendly, patient, and concise";
+export const DEFAULT_SYSTEM_PROMPT = loadPrompt("role.md");
+export const DEFAULT_PRODUCT_KNOWLEDGE_PROMPT = loadPrompt(
+  "product-knowledge.md",
+);
+export const DEFAULT_SUPPORT_WORKFLOW_PROMPT = loadPrompt(
+  "support-workflow.md",
+);
+export const DEFAULT_SAFETY_PROMPT = loadPrompt("safety.md");
+export const DEFAULT_ASSISTANT_TONE = loadPrompt("style.md");
 
 export type GuildSetupSettings = Readonly<{
   guildId: string;
   initialized: boolean;
   assistantIdentity: string;
+  systemPrompt: string;
+  productKnowledgePrompt: string;
+  supportWorkflowPrompt: string;
+  safetyPrompt: string;
   tone: string;
   hubChannelId?: string;
   hubInformationMessageId?: string;
@@ -31,6 +47,10 @@ export interface GuildSettingsStore {
   ): Promise<void>;
   setHubInformationMessage(guildId: string, messageId: string): Promise<void>;
   setAssistantIdentity(guildId: string, identity: string): Promise<void>;
+  setSystemPrompt(guildId: string, prompt: string): Promise<void>;
+  setProductKnowledgePrompt(guildId: string, prompt: string): Promise<void>;
+  setSupportWorkflowPrompt(guildId: string, prompt: string): Promise<void>;
+  setSafetyPrompt(guildId: string, prompt: string): Promise<void>;
   setTone(guildId: string, tone: string): Promise<void>;
   getHubTransition(guildId: string): Promise<HubTransition | undefined>;
   beginHubTransition(guildId: string, transition: HubTransition): Promise<void>;
@@ -72,6 +92,30 @@ const insertDefaultRows = (
     .insert(guildSettings)
     .values([
       { guildId, key: "initialized", value: "1", updatedAt },
+      {
+        guildId,
+        key: "system_prompt",
+        value: DEFAULT_SYSTEM_PROMPT,
+        updatedAt,
+      },
+      {
+        guildId,
+        key: "product_knowledge_prompt",
+        value: DEFAULT_PRODUCT_KNOWLEDGE_PROMPT,
+        updatedAt,
+      },
+      {
+        guildId,
+        key: "support_workflow_prompt",
+        value: DEFAULT_SUPPORT_WORKFLOW_PROMPT,
+        updatedAt,
+      },
+      {
+        guildId,
+        key: "safety_prompt",
+        value: DEFAULT_SAFETY_PROMPT,
+        updatedAt,
+      },
       {
         guildId,
         key: "assistant_identity",
@@ -172,6 +216,14 @@ export const createSqliteGuildSettingsStore = (
         initialized: values.get("initialized") === "1",
         assistantIdentity:
           values.get("assistant_identity") ?? DEFAULT_ASSISTANT_IDENTITY,
+        systemPrompt: values.get("system_prompt") ?? DEFAULT_SYSTEM_PROMPT,
+        productKnowledgePrompt:
+          values.get("product_knowledge_prompt") ??
+          DEFAULT_PRODUCT_KNOWLEDGE_PROMPT,
+        supportWorkflowPrompt:
+          values.get("support_workflow_prompt") ??
+          DEFAULT_SUPPORT_WORKFLOW_PROMPT,
+        safetyPrompt: values.get("safety_prompt") ?? DEFAULT_SAFETY_PROMPT,
         tone: values.get("tone") ?? DEFAULT_ASSISTANT_TONE,
         ...(hubChannelId === undefined ? {} : { hubChannelId }),
         ...(hubInformationMessageId === undefined
@@ -292,6 +344,76 @@ export const createSqliteGuildSettingsStore = (
         const timestamp = now();
         insertDefaultRows(transaction, guildId, timestamp);
         upsert(transaction, guildId, "tone", normalized, timestamp);
+      });
+    },
+    setSystemPrompt: async (guildId: string, prompt: string): Promise<void> => {
+      assertId("guildId", guildId);
+      const normalized = prompt.trim();
+      assertId("system prompt", normalized);
+      database.transaction((transaction) => {
+        const timestamp = now();
+        insertDefaultRows(transaction, guildId, timestamp);
+        upsert(
+          transaction,
+          guildId,
+          "system_prompt",
+          normalized,
+          timestamp,
+        );
+      });
+    },
+    setProductKnowledgePrompt: async (
+      guildId: string,
+      prompt: string,
+    ): Promise<void> => {
+      assertId("guildId", guildId);
+      const normalized = prompt.trim();
+      assertId("product knowledge prompt", normalized);
+      database.transaction((transaction) => {
+        const timestamp = now();
+        insertDefaultRows(transaction, guildId, timestamp);
+        upsert(
+          transaction,
+          guildId,
+          "product_knowledge_prompt",
+          normalized,
+          timestamp,
+        );
+      });
+    },
+    setSupportWorkflowPrompt: async (
+      guildId: string,
+      prompt: string,
+    ): Promise<void> => {
+      assertId("guildId", guildId);
+      const normalized = prompt.trim();
+      assertId("support workflow prompt", normalized);
+      database.transaction((transaction) => {
+        const timestamp = now();
+        insertDefaultRows(transaction, guildId, timestamp);
+        upsert(
+          transaction,
+          guildId,
+          "support_workflow_prompt",
+          normalized,
+          timestamp,
+        );
+      });
+    },
+    setSafetyPrompt: async (guildId: string, prompt: string): Promise<void> => {
+      assertId("guildId", guildId);
+      const normalized = prompt.trim();
+      assertId("safety prompt", normalized);
+      database.transaction((transaction) => {
+        const timestamp = now();
+        insertDefaultRows(transaction, guildId, timestamp);
+        upsert(
+          transaction,
+          guildId,
+          "safety_prompt",
+          normalized,
+          timestamp,
+        );
       });
     },
     getHubTransition: async (

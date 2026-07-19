@@ -1,4 +1,8 @@
-import type { ApplicationCommandData, Interaction, Message } from "discord.js";
+import type {
+  ApplicationCommandData,
+  Interaction,
+  Message,
+} from "discord.js";
 import type { Logger } from "pino";
 import {
   createDiscordUserSubject,
@@ -20,7 +24,10 @@ import {
 
 import type { DiscordActionSurface } from "../discord.js";
 import type { GuildSettingsStore } from "../guild-settings.js";
+import type { ExecuteGuildOperation } from "../guild-operation.js";
 import type { SupportHubDiscord } from "../support-hub.js";
+import type { TicketProvisioningService } from "../ticket-provisioning.js";
+import { createTicketAction } from "./create-ticket.js";
 import { pingAction } from "./ping.js";
 import { createGuildSetupSettingsConsumer } from "./settings.js";
 
@@ -31,7 +38,10 @@ export type ProdActionContext = Readonly<{
     member: DiscordMemberLike,
     context: AuthorizationContext,
   ) => UserAuthorizationSubject;
-  replyToTextCommand?: (content: string) => Promise<void>;
+  replyToTextCommand?: (
+    content: string,
+    deleteAfterMs?: number,
+  ) => Promise<void>;
 }>;
 
 export type ProdActionRuntime = DiscordActionSurface &
@@ -47,6 +57,8 @@ export type ProdActionRuntimeOptions = Readonly<{
   textCommandPrefix: string;
   guildSettingsStore: GuildSettingsStore;
   supportHubDiscord: SupportHubDiscord;
+  ticketProvisioningService: TicketProvisioningService;
+  executeGuildOperation?: ExecuteGuildOperation;
 }>;
 
 export const createProdActionRuntime = (
@@ -69,6 +81,8 @@ export const createProdActionRuntime = (
     isApplicationOperator,
     options.guildSettingsStore,
     options.supportHubDiscord,
+    options.ticketProvisioningService,
+    options.executeGuildOperation,
   );
   const textProvider = createTextCommandProvider<ProdActionContext>({
     prefix: options.textCommandPrefix,
@@ -85,6 +99,9 @@ export const createProdActionRuntime = (
     ],
   });
   registry.registerAction(pingAction);
+  registry.registerAction(
+    createTicketAction(options.ticketProvisioningService),
+  );
   registry.registerAction(settings.action);
 
   const handleMessage = textProvider.prefix
@@ -92,27 +109,29 @@ export const createProdActionRuntime = (
         const dispatched = await dispatchTextCommand({
           registry,
           provider: textProvider,
-          message: {
-            content: message.content,
-            author: {
-              id: message.author.id,
-              username: message.author.username,
-              globalName: message.author.globalName,
-              bot: message.author.bot,
-            },
-            webhookId: message.webhookId,
-            channelId: message.channelId,
-            guildId: message.guildId,
-          },
+          message,
           context: {
             logger,
             isApplicationOperator,
             createUserAuthorizationSubject,
-            replyToTextCommand: async (content) => {
-              await message.reply({
+            replyToTextCommand: async (content, deleteAfterMs) => {
+              const response = await message.reply({
                 content,
                 allowedMentions: { parse: [], repliedUser: false },
               });
+              if (deleteAfterMs !== undefined) {
+                const timer = setTimeout(() => {
+                  void response
+                    .delete()
+                    .catch((error: unknown) =>
+                      logger.error(
+                        { err: error },
+                        "failed to delete ticket text-command reply",
+                      ),
+                    );
+                }, deleteAfterMs);
+                timer.unref();
+              }
             },
           },
         });
@@ -133,6 +152,48 @@ export const createProdActionRuntime = (
       for (const userId of userIds) applicationOperatorUserIds.add(userId);
     },
     refreshCommands: (client) => registerDiscordCommands(client, registry),
+    reconcile: async (client) => {
+      const reconciliationFailures: unknown[] = [];
+      for (const guild of client.guilds.cache.values()) {
+        try {
+          await settings.reconcile(guild);
+        } catch (error) {
+          reconciliationFailures.push(error);
+        }
+      }
+      const discovery =
+        await options.ticketProvisioningService.discoverRecoveryThreads(
+          async (guildId) => client.guilds.fetch(guildId),
+        );
+      if (discovery.failed > 0) {
+        reconciliationFailures.push(
+          new Error(
+            `Prod could not discover ${String(discovery.failed)} interrupted ticket threads before recovery`,
+          ),
+        );
+      }
+      if (reconciliationFailures.length > 0) {
+        throw new AggregateError(
+          reconciliationFailures,
+          "Prod could not reconcile startup state",
+        );
+      }
+      const result = await options.ticketProvisioningService.recover(
+        async (guildId) => client.guilds.fetch(guildId),
+      );
+      const details = {
+        recoveredTicketCount: result.recovered,
+        failedTicketCount: result.failed,
+      };
+      if (result.failed > 0) {
+        logger.error(
+          details,
+          "ticket provisioning reconciliation completed with failures",
+        );
+      } else {
+        logger.info(details, "ticket provisioning reconciliation completed");
+      }
+    },
     handleInteraction: async (interaction: Interaction) => {
       const settingsResult = await settings.handle(interaction);
       if (settingsResult.matched) {
