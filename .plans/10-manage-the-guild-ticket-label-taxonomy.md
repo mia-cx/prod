@@ -45,6 +45,7 @@ ticket.
 - 2026-07-17: PR review also found that an unbounded name-and-description display could silently hide manageable labels at Discord's text limit.
 - 2026-07-17: A follow-up review found direct first-write store callers could bypass initialization. Resolution shares one transaction-scoped initializer across explicit initialization and creation, including domain-error commits.
 - 2026-07-19: Labels now have no inactive state. The settings UI uses one string select (maximum 25 labels) and appends edit/delete controls for the selected label. Deletion cascades only through `ticket_labels`, preserving tickets and their other labels.
-- 2026-07-19: Full `pnpm check` passes all 32 tasks with 180 app tests; `pnpm pack:check` passes all 15 tasks.
+- 2026-07-19: Full `pnpm check` passes all 32 tasks with 181 app tests; `pnpm pack:check` passes all 15 tasks.
 - 2026-07-19: The Labels page lists every label above its selector, then renders Edit and Delete together in one Action Row for the selected label. Descriptions are optional and no longer framed as AI-specific.
 - 2026-07-19: Follow-up review made nested-control visibility transitive, enforced ticket existence and guild ownership with two cascading foreign keys, and added recursive enforcement of Discord's 40-component message limit without changing the accepted Labels UI.
+- 2026-07-19: Label selection and delete-confirmation state now expires after 15 minutes and is capped at 1,000 least-recently-used settings sessions.

@@ -93,6 +93,15 @@ const labelSummary = (description: string): string => {
     : `${characters.slice(0, 49).join("")}…`;
 };
 
+const LABEL_SESSION_TTL_MS = 15 * 60 * 1_000;
+const LABEL_SESSION_LIMIT = 1_000;
+
+type LabelManagementSession = Readonly<{
+  selectedLabelId: string;
+  pendingDeletionLabelId?: string;
+  expiresAt: number;
+}>;
+
 const labelListItem = (label: TicketLabel, summarize = false): string => {
   const description =
     label.description === undefined
@@ -236,19 +245,51 @@ export function createGuildSetupSettingsConsumer(
       throw error;
     }
   };
-  const selectedLabelIds = new Map<string, string>();
-  const pendingLabelDeletions = new Set<string>();
+  const labelSessions = new Map<string, LabelManagementSession>();
+  const rememberLabelSession = (
+    sessionId: string,
+    selectedLabelId: string,
+    pendingDeletionLabelId?: string,
+  ): void => {
+    labelSessions.delete(sessionId);
+    labelSessions.set(sessionId, {
+      selectedLabelId,
+      ...(pendingDeletionLabelId === undefined
+        ? {}
+        : { pendingDeletionLabelId }),
+      expiresAt: Date.now() + LABEL_SESSION_TTL_MS,
+    });
+    if (labelSessions.size > LABEL_SESSION_LIMIT) {
+      const oldestSessionId = labelSessions.keys().next().value as
+        | string
+        | undefined;
+      if (oldestSessionId !== undefined) labelSessions.delete(oldestSessionId);
+    }
+  };
+  const readLabelSession = (
+    sessionId: string,
+  ): LabelManagementSession | undefined => {
+    const session = labelSessions.get(sessionId);
+    if (session === undefined) return undefined;
+    if (session.expiresAt <= Date.now()) {
+      labelSessions.delete(sessionId);
+      return undefined;
+    }
+    rememberLabelSession(
+      sessionId,
+      session.selectedLabelId,
+      session.pendingDeletionLabelId,
+    );
+    return labelSessions.get(sessionId);
+  };
   const selectedLabel = async (
     context: GuildSetupSettingsContext,
   ): Promise<TicketLabel | undefined> => {
-    const labelId = selectedLabelIds.get(context.settingsSessionId);
+    const labelId = readLabelSession(context.settingsSessionId)?.selectedLabelId;
     if (labelId === undefined) return undefined;
     const label = await labelStore.findById(requireGuild(context).id, labelId);
     if (label === undefined) {
-      selectedLabelIds.delete(context.settingsSessionId);
-      pendingLabelDeletions.delete(
-        `${context.settingsSessionId}:${labelId}`,
-      );
+      labelSessions.delete(context.settingsSessionId);
     }
     return label;
   };
@@ -261,11 +302,6 @@ export function createGuildSetupSettingsConsumer(
     }
     return label;
   };
-  const deletionKey = (
-    context: GuildSetupSettingsContext,
-    labelId: string,
-  ): string => `${context.settingsSessionId}:${labelId}`;
-
   const definition: SettingsDefinition<GuildSetupSettingsContext> = {
     title: "Settings",
     accentColor: 0x5865f2,
@@ -608,7 +644,7 @@ export function createGuildSetupSettingsConsumer(
                     description: modalText(values, "description"),
                   },
                 );
-                selectedLabelIds.set(context.settingsSessionId, created.id);
+                rememberLabelSession(context.settingsSessionId, created.id);
               }),
           },
           {
@@ -634,19 +670,16 @@ export function createGuildSetupSettingsConsumer(
               (await labelStore.list(requireGuild(context).id)).length > 0,
             load: async (context) => {
               const allLabels = await labelStore.list(requireGuild(context).id);
-              const storedSelectedId = selectedLabelIds.get(
+              const storedSelectedId = readLabelSession(
                 context.settingsSessionId,
-              );
+              )?.selectedLabelId;
               const selectedId = allLabels.some(
                 (label) => label.id === storedSelectedId,
               )
                 ? storedSelectedId
                 : undefined;
               if (storedSelectedId !== undefined && selectedId === undefined) {
-                selectedLabelIds.delete(context.settingsSessionId);
-                pendingLabelDeletions.delete(
-                  deletionKey(context, storedSelectedId),
-                );
+                labelSessions.delete(context.settingsSessionId);
               }
               return {
                 options: allLabels.map((label) => ({
@@ -669,7 +702,7 @@ export function createGuildSetupSettingsConsumer(
               if (labelId === undefined) {
                 return invalid([issue("Select one label.")]);
               }
-              selectedLabelIds.set(context.settingsSessionId, labelId);
+              rememberLabelSession(context.settingsSessionId, labelId);
               return { status: "success" };
             },
           },
@@ -746,24 +779,29 @@ export function createGuildSetupSettingsConsumer(
                     style: ButtonStyle.Danger,
                     load: async (context) => {
                       const label = await requireSelectedLabel(context);
-                      const pending = pendingLabelDeletions.has(
-                        deletionKey(context, label.id),
-                      );
+                      const pending =
+                        readLabelSession(context.settingsSessionId)
+                          ?.pendingDeletionLabelId === label.id;
                       return {
                         buttonLabel: pending ? "Confirm delete" : "Delete",
                       };
                     },
                     mutate: async (context) => {
                       const label = await requireSelectedLabel(context);
-                      const key = deletionKey(context, label.id);
-                      if (!pendingLabelDeletions.has(key)) {
-                        pendingLabelDeletions.add(key);
+                      const session = readLabelSession(
+                        context.settingsSessionId,
+                      );
+                      if (session?.pendingDeletionLabelId !== label.id) {
+                        rememberLabelSession(
+                          context.settingsSessionId,
+                          label.id,
+                          label.id,
+                        );
                         return { status: "success" };
                       }
                       return labelMutation(async () => {
                         await labelStore.delete(requireGuild(context).id, label.id);
-                        pendingLabelDeletions.delete(key);
-                        selectedLabelIds.delete(context.settingsSessionId);
+                        labelSessions.delete(context.settingsSessionId);
                       });
                     },
                   },

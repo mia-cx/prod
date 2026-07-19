@@ -208,6 +208,7 @@ const component = (
   route: Parameters<typeof encodeSettingsCustomId>[0],
   options: Readonly<{
     userId?: string;
+    messageId?: string;
     allowed?: readonly PermissionResolvable[];
     modalValue?: string;
     selectedValues?: readonly string[];
@@ -228,7 +229,7 @@ const component = (
     ),
     deferred: false,
     replied: false,
-    message: { id: "123456789012345699" },
+    message: { id: options.messageId ?? "123456789012345699" },
     values:
       kind === "channel"
         ? [hubChannelId]
@@ -846,6 +847,38 @@ describe("guild setup settings integration", () => {
     expect(payload.indexOf("`account`:")).toBeLessThan(
       payload.indexOf("Choose a label"),
     );
+  });
+
+  it("expires stale label-management session state", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-19T12:00:00.000Z"));
+      const { runtime, labelStore } = await setup();
+      await labelStore.ensureDefaults(guildId);
+      const bug = (await labelStore.findByName(guildId, "bug"))!;
+      const messageId = "label-session-1";
+      const select = component("string", labelSelectRoute, {
+        messageId,
+        selectedValues: [bug.id],
+      });
+      await runtime.handleInteraction(select as unknown as Interaction);
+
+      vi.advanceTimersByTime(15 * 60 * 1_000 + 1);
+      const staleDelete = component("button", labelDeleteRoute, { messageId });
+      await runtime.handleInteraction(staleDelete as unknown as Interaction);
+
+      expect(staleDelete.followUp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content:
+            "This settings control is outdated. Reopen settings and try again.",
+        }),
+      );
+      await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject(
+        { id: bug.id },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps label creation available when the taxonomy is empty", async () => {
