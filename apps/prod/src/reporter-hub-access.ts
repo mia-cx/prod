@@ -12,6 +12,7 @@ export const REPORTER_TICKET_HUB_OVERWRITE = Object.freeze({
   SendMessages: false,
   CreatePublicThreads: false,
   CreatePrivateThreads: false,
+  ManageThreads: false,
 } as const);
 
 export const REPORTER_TICKET_PERMISSION_NAMES = Object.freeze(
@@ -39,6 +40,7 @@ const permissionBits = Object.freeze({
   SendMessages: PermissionFlagsBits.SendMessages,
   CreatePublicThreads: PermissionFlagsBits.CreatePublicThreads,
   CreatePrivateThreads: PermissionFlagsBits.CreatePrivateThreads,
+  ManageThreads: PermissionFlagsBits.ManageThreads,
 } satisfies Readonly<Record<ReporterPermissionName, bigint>>);
 
 const permissionState = (

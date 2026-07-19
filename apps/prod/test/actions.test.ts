@@ -541,7 +541,6 @@ describe("Prod action runtime", () => {
       guild: message.guild,
       reporterUserId: "user-1",
       originatingAlias: "issue",
-      summary: "Poke crashes",
     });
     expect(reply).toHaveBeenCalledWith({
       content: "https://discord.com/channels/guild-1/thread-1",

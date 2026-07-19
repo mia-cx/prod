@@ -3,6 +3,7 @@ import {
   ChannelType,
   escapeMarkdown,
   OverwriteType,
+  PermissionFlagsBits,
   RESTJSONErrorCodes,
   Routes,
   ThreadAutoArchiveDuration,
@@ -20,6 +21,7 @@ import {
 } from "./guild-operation.js";
 import {
   findPublicSupportHubThreads,
+  findUnmanagedActivePrivateSupportHubThreads,
   findUnmanagedSupportHubMessages,
 } from "./support-hub.js";
 import {
@@ -62,6 +64,7 @@ export interface TicketProvisioningDiscord {
     guild: Guild,
     hubChannelId: string,
     reporter: GuildMember,
+    managedThreadIds: ReadonlySet<string>,
   ): Promise<void>;
   restoreReporterAccess(
     guild: Guild,
@@ -272,21 +275,42 @@ export const createTicketProvisioningDiscord =
           hub.permissionOverwrites.cache.get(reporterUserId),
         );
       },
-      grantReporterAccess: async (guild, hubChannelId, reporter) => {
+      grantReporterAccess: async (
+        guild,
+        hubChannelId,
+        reporter,
+        managedThreadIds,
+      ) => {
         const hub = await requireHub(guild, hubChannelId);
         const botMember = guild.members.me ?? (await guild.members.fetchMe());
-        const [publicThreads, unmanagedMessages] = await Promise.all([
+        const [publicThreads, unmanagedPrivateThreads, unmanagedMessages] =
+          await Promise.all([
           findPublicSupportHubThreads(hub),
+          findUnmanagedActivePrivateSupportHubThreads(hub, managedThreadIds),
           findUnmanagedSupportHubMessages(hub, botMember.id),
-        ]);
+          ]);
         if (publicThreads.length > 0) {
           throw new Error(
             "The support hub contains a public thread and cannot safely grant reporter access",
           );
         }
+        if (unmanagedPrivateThreads.length > 0) {
+          throw new Error(
+            "The support hub contains an unmanaged private thread and cannot safely grant reporter access",
+          );
+        }
         if (unmanagedMessages.length > 0) {
           throw new Error(
             "The support hub contains unmanaged messages and cannot safely grant reporter access",
+          );
+        }
+        if (
+          hub.permissionOverwrites.cache
+            .get(guild.roles.everyone.id)
+            ?.deny.has(PermissionFlagsBits.ManageThreads) !== true
+        ) {
+          throw new Error(
+            "Reconfigure the support hub before granting reporter access",
           );
         }
         await hub.permissionOverwrites.edit(
@@ -587,7 +611,7 @@ export const createTicketProvisioningService = (
         if (snapshot === undefined) {
           throw new Error("Reporter hub access ownership is missing");
         }
-        await discord.restoreReporterAccess(
+        await restoreReporterAccess(
           guild,
           ticket.hubChannelId,
           ticket.reporterUserId,
@@ -651,9 +675,19 @@ export const createTicketProvisioningService = (
       );
       await store.beginReporterAccess(ticket, snapshot);
       accessOwnershipStarted = true;
-      await discord.grantReporterAccess(guild, ticket.hubChannelId, reporter);
+      const managedThreadIds = new Set(
+        await store.listActiveThreadIds(ticket.guildId, ticket.hubChannelId),
+      );
+      await discord.grantReporterAccess(
+        guild,
+        ticket.hubChannelId,
+        reporter,
+        managedThreadIds,
+      );
       await store.recordProgress(ticket.id, "reporter_access_granted");
-      threadId ??= await discord.findTicketThread(guild, ticket);
+      if (threadId === undefined && recovering) {
+        threadId = await discord.findTicketThread(guild, ticket);
+      }
       if (threadId === undefined) {
         threadId = await discord.createTicketThread(guild, ticket);
         createdThreadId = threadId;
@@ -764,6 +798,30 @@ export const createTicketProvisioningService = (
             guild.id,
             hubChannelId,
           );
+          const resumableReporterIds = new Set(
+            ownerships.map(({ reporterUserId }) => reporterUserId),
+          );
+          const allOwnerships = await store.listReporterAccess(
+            guild.id,
+            hubChannelId,
+          );
+          for (const ownership of allOwnerships) {
+            if (resumableReporterIds.has(ownership.reporterUserId)) continue;
+            await restoreReporterAccess(
+              guild,
+              hubChannelId,
+              ownership.reporterUserId,
+              ownership.snapshot,
+            );
+            await store.finishReporterAccessFor(
+              guild.id,
+              hubChannelId,
+              ownership.reporterUserId,
+            );
+          }
+          const managedThreadIds = new Set(
+            await store.listActiveThreadIds(guild.id, hubChannelId),
+          );
           let resumed = 0;
           for (const ownership of ownerships) {
             let reporter: GuildMember;
@@ -778,7 +836,12 @@ export const createTicketProvisioningService = (
               }
               throw error;
             }
-            await discord.grantReporterAccess(guild, hubChannelId, reporter);
+            await discord.grantReporterAccess(
+              guild,
+              hubChannelId,
+              reporter,
+              managedThreadIds,
+            );
             resumed += 1;
           }
           return resumed;

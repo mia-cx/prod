@@ -134,14 +134,8 @@ export const createTicketAction = (
     }),
     textCommandTrigger<CreateTicketInput, ProdActionContext>({
       name: alias,
-      description: "Open a private support ticket",
-      parse: (argumentTail) => {
-        const summary = argumentTail.trim();
-        return {
-          alias,
-          ...(summary.length === 0 ? {} : { summary }),
-        };
-      },
+      description: "Open a private support ticket; add details inside",
+      parse: () => ({ alias }),
       present: async (_trigger, _message, outcome, context) => {
         await context.replyToTextCommand?.(outcomeContent(outcome), 30_000);
       },

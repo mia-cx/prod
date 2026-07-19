@@ -16,6 +16,7 @@ const emptySnapshot: ReporterHubAccessSnapshot = {
     SendMessages: "unset",
     CreatePublicThreads: "unset",
     CreatePrivateThreads: "unset",
+    ManageThreads: "unset",
   },
 };
 

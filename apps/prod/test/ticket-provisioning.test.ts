@@ -48,6 +48,7 @@ const emptyAccessSnapshot: ReporterHubAccessSnapshot = {
     SendMessages: "unset",
     CreatePublicThreads: "unset",
     CreatePrivateThreads: "unset",
+    ManageThreads: "unset",
   },
 };
 const reporter = { id: "reporter-1" } as GuildMember;
@@ -162,6 +163,7 @@ describe("ticket provisioning", () => {
       guild,
       "hub-new",
       reporter,
+      new Set(),
     );
     connection.close();
   });
@@ -340,6 +342,7 @@ describe("ticket provisioning", () => {
       expect(discord.grantReporterAccess).toHaveBeenCalledBefore(
         vi.mocked(discord.createTicketThread),
       );
+      expect(discord.findTicketThread).not.toHaveBeenCalled();
       expect(discord.addReporter).toHaveBeenCalledWith(
         guild,
         "thread-1",
@@ -494,6 +497,53 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("retries orphaned reporter access after failed compensation", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture({
+      restoreReporterAccess: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("restore unavailable one"))
+        .mockRejectedValueOnce(new Error("restore unavailable two"))
+        .mockRejectedValueOnce(new Error("restore unavailable three"))
+        .mockResolvedValueOnce(undefined),
+    });
+    const failingStore = {
+      ...store,
+      recordProgress: vi
+        .fn(store.recordProgress)
+        .mockRejectedValueOnce(new Error("controlled database failure")),
+    };
+    const service = createTicketProvisioningService(
+      settings,
+      failingStore,
+      discord,
+      { createId: () => "ticket-orphaned-access" },
+    );
+    try {
+      await expect(
+        service.open({
+          guild,
+          reporterUserId: "reporter-1",
+          originatingAlias: "issue",
+        }),
+      ).rejects.toMatchObject({ name: "TicketProvisioningError" });
+      expect(discord.restoreReporterAccess).toHaveBeenCalledTimes(3);
+      const failed = (await store.get("ticket-orphaned-access"))!;
+      expect(failed.status).toBe("failed");
+      await expect(store.getReporterAccess(failed)).resolves.toEqual(
+        emptyAccessSnapshot,
+      );
+
+      await expect(service.resumeHubAccess(guild, "hub-1")).resolves.toBe(0);
+      expect(discord.restoreReporterAccess).toHaveBeenCalledTimes(4);
+      await expect(store.getReporterAccess(failed)).resolves.toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("fails an admitted ticket before access ownership without restoring unknown state", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -635,18 +685,20 @@ describe("ticket provisioning", () => {
         guild,
         "hub-1",
         reporters.get("reporter-1"),
+        new Set(),
       );
       expect(discord.grantReporterAccess).toHaveBeenCalledWith(
         guild,
         "hub-1",
         reporters.get("reporter-2"),
+        new Set(),
       );
     } finally {
       connection.close();
     }
   });
 
-  it("never resumes retained ownership for a failed ticket", async () => {
+  it("restores retained ownership for a failed ticket during resumption", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
     const store = createSqliteTicketStore(connection.database);
@@ -665,14 +717,14 @@ describe("ticket provisioning", () => {
       await expect(service.resumeHubAccess(guild, "hub-1")).resolves.toBe(0);
       expect(discord.validateReporter).not.toHaveBeenCalled();
       expect(discord.grantReporterAccess).not.toHaveBeenCalled();
-
-      await expect(service.suspendHubAccess(guild, "hub-1")).resolves.toBe(1);
       expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
         guild,
         "hub-1",
         "reporter-failed",
         emptyAccessSnapshot,
       );
+      await expect(store.getReporterAccess(failed)).resolves.toBeUndefined();
+      await expect(service.suspendHubAccess(guild, "hub-1")).resolves.toBe(0);
     } finally {
       connection.close();
     }
@@ -716,6 +768,7 @@ describe("ticket provisioning", () => {
         guild,
         "hub-1",
         remainingReporter,
+        new Set(),
       );
     } finally {
       connection.close();
@@ -992,14 +1045,31 @@ describe("Discord ticket privacy adapter", () => {
     const edit = vi.fn().mockResolvedValue(undefined);
     const send = vi.fn();
     const mockGuild = {
+      roles: { everyone: { id: "everyone" } },
       members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
           type: ChannelType.GuildText,
-          permissionOverwrites: { edit },
+          permissionOverwrites: {
+            edit,
+            cache: new Collection([
+              [
+                "everyone",
+                { deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads) },
+              ],
+            ]),
+          },
           threads: {
             fetchActive: vi.fn().mockResolvedValue({
-              threads: new Collection(),
+              threads: new Collection([
+                [
+                  "managed-private",
+                  {
+                    id: "managed-private",
+                    type: ChannelType.PrivateThread,
+                  },
+                ],
+              ]),
             }),
             fetchArchived: vi.fn().mockResolvedValue({
               threads: new Collection(),
@@ -1018,6 +1088,7 @@ describe("Discord ticket privacy adapter", () => {
       mockGuild,
       "hub-1",
       reporter,
+      new Set(["managed-private"]),
     );
 
     expect(edit).toHaveBeenCalledWith(
@@ -1036,6 +1107,7 @@ describe("Discord ticket privacy adapter", () => {
       SendMessages: false,
       CreatePublicThreads: false,
       CreatePrivateThreads: false,
+      ManageThreads: false,
     });
     expect(send).not.toHaveBeenCalled();
   });
@@ -1043,11 +1115,20 @@ describe("Discord ticket privacy adapter", () => {
   it("refuses reporter access while the hub contains a public thread", async () => {
     const edit = vi.fn();
     const mockGuild = {
+      roles: { everyone: { id: "everyone" } },
       members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
           type: ChannelType.GuildText,
-          permissionOverwrites: { edit },
+          permissionOverwrites: {
+            edit,
+            cache: new Collection([
+              [
+                "everyone",
+                { deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads) },
+              ],
+            ]),
+          },
           threads: {
             fetchActive: vi.fn().mockResolvedValue({
               threads: new Collection([
@@ -1074,19 +1155,85 @@ describe("Discord ticket privacy adapter", () => {
         mockGuild,
         "hub-1",
         reporter,
+        new Set(),
       ),
     ).rejects.toThrow("public thread");
+    expect(edit).not.toHaveBeenCalled();
+  });
+
+  it("refuses reporter access while the hub contains an unmanaged private thread", async () => {
+    const edit = vi.fn();
+    const mockGuild = {
+      roles: { everyone: { id: "everyone" } },
+      members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
+      channels: {
+        fetch: vi.fn().mockResolvedValue({
+          type: ChannelType.GuildText,
+          permissionOverwrites: {
+            edit,
+            cache: new Collection([
+              [
+                "everyone",
+                {
+                  deny: new PermissionsBitField(
+                    PermissionFlagsBits.ManageThreads,
+                  ),
+                },
+              ],
+            ]),
+          },
+          threads: {
+            fetchActive: vi.fn().mockResolvedValue({
+              threads: new Collection([
+                [
+                  "unmanaged-private",
+                  {
+                    id: "unmanaged-private",
+                    type: ChannelType.PrivateThread,
+                  },
+                ],
+              ]),
+            }),
+            fetchArchived: vi.fn().mockResolvedValue({
+              threads: new Collection(),
+              hasMore: false,
+            }),
+          },
+          messages: {
+            fetch: vi.fn().mockResolvedValue(new Collection()),
+          },
+        }),
+      },
+    } as unknown as Guild;
+
+    await expect(
+      createTicketProvisioningDiscord().grantReporterAccess(
+        mockGuild,
+        "hub-1",
+        reporter,
+        new Set(),
+      ),
+    ).rejects.toThrow("unmanaged private thread");
     expect(edit).not.toHaveBeenCalled();
   });
 
   it("refuses reporter access while the hub contains unmanaged history", async () => {
     const edit = vi.fn();
     const mockGuild = {
+      roles: { everyone: { id: "everyone" } },
       members: { me: { id: "bot-1" }, fetchMe: vi.fn() },
       channels: {
         fetch: vi.fn().mockResolvedValue({
           type: ChannelType.GuildText,
-          permissionOverwrites: { edit },
+          permissionOverwrites: {
+            edit,
+            cache: new Collection([
+              [
+                "everyone",
+                { deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads) },
+              ],
+            ]),
+          },
           threads: {
             fetchActive: vi.fn().mockResolvedValue({
               threads: new Collection(),
@@ -1119,6 +1266,7 @@ describe("Discord ticket privacy adapter", () => {
         mockGuild,
         "hub-1",
         reporter,
+        new Set(),
       ),
     ).rejects.toThrow("unmanaged messages");
     expect(edit).not.toHaveBeenCalled();

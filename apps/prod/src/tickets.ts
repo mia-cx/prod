@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, inArray, ne } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, ne } from "drizzle-orm";
 
 import type { ProdDatabase } from "./database.js";
 import {
@@ -53,6 +53,10 @@ export interface TicketStore {
   get(ticketId: string): Promise<Ticket | undefined>;
   listProvisioning(): Promise<readonly Ticket[]>;
   hasActiveTickets(guildId: string, hubChannelId: string): Promise<boolean>;
+  listActiveThreadIds(
+    guildId: string,
+    hubChannelId: string,
+  ): Promise<readonly string[]>;
   hasOtherActiveTicket(ticket: Ticket): Promise<boolean>;
   beginReporterAccess(
     ticket: Ticket,
@@ -62,6 +66,11 @@ export interface TicketStore {
     ticket: Ticket,
   ): Promise<ReporterHubAccessSnapshot | undefined>;
   finishReporterAccess(ticket: Ticket): Promise<void>;
+  finishReporterAccessFor(
+    guildId: string,
+    hubChannelId: string,
+    reporterUserId: string,
+  ): Promise<void>;
   listReporterAccess(
     guildId: string,
     hubChannelId: string,
@@ -326,6 +335,20 @@ export const createSqliteTicketStore = (
           ),
         )
         .get() !== undefined,
+    listActiveThreadIds: async (guildId: string, hubChannelId: string) =>
+      database
+        .select({ threadId: tickets.threadId })
+        .from(tickets)
+        .where(
+          and(
+            eq(tickets.guildId, guildId),
+            eq(tickets.hubChannelId, hubChannelId),
+            inArray(tickets.status, ["provisioning", "open"]),
+            isNotNull(tickets.threadId),
+          ),
+        )
+        .all()
+        .flatMap(({ threadId }) => (threadId === null ? [] : [threadId])),
     hasOtherActiveTicket: async (ticket: Ticket) =>
       database
         .select({ id: tickets.id })
@@ -397,6 +420,22 @@ export const createSqliteTicketStore = (
             eq(reporterHubAccess.guildId, ticket.guildId),
             eq(reporterHubAccess.hubChannelId, ticket.hubChannelId),
             eq(reporterHubAccess.reporterUserId, ticket.reporterUserId),
+          ),
+        )
+        .run();
+    },
+    finishReporterAccessFor: async (
+      guildId: string,
+      hubChannelId: string,
+      reporterUserId: string,
+    ) => {
+      database
+        .delete(reporterHubAccess)
+        .where(
+          and(
+            eq(reporterHubAccess.guildId, guildId),
+            eq(reporterHubAccess.hubChannelId, hubChannelId),
+            eq(reporterHubAccess.reporterUserId, reporterUserId),
           ),
         )
         .run();

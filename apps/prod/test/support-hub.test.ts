@@ -261,11 +261,13 @@ describe("Discord support hub", () => {
     expect(reporter.has(PermissionFlagsBits.SendMessagesInThreads)).toBe(false);
     expect(reporter.has(PermissionFlagsBits.CreatePublicThreads)).toBe(false);
     expect(reporter.has(PermissionFlagsBits.CreatePrivateThreads)).toBe(false);
+    expect(reporter.has(PermissionFlagsBits.ManageThreads)).toBe(false);
     expect(EMPTY_HUB_REPORTER_OVERWRITE).toEqual({
       SendMessages: false,
       SendMessagesInThreads: false,
       CreatePublicThreads: false,
       CreatePrivateThreads: false,
+      ManageThreads: false,
     });
   });
 
@@ -321,6 +323,7 @@ describe("Discord support hub", () => {
         PermissionFlagsBits.SendMessages,
         PermissionFlagsBits.CreatePublicThreads,
         PermissionFlagsBits.CreatePrivateThreads,
+        PermissionFlagsBits.ManageThreads,
       ],
     );
 
@@ -352,6 +355,89 @@ describe("Discord support hub", () => {
       1,
     );
     expect(remove).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects active and archived private threads when adopting a hub", async () => {
+    const hub = createSupportHubDiscord();
+    for (const location of ["active", "archived"] as const) {
+      const state = fixture();
+      state[`${location}Threads`].set("private-1", {
+        id: "private-1",
+        type: ChannelType.PrivateThread,
+      });
+
+      await expect(hub.prepareHub(state.guild, "hub-1")).resolves.toEqual({
+        valid: false,
+        issues: [expect.stringContaining("Remove private threads")],
+      });
+      expect(state.editOverwrite).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects channel-specific Manage Threads grants", async () => {
+    const hub = createSupportHubDiscord();
+    for (const targetId of ["role-1", "member-1"]) {
+      const state = fixture();
+      state.addOverwrite(targetId, [PermissionFlagsBits.ManageThreads]);
+
+      await expect(hub.validateHub(state.guild, "hub-1")).resolves.toEqual({
+        valid: false,
+        issues: [expect.stringContaining("channel-specific role or member")],
+      });
+    }
+  });
+
+  it("upgrades version-one ownership without losing Manage Threads state", async () => {
+    const hub = createSupportHubDiscord();
+    const state = fixture();
+    state.addOverwrite(state.everyone.id, [PermissionFlagsBits.ManageThreads]);
+    state.addOverwrite(
+      state.botMember.id,
+      [PermissionFlagsBits.ManageThreads],
+    );
+    const versionOneOwnership = {
+      version: 1 as const,
+      channelId: "hub-1",
+      botMemberId: "bot-1",
+      everyone: {
+        SendMessages: "unset" as const,
+        SendMessagesInThreads: "unset" as const,
+        CreatePublicThreads: "unset" as const,
+        CreatePrivateThreads: "unset" as const,
+      },
+      bot: {
+        SendMessages: "unset" as const,
+        SendMessagesInThreads: "unset" as const,
+        CreatePublicThreads: "unset" as const,
+        CreatePrivateThreads: "unset" as const,
+      },
+    };
+
+    const prepared = await hub.prepareHub(
+      state.guild,
+      "hub-1",
+      versionOneOwnership,
+    );
+    expect(prepared.valid).toBe(true);
+    if (!prepared.valid) return;
+    expect(prepared.permissionOwnership).toMatchObject({
+      version: 2,
+      everyone: { ManageThreads: "allow" },
+      bot: { ManageThreads: "allow" },
+    });
+
+    await hub.applyHub(state.guild, prepared.permissionOwnership);
+    await hub.releaseHub(state.guild, prepared.permissionOwnership);
+    expect(
+      state.overwriteCache
+        .get(state.everyone.id)
+        ?.allow.has(PermissionFlagsBits.ManageThreads),
+    ).toBe(true);
+    expect(
+      state.overwriteCache
+        .get(state.botMember.id)
+        ?.allow.has(PermissionFlagsBits.ManageThreads),
+    ).toBe(true);
   });
 
   it("treats a concurrently deleted public thread as already cleaned", async () => {
