@@ -160,7 +160,7 @@ async function renderSettingsView<Context>(
     const components = [
       container("home", homeChildren, definition.accentColor),
     ];
-    constrainTextDisplays(components);
+    constrainMessage(components);
     return {
       components,
       location: { page: requestedHomePage, pageCount: homePageCount },
@@ -227,7 +227,7 @@ async function renderSettingsView<Context>(
       container("home", homeChildren, definition.accentColor),
       container("category", categoryChildren, definition.accentColor),
     ];
-    constrainTextDisplays(components);
+    constrainMessage(components);
     return {
       components,
       location: { categoryId: category.id, page: 0, pageCount: 0 },
@@ -299,7 +299,7 @@ async function renderSettingsView<Context>(
       definition.accentColor,
     )),
   ];
-  constrainTextDisplays(components);
+  constrainMessage(components);
   return {
     components,
     location,
@@ -942,6 +942,39 @@ function separator(): APISeparatorComponent {
     divider: true,
     spacing: SeparatorSpacingSize.Small,
   };
+}
+
+function constrainMessage(
+  components: readonly APIMessageTopLevelComponent[],
+): void {
+  const componentCount = components.reduce(
+    (total, component) => total + countComponentTree(component),
+    0,
+  );
+  if (componentCount > SETTINGS_LIMITS.messageComponents) {
+    throw new SettingsViewError(
+      "invalid-view",
+      `settings message exceeds ${String(SETTINGS_LIMITS.messageComponents)} total components`,
+    );
+  }
+  constrainTextDisplays(components);
+}
+
+function countComponentTree(component: object): number {
+  const nested = component as Readonly<{
+    components?: readonly object[];
+    accessory?: object;
+  }>;
+  return (
+    1 +
+    (nested.components?.reduce(
+      (total, child) => total + countComponentTree(child),
+      0,
+    ) ?? 0) +
+    (nested.accessory === undefined
+      ? 0
+      : countComponentTree(nested.accessory))
+  );
 }
 
 function constrainTextDisplays(

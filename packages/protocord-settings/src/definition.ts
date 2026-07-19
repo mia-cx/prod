@@ -17,6 +17,7 @@ export const SETTINGS_LIMITS = Object.freeze({
   modalInputs: 5,
   customIdLength: 100,
   containerComponents: 10,
+  messageComponents: 40,
   actionRowButtons: 5,
   textDisplayCharacters: 4_000,
   textDisplayCharactersPerMessage: 4_000,

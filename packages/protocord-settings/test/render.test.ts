@@ -511,6 +511,46 @@ describe("Components v2 settings rendering", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("rejects views above Discord's 40 total component limit", async () => {
+    const definitionWithContainers = (
+      containerCount: number,
+    ): SettingsDefinition<Context> => ({
+      title: "Bounded component settings",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: Array.from({ length: containerCount }, (_, containerIndex) => ({
+            kind: "container" as const,
+            id: `container-${String(containerIndex)}`,
+            label: `Container ${String(containerIndex)}`,
+            fields: Array.from({ length: 9 }, (_, fieldIndex) => ({
+              kind: "display" as const,
+              id: `display-${String(containerIndex)}-${String(fieldIndex)}`,
+              label: `Display ${String(fieldIndex)}`,
+              presentation: { kind: "plain" as const },
+              load: () => ({ value: "Value" }),
+            })),
+          })),
+        },
+      ],
+    });
+
+    await expect(
+      createSettingsRenderer(definitionWithContainers(3)).render(
+        { categoryId: "setup" },
+        { userId: "admin" },
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      createSettingsRenderer(definitionWithContainers(4)).render(
+        { categoryId: "setup" },
+        { userId: "admin" },
+      ),
+    ).rejects.toMatchObject({ reason: "invalid-view" });
+  });
+
   it("reserves notice space when paginating direct category fields", async () => {
     const renderer = createSettingsRenderer<Context>({
       title: "Direct settings",
