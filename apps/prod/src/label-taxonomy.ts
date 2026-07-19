@@ -5,7 +5,7 @@ import type { ProdDatabase } from "./database.js";
 import { guildLabelTaxonomies, labels, ticketLabels } from "./schema.js";
 
 export const DEFAULT_LABEL_SEED_VERSION = 1;
-export const MAX_ACTIVE_LABELS = 20;
+export const MAX_LABELS = 25;
 
 export const DEFAULT_LABELS = Object.freeze([
   {
@@ -30,7 +30,7 @@ export const DEFAULT_LABELS = Object.freeze([
   },
   {
     name: "other",
-    description: "Support requests that do not fit another active label.",
+    description: "Support requests that do not fit another label.",
   },
 ] as const);
 
@@ -40,7 +40,6 @@ export type TicketLabel = Readonly<{
   name: string;
   normalizedName: string;
   description: string;
-  active: boolean;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -52,10 +51,8 @@ export type LabelActor = Readonly<{
 
 export interface LabelTaxonomyStore {
   ensureDefaults(guildId: string): Promise<void>;
-  list(
-    guildId: string,
-    options?: { includeInactive?: boolean },
-  ): Promise<readonly TicketLabel[]>;
+  list(guildId: string): Promise<readonly TicketLabel[]>;
+  findById(guildId: string, labelId: string): Promise<TicketLabel | undefined>;
   findByName(guildId: string, name: string): Promise<TicketLabel | undefined>;
   create(
     guildId: string,
@@ -63,10 +60,10 @@ export interface LabelTaxonomyStore {
   ): Promise<TicketLabel>;
   update(
     guildId: string,
-    currentName: string,
+    labelId: string,
     input: { name: string; description: string },
   ): Promise<TicketLabel>;
-  deactivate(guildId: string, name: string): Promise<TicketLabel>;
+  delete(guildId: string, labelId: string): Promise<void>;
   selectForTicket(input: {
     guildId: string;
     ticketId: string;
@@ -86,10 +83,6 @@ export class DuplicateLabelNameError extends Error {
 
 export class LabelNotFoundError extends Error {
   override readonly name = "LabelNotFoundError";
-}
-
-export class LabelInactiveError extends Error {
-  override readonly name = "LabelInactiveError";
 }
 
 export class LabelLimitError extends Error {
@@ -175,7 +168,6 @@ export const createSqliteLabelTaxonomyStore = (
           name: label.name,
           normalizedName: normalizeLabelName(label.name),
           description: label.description,
-          active: true,
           createdAt: timestamp,
           updatedAt: timestamp,
         })
@@ -211,25 +203,33 @@ export const createSqliteLabelTaxonomyStore = (
     return row === undefined ? undefined : rowToLabel(row);
   };
 
+  const findById = (
+    guildId: string,
+    labelId: string,
+  ): TicketLabel | undefined => {
+    assertId("guildId", guildId);
+    assertId("labelId", labelId);
+    const row = database
+      .select()
+      .from(labels)
+      .where(and(eq(labels.guildId, guildId), eq(labels.id, labelId)))
+      .get();
+    return row === undefined ? undefined : rowToLabel(row);
+  };
+
   const store: LabelTaxonomyStore = {
     ensureDefaults: async (guildId) => ensureDefaults(guildId),
-    list: async (guildId, listOptions = {}) => {
+    list: async (guildId) => {
       assertId("guildId", guildId);
-      const rows = listOptions.includeInactive
-        ? database
-            .select()
-            .from(labels)
-            .where(eq(labels.guildId, guildId))
-            .orderBy(asc(labels.normalizedName))
-            .all()
-        : database
-            .select()
-            .from(labels)
-            .where(and(eq(labels.guildId, guildId), eq(labels.active, true)))
-            .orderBy(asc(labels.normalizedName))
-            .all();
+      const rows = database
+        .select()
+        .from(labels)
+        .where(eq(labels.guildId, guildId))
+        .orderBy(asc(labels.normalizedName))
+        .all();
       return Object.freeze(rows.map(rowToLabel));
     },
+    findById: async (guildId, labelId) => findById(guildId, labelId),
     findByName: async (guildId, name) => findByName(guildId, name),
     create: async (guildId, input) => {
       assertId("guildId", guildId);
@@ -252,15 +252,15 @@ export const createSqliteLabelTaxonomyStore = (
         ) {
           return { error: duplicate(normalizedName) } as const;
         }
-        const activeCount = transaction
+        const labelCount = transaction
           .select({ value: count() })
           .from(labels)
-          .where(and(eq(labels.guildId, guildId), eq(labels.active, true)))
+          .where(eq(labels.guildId, guildId))
           .get()!.value;
-        if (activeCount >= MAX_ACTIVE_LABELS) {
+        if (labelCount >= MAX_LABELS) {
           return {
             error: new LabelLimitError(
-              `A server may have at most ${String(MAX_ACTIVE_LABELS)} active labels. Deactivate one before creating another.`,
+              `A server may have at most ${String(MAX_LABELS)} labels. Delete one before creating another.`,
             ),
           } as const;
         }
@@ -271,7 +271,6 @@ export const createSqliteLabelTaxonomyStore = (
           name,
           normalizedName,
           description,
-          active: true,
           createdAt: timestamp,
           updatedAt: timestamp,
         };
@@ -281,9 +280,9 @@ export const createSqliteLabelTaxonomyStore = (
       if ("error" in result) throw result.error;
       return result.label;
     },
-    update: async (guildId, currentName, input) => {
+    update: async (guildId, labelId, input) => {
       assertId("guildId", guildId);
-      const currentNormalizedName = normalizeLabelName(currentName);
+      assertId("labelId", labelId);
       const name = cleanLabelName(input.name);
       const normalizedName = normalizeLabelName(name);
       const description = cleanDescription(input.description);
@@ -294,17 +293,12 @@ export const createSqliteLabelTaxonomyStore = (
           .where(
             and(
               eq(labels.guildId, guildId),
-              eq(labels.normalizedName, currentNormalizedName),
+              eq(labels.id, labelId),
             ),
           )
           .get();
         if (current === undefined) {
           throw new LabelNotFoundError("That label no longer exists.");
-        }
-        if (!current.active) {
-          throw new LabelInactiveError(
-            "Inactive labels are retained as immutable ticket history.",
-          );
         }
         const collision = transaction
           .select({ id: labels.id })
@@ -339,34 +333,16 @@ export const createSqliteLabelTaxonomyStore = (
         return rowToLabel(updated);
       });
     },
-    deactivate: async (guildId, name) => {
+    delete: async (guildId, labelId) => {
       assertId("guildId", guildId);
-      const normalizedName = normalizeLabelName(name);
-      return database.transaction((transaction) => {
-        const current = transaction
-          .select()
-          .from(labels)
-          .where(
-            and(
-              eq(labels.guildId, guildId),
-              eq(labels.normalizedName, normalizedName),
-            ),
-          )
-          .get();
-        if (current === undefined) {
-          throw new LabelNotFoundError("That label no longer exists.");
-        }
-        if (!current.active) {
-          throw new LabelInactiveError("That label is already inactive.");
-        }
-        const updated = { ...current, active: false, updatedAt: now() };
-        transaction
-          .update(labels)
-          .set({ active: false, updatedAt: updated.updatedAt })
-          .where(and(eq(labels.id, current.id), eq(labels.active, true)))
-          .run();
-        return rowToLabel(updated);
-      });
+      assertId("labelId", labelId);
+      const result = database
+        .delete(labels)
+        .where(and(eq(labels.guildId, guildId), eq(labels.id, labelId)))
+        .run();
+      if (result.changes === 0) {
+        throw new LabelNotFoundError("That label no longer exists.");
+      }
     },
     selectForTicket: async (input) => {
       assertId("guildId", input.guildId);
@@ -375,7 +351,7 @@ export const createSqliteLabelTaxonomyStore = (
       assertId("actorId", input.actor.id);
       database.transaction((transaction) => {
         const label = transaction
-          .select({ active: labels.active })
+          .select({ id: labels.id })
           .from(labels)
           .where(
             and(
@@ -386,11 +362,6 @@ export const createSqliteLabelTaxonomyStore = (
           .get();
         if (label === undefined) {
           throw new LabelNotFoundError("That label no longer exists.");
-        }
-        if (!label.active) {
-          throw new LabelInactiveError(
-            "That label is inactive and cannot be selected.",
-          );
         }
         transaction
           .insert(ticketLabels)

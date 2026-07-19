@@ -111,6 +111,7 @@ const ticketProvisioningService: TicketProvisioningService = {
 const labelTaxonomyStore: LabelTaxonomyStore = {
   ensureDefaults: async () => undefined,
   list: async () => [],
+  findById: async () => undefined,
   findByName: async () => undefined,
   create: async () => {
     throw new Error("not used");
@@ -118,7 +119,7 @@ const labelTaxonomyStore: LabelTaxonomyStore = {
   update: async () => {
     throw new Error("not used");
   },
-  deactivate: async () => {
+  delete: async () => {
     throw new Error("not used");
   },
   selectForTicket: async () => undefined,

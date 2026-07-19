@@ -21,7 +21,7 @@ import {
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import { createSqliteGuildSettingsStore } from "../src/guild-settings.js";
 import {
-  MAX_ACTIVE_LABELS,
+  MAX_LABELS,
   createSqliteLabelTaxonomyStore,
 } from "../src/label-taxonomy.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
@@ -302,7 +302,7 @@ const modalRoute = (
 });
 
 const labelModalRoute = (
-  fieldId: "label-create" | "label-edit" | "label-deactivate",
+  fieldId: "label-create" | "label-edit",
 ) => ({
   action: "modal-submit" as const,
   categoryId: "labels",
@@ -310,6 +310,22 @@ const labelModalRoute = (
   fieldId,
   page: 0,
 });
+
+const labelSelectRoute = {
+  action: "string-select" as const,
+  categoryId: "labels",
+  subcategoryId: "labels",
+  fieldId: "label-select",
+  page: 0,
+};
+
+const labelDeleteRoute = {
+  action: "button" as const,
+  categoryId: "labels",
+  subcategoryId: "labels",
+  fieldId: "label-delete",
+  page: 0,
+};
 
 describe("guild setup settings integration", () => {
   it("adds Manage Server roles to every permission preset on first reconciliation", async () => {
@@ -428,7 +444,8 @@ describe("guild setup settings integration", () => {
     expect(labelsPage).toContain(
       "Manage the internal ticket taxonomy used by staff and AI triage.",
     );
-    expect(labelsPage).toContain("Current taxonomy");
+    expect(labelsPage).toContain("Select a label to manage it.");
+    expect(labelsPage).toContain("Choose a label");
     expect(labelsPage).toContain("Create label");
     expect(labelsPage).not.toContain("Choose a settings page");
     expect(labelsPage).not.toContain("Ticket labels:");
@@ -709,15 +726,15 @@ describe("guild setup settings integration", () => {
     );
 
     await expect(labelStore.list(guildId)).resolves.toEqual([
-      expect.objectContaining({ name: "account", active: true }),
-      expect.objectContaining({ name: "bug", active: true }),
-      expect.objectContaining({ name: "feedback", active: true }),
-      expect.objectContaining({ name: "gameplay", active: true }),
-      expect.objectContaining({ name: "other", active: true }),
+      expect.objectContaining({ name: "account" }),
+      expect.objectContaining({ name: "bug" }),
+      expect.objectContaining({ name: "feedback" }),
+      expect.objectContaining({ name: "gameplay" }),
+      expect.objectContaining({ name: "other" }),
     ]);
   });
 
-  it("creates, edits, and deactivates labels with persisted rerenders", async () => {
+  it("creates, selects, edits, and deletes labels with persisted rerenders", async () => {
     const { connection, runtime, labelStore } = await setup();
     await labelStore.ensureDefaults(guildId);
 
@@ -745,7 +762,6 @@ describe("guild setup settings integration", () => {
 
     const edit = component("modal", labelModalRoute("label-edit"), {
       modalValues: {
-        "current-name": "connection issue",
         name: "Connectivity",
         description: "Network and game-server connectivity problems.",
       },
@@ -755,40 +771,58 @@ describe("guild setup settings integration", () => {
       "Connectivity",
     );
 
-    const deactivate = component("modal", labelModalRoute("label-deactivate"), {
-      modalValues: { name: "connectivity" },
-    });
-    await runtime.handleInteraction(deactivate as unknown as Interaction);
+    const firstDelete = component("button", labelDeleteRoute);
+    await runtime.handleInteraction(firstDelete as unknown as Interaction);
+    expect(JSON.stringify(firstDelete.editReply.mock.calls[0]?.[0])).toContain(
+      "Confirm delete",
+    );
+
+    const confirmDelete = component("button", labelDeleteRoute);
+    await runtime.handleInteraction(confirmDelete as unknown as Interaction);
     expect(
-      JSON.stringify(deactivate.editReply.mock.calls[0]?.[0]),
+      JSON.stringify(confirmDelete.editReply.mock.calls[0]?.[0]),
     ).not.toContain("Connectivity");
 
-    await expect(labelStore.list(guildId)).resolves.not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ normalizedName: "connectivity" }),
-      ]),
-    );
+    await expect(
+      labelStore.findByName(guildId, "connectivity"),
+    ).resolves.toBeUndefined();
     const restarted = createSqliteLabelTaxonomyStore(connection.database);
     await expect(
       restarted.findByName(guildId, "connectivity"),
-    ).resolves.toMatchObject({
-      name: "Connectivity",
-      description: "Network and game-server connectivity problems.",
-      active: false,
+    ).resolves.toBeUndefined();
+  });
+
+  it("appends management controls for the selected label", async () => {
+    const { runtime, labelStore } = await setup();
+    await labelStore.ensureDefaults(guildId);
+    const bug = (await labelStore.findByName(guildId, "bug"))!;
+    const select = component("string", labelSelectRoute, {
+      selectedValues: [bug.id],
     });
+
+    await runtime.handleInteraction(select as unknown as Interaction);
+
+    const payload = JSON.stringify(select.editReply.mock.calls[0]?.[0]);
+    expect(payload).toContain("Unexpected behavior, errors, crashes");
+    expect(payload).toContain("Edit label");
+    expect(payload).toContain("Delete label");
   });
 
   it("rechecks authorization before a label mutation", async () => {
     const { runtime, store, labelStore } = await setup();
     await store.configureHub(guildId, hubChannelId, ownership());
     await labelStore.ensureDefaults(guildId);
+    const bug = (await labelStore.findByName(guildId, "bug"))!;
+    const select = component("string", labelSelectRoute, {
+      selectedValues: [bug.id],
+    });
+    await runtime.handleInteraction(select as unknown as Interaction);
     const unauthorized = component(
-      "modal",
-      labelModalRoute("label-deactivate"),
+      "button",
+      labelDeleteRoute,
       {
         userId: "ordinary-member",
         allowed: [],
-        modalValues: { name: "bug" },
       },
     );
 
@@ -802,16 +836,16 @@ describe("guild setup settings integration", () => {
         flags: MessageFlags.Ephemeral,
       }),
     );
-    await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject({
-      active: true,
-    });
+    await expect(labelStore.findByName(guildId, "bug")).resolves.toMatchObject(
+      { id: bug.id },
+    );
   });
 
-  it("keeps every supported active name reachable within the Discord view", async () => {
+  it("keeps every supported label reachable within the Discord select", async () => {
     const { runtime, labelStore } = await setup();
     await labelStore.ensureDefaults(guildId);
     const customNames: string[] = [];
-    for (let index = 0; index < MAX_ACTIVE_LABELS - 5; index++) {
+    for (let index = 0; index < MAX_LABELS - 5; index++) {
       const name = `${String(index).padStart(2, "0")}-${"*".repeat(77)}`;
       customNames.push(name);
       await labelStore.create(guildId, {
@@ -820,10 +854,18 @@ describe("guild setup settings integration", () => {
       });
     }
 
+    const selected = (await labelStore.findByName(
+      guildId,
+      customNames.at(-1)!,
+    ))!;
+    const select = component("string", labelSelectRoute, {
+      selectedValues: [selected.id],
+    });
+    await runtime.handleInteraction(select as unknown as Interaction);
+
     const edit = component("modal", labelModalRoute("label-edit"), {
       modalValues: {
-        "current-name": customNames.at(-1)!,
-        name: customNames.at(-1)!.replace("14-", "zz-"),
+        name: customNames.at(-1)!.replace("19-", "zz-"),
         description: "Updated at the supported boundary.",
       },
     });
@@ -838,12 +880,12 @@ describe("guild setup settings integration", () => {
     const overflow = component("modal", labelModalRoute("label-create"), {
       modalValues: {
         name: "overflow",
-        description: "This exceeds the supported active taxonomy bound.",
+        description: "This exceeds the supported label bound.",
       },
     });
     await runtime.handleInteraction(overflow as unknown as Interaction);
     expect(JSON.stringify(overflow.editReply.mock.calls[0]?.[0])).toContain(
-      "at most 20 active labels",
+      "at most 25 labels",
     );
   });
 });

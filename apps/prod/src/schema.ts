@@ -226,7 +226,6 @@ export const labels = sqliteTable(
     name: text().notNull(),
     normalizedName: text("normalized_name").notNull(),
     description: text().notNull(),
-    active: integer({ mode: "boolean" }).notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
@@ -235,7 +234,6 @@ export const labels = sqliteTable(
       table.guildId,
       table.normalizedName,
     ),
-    index("labels_guild_active").on(table.guildId, table.active),
   ],
 );
 
@@ -251,7 +249,7 @@ export const ticketLabels = sqliteTable(
     ticketId: text("ticket_id").notNull(),
     labelId: text("label_id")
       .notNull()
-      .references(() => labels.id, { onDelete: "restrict" }),
+      .references(() => labels.id, { onDelete: "cascade" }),
     appliedByType: text("applied_by_type", {
       enum: ["user", "service"],
     }).notNull(),

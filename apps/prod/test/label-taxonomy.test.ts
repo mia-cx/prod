@@ -4,9 +4,9 @@ import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import {
   DEFAULT_LABELS,
   DuplicateLabelNameError,
-  LabelInactiveError,
   LabelLimitError,
-  MAX_ACTIVE_LABELS,
+  LabelNotFoundError,
+  MAX_LABELS,
   createSqliteLabelTaxonomyStore,
   normalizeLabelName,
 } from "../src/label-taxonomy.js";
@@ -43,7 +43,7 @@ describe("SQLite guild label taxonomy", () => {
       store.ensureDefaults("guild-1"),
       store.ensureDefaults("guild-1"),
     ]);
-    const labels = await store.list("guild-1", { includeInactive: true });
+    const labels = await store.list("guild-1");
 
     expect(labels.map(({ name }) => name).sort()).toEqual(
       DEFAULT_LABELS.map(({ name }) => name).sort(),
@@ -54,7 +54,7 @@ describe("SQLite guild label taxonomy", () => {
     const restarted = createSqliteLabelTaxonomyStore(connection.database);
     await restarted.ensureDefaults("guild-1");
     await expect(
-      restarted.list("guild-1", { includeInactive: true }),
+      restarted.list("guild-1"),
     ).resolves.toHaveLength(5);
   });
 
@@ -63,7 +63,7 @@ describe("SQLite guild label taxonomy", () => {
     await store.ensureDefaults("guild-1");
     const bug = (await store.findByName("guild-1", "bug"))!;
 
-    await store.update("guild-1", "bug", {
+    await store.update("guild-1", bug.id, {
       name: "defect",
       description: "Unexpected behavior or broken functionality.",
     });
@@ -111,7 +111,7 @@ describe("SQLite guild label taxonomy", () => {
 
     for (
       let index = 0;
-      index < MAX_ACTIVE_LABELS - DEFAULT_LABELS.length;
+      index < MAX_LABELS - DEFAULT_LABELS.length;
       index++
     ) {
       await store.create("guild-3", {
@@ -123,12 +123,12 @@ describe("SQLite guild label taxonomy", () => {
     const restarted = createSqliteLabelTaxonomyStore(connection.database);
     await restarted.ensureDefaults("guild-3");
     await expect(restarted.list("guild-3")).resolves.toHaveLength(
-      MAX_ACTIVE_LABELS,
+      MAX_LABELS,
     );
     await expect(
       restarted.create("guild-3", {
         name: "overflow",
-        description: "This must not exceed the active bound.",
+        description: "This must not exceed the label bound.",
       }),
     ).rejects.toBeInstanceOf(LabelLimitError);
   });
@@ -146,7 +146,6 @@ describe("SQLite guild label taxonomy", () => {
       name: "Connection Issue",
       normalizedName: "connection issue",
       description: "Trouble connecting to a server.",
-      active: true,
     });
     await expect(
       store.create("guild-1", {
@@ -161,7 +160,7 @@ describe("SQLite guild label taxonomy", () => {
       }),
     ).resolves.toMatchObject({ guildId: "guild-2" });
 
-    const updated = await store.update("guild-1", "connection issue", {
+    const updated = await store.update("guild-1", created.id, {
       name: "Connectivity",
       description: "Network and server connectivity problems.",
     });
@@ -173,43 +172,35 @@ describe("SQLite guild label taxonomy", () => {
     });
   });
 
-  it("keeps ticket history when a selected label is deactivated", async () => {
+  it("deletes a label and cascades only its ticket associations", async () => {
     const { store } = await setup();
-    const bug = await store.findByName("guild-1", "bug");
-    expect(bug).toBeUndefined();
     await store.ensureDefaults("guild-1");
-    const seededBug = await store.findByName("guild-1", "bug");
-    expect(seededBug).toBeDefined();
-
-    await Promise.all([
-      store.selectForTicket({
+    const bug = (await store.findByName("guild-1", "bug"))!;
+    const account = (await store.findByName("guild-1", "account"))!;
+    for (const label of [bug, account]) {
+      await store.selectForTicket({
         guildId: "guild-1",
         ticketId: "ticket-1",
-        labelId: seededBug!.id,
+        labelId: label.id,
         actor: { type: "user", id: "staff-1" },
-      }),
-      store.deactivate("guild-1", "bug"),
-    ]);
+      });
+    }
 
-    expect((await store.list("guild-1")).map(({ name }) => name)).not.toContain(
-      "bug",
-    );
+    await store.delete("guild-1", bug.id);
+
+    await expect(store.findById("guild-1", bug.id)).resolves.toBeUndefined();
     await expect(store.listForTicket("ticket-1")).resolves.toEqual([
-      expect.objectContaining({
-        id: seededBug!.id,
-        name: "bug",
-        active: false,
-      }),
+      expect.objectContaining({ id: account.id, name: "account" }),
     ]);
   });
 
-  it("rejects a concurrent selection safely when deactivation wins", async () => {
+  it("rejects selection safely when concurrent deletion wins", async () => {
     const { store } = await setup();
     await store.ensureDefaults("guild-1");
     const bug = (await store.findByName("guild-1", "bug"))!;
 
-    const [deactivation, selection] = await Promise.allSettled([
-      store.deactivate("guild-1", "bug"),
+    const [deletion, selection] = await Promise.allSettled([
+      store.delete("guild-1", bug.id),
       store.selectForTicket({
         guildId: "guild-1",
         ticketId: "ticket-2",
@@ -218,20 +209,20 @@ describe("SQLite guild label taxonomy", () => {
       }),
     ]);
 
-    expect(deactivation.status).toBe("fulfilled");
+    expect(deletion.status).toBe("fulfilled");
     expect(selection).toMatchObject({
       status: "rejected",
-      reason: expect.any(LabelInactiveError),
+      reason: expect.any(LabelNotFoundError),
     });
     await expect(store.listForTicket("ticket-2")).resolves.toEqual([]);
   });
 
-  it("bounds active choices while allowing inactive history to accumulate", async () => {
+  it("bounds selectable labels and lets deletion free a slot", async () => {
     const { store } = await setup();
     await store.ensureDefaults("guild-1");
     for (
       let index = DEFAULT_LABELS.length;
-      index < MAX_ACTIVE_LABELS;
+      index < MAX_LABELS;
       index++
     ) {
       await store.create("guild-1", {
@@ -243,25 +234,18 @@ describe("SQLite guild label taxonomy", () => {
     await expect(
       store.create("guild-1", {
         name: "overflow",
-        description: "This label exceeds the active limit.",
+        description: "This label exceeds the select limit.",
       }),
     ).rejects.toBeInstanceOf(LabelLimitError);
 
-    await store.deactivate("guild-1", "custom-5");
+    const removed = (await store.findByName("guild-1", "custom-5"))!;
+    await store.delete("guild-1", removed.id);
     await expect(
       store.create("guild-1", {
         name: "replacement",
-        description: "A replacement active label.",
+        description: "A replacement label.",
       }),
-    ).resolves.toMatchObject({ active: true });
-    await expect(store.list("guild-1")).resolves.toHaveLength(
-      MAX_ACTIVE_LABELS,
-    );
-    await expect(
-      store.update("guild-1", "custom-5", {
-        name: "changed-history",
-        description: "Historical metadata must remain stable.",
-      }),
-    ).rejects.toBeInstanceOf(LabelInactiveError);
+    ).resolves.toMatchObject({ name: "replacement" });
+    await expect(store.list("guild-1")).resolves.toHaveLength(MAX_LABELS);
   });
 });
