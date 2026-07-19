@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "45f28fc8-9df5-491b-9217-cd18de415715",
+  "id": "47021ae8-e980-4c43-92ce-8f87b71c586e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "guild_label_taxonomies": {
@@ -606,6 +606,19 @@
         }
       },
       "foreignKeys": {
+        "ticket_labels_ticket_id_tickets_id_fk": {
+          "name": "ticket_labels_ticket_id_tickets_id_fk",
+          "tableFrom": "ticket_labels",
+          "tableTo": "tickets",
+          "columnsFrom": [
+            "ticket_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "ticket_labels_label_id_labels_id_fk": {
           "name": "ticket_labels_label_id_labels_id_fk",
           "tableFrom": "ticket_labels",

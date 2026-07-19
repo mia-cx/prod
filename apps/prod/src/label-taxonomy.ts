@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { and, asc, count, eq } from "drizzle-orm";
 
 import type { ProdDatabase } from "./database.js";
-import { guildLabelTaxonomies, labels, ticketLabels } from "./schema.js";
+import {
+  guildLabelTaxonomies,
+  labels,
+  ticketLabels,
+  tickets,
+} from "./schema.js";
 
 export const DEFAULT_LABEL_SEED_VERSION = 1;
 export const MAX_LABELS = 25;
@@ -83,6 +88,10 @@ export class DuplicateLabelNameError extends Error {
 
 export class LabelNotFoundError extends Error {
   override readonly name = "LabelNotFoundError";
+}
+
+export class TicketNotFoundError extends Error {
+  override readonly name = "TicketNotFoundError";
 }
 
 export class LabelLimitError extends Error {
@@ -355,6 +364,21 @@ export const createSqliteLabelTaxonomyStore = (
       assertId("labelId", input.labelId);
       assertId("actorId", input.actor.id);
       database.transaction((transaction) => {
+        const ticket = transaction
+          .select({ id: tickets.id })
+          .from(tickets)
+          .where(
+            and(
+              eq(tickets.id, input.ticketId),
+              eq(tickets.guildId, input.guildId),
+            ),
+          )
+          .get();
+        if (ticket === undefined) {
+          throw new TicketNotFoundError(
+            "That ticket no longer exists in this guild.",
+          );
+        }
         const label = transaction
           .select({ id: labels.id })
           .from(labels)

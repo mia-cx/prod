@@ -91,6 +91,7 @@ CREATE TABLE `ticket_labels` (
 	`applied_by_id` text NOT NULL,
 	`created_at` text NOT NULL,
 	PRIMARY KEY(`ticket_id`, `label_id`),
+	FOREIGN KEY (`ticket_id`) REFERENCES `tickets`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`label_id`) REFERENCES `labels`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint

@@ -246,7 +246,9 @@ export const guildLabelTaxonomies = sqliteTable("guild_label_taxonomies", {
 export const ticketLabels = sqliteTable(
   "ticket_labels",
   {
-    ticketId: text("ticket_id").notNull(),
+    ticketId: text("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
     labelId: text("label_id")
       .notNull()
       .references(() => labels.id, { onDelete: "cascade" }),

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
 import { openDatabase, type DatabaseConnection } from "../src/database.js";
 import {
@@ -11,6 +12,7 @@ import {
   normalizeLabelName,
 } from "../src/label-taxonomy.js";
 import { applyMigrations } from "../src/migrations.js";
+import { tickets } from "../src/schema.js";
 
 const connections: DatabaseConnection[] = [];
 
@@ -30,6 +32,24 @@ const setup = async () => {
   });
   return { connection, store };
 };
+
+const insertTicket = async (
+  connection: DatabaseConnection,
+  id: string,
+  guildId: string,
+) =>
+  connection.database.insert(tickets).values({
+    id,
+    number: 1,
+    guildId,
+    hubChannelId: `hub-${guildId}`,
+    reporterUserId: "reporter-1",
+    originatingAlias: "issue",
+    status: "open",
+    triageStatus: "collecting",
+    createdAt: "2026-07-17T12:00:00.000Z",
+    updatedAt: "2026-07-17T12:00:00.000Z",
+  });
 
 describe("SQLite guild label taxonomy", () => {
   it("normalizes Unicode, case, and whitespace consistently", () => {
@@ -186,8 +206,9 @@ describe("SQLite guild label taxonomy", () => {
   });
 
   it("deletes a label and cascades only its ticket associations", async () => {
-    const { store } = await setup();
+    const { connection, store } = await setup();
     await store.ensureDefaults("guild-1");
+    await insertTicket(connection, "ticket-1", "guild-1");
     const bug = (await store.findByName("guild-1", "bug"))!;
     const account = (await store.findByName("guild-1", "account"))!;
     for (const label of [bug, account]) {
@@ -207,9 +228,35 @@ describe("SQLite guild label taxonomy", () => {
     ]);
   });
 
-  it("rejects selection safely when concurrent deletion wins", async () => {
-    const { store } = await setup();
+  it("rejects nonexistent and cross-guild ticket associations", async () => {
+    const { connection, store } = await setup();
     await store.ensureDefaults("guild-1");
+    const bug = (await store.findByName("guild-1", "bug"))!;
+
+    await expect(
+      store.selectForTicket({
+        guildId: "guild-1",
+        ticketId: "missing-ticket",
+        labelId: bug.id,
+        actor: { type: "user", id: "staff-1" },
+      }),
+    ).rejects.toThrow("That ticket no longer exists in this guild.");
+
+    await insertTicket(connection, "ticket-2", "guild-2");
+    await expect(
+      store.selectForTicket({
+        guildId: "guild-1",
+        ticketId: "ticket-2",
+        labelId: bug.id,
+        actor: { type: "user", id: "staff-1" },
+      }),
+    ).rejects.toThrow("That ticket no longer exists in this guild.");
+  });
+
+  it("rejects selection safely when concurrent deletion wins", async () => {
+    const { connection, store } = await setup();
+    await store.ensureDefaults("guild-1");
+    await insertTicket(connection, "ticket-2", "guild-1");
     const bug = (await store.findByName("guild-1", "bug"))!;
 
     const [deletion, selection] = await Promise.allSettled([
@@ -228,6 +275,25 @@ describe("SQLite guild label taxonomy", () => {
       reason: expect.any(LabelNotFoundError),
     });
     await expect(store.listForTicket("ticket-2")).resolves.toEqual([]);
+  });
+
+  it("cascades ticket deletion to its label associations", async () => {
+    const { connection, store } = await setup();
+    await store.ensureDefaults("guild-1");
+    await insertTicket(connection, "ticket-1", "guild-1");
+    const bug = (await store.findByName("guild-1", "bug"))!;
+    await store.selectForTicket({
+      guildId: "guild-1",
+      ticketId: "ticket-1",
+      labelId: bug.id,
+      actor: { type: "user", id: "staff-1" },
+    });
+
+    await connection.database
+      .delete(tickets)
+      .where(eq(tickets.id, "ticket-1"));
+
+    await expect(store.listForTicket("ticket-1")).resolves.toEqual([]);
   });
 
   it("bounds selectable labels and lets deletion free a slot", async () => {
