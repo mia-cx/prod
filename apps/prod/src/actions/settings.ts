@@ -753,6 +753,8 @@ export function createGuildSetupSettingsConsumer(
                         maxLength: 500,
                       },
                     ],
+                    draftScope: async (context) =>
+                      (await requireSelectedLabel(context)).id,
                     load: async (context) => {
                       const label = await requireSelectedLabel(context);
                       return {
@@ -777,27 +779,44 @@ export function createGuildSetupSettingsConsumer(
                     id: "label-delete",
                     label: "Delete",
                     style: ButtonStyle.Danger,
-                    load: async (context) => {
+                    visible: async (context) => {
                       const label = await requireSelectedLabel(context);
-                      const pending =
+                      return (
                         readLabelSession(context.settingsSessionId)
-                          ?.pendingDeletionLabelId === label.id;
-                      return {
-                        buttonLabel: pending ? "Confirm delete" : "Delete",
-                      };
+                          ?.pendingDeletionLabelId !== label.id
+                      );
                     },
+                    load: () => ({ buttonLabel: "Delete" }),
                     mutate: async (context) => {
                       const label = await requireSelectedLabel(context);
-                      const session = readLabelSession(
+                      rememberLabelSession(
                         context.settingsSessionId,
+                        label.id,
+                        label.id,
                       );
-                      if (session?.pendingDeletionLabelId !== label.id) {
-                        rememberLabelSession(
-                          context.settingsSessionId,
-                          label.id,
-                          label.id,
-                        );
-                        return { status: "success" };
+                      return { status: "success" };
+                    },
+                  },
+                  {
+                    kind: "button",
+                    id: "label-delete-confirm",
+                    label: "Confirm delete",
+                    style: ButtonStyle.Danger,
+                    visible: async (context) => {
+                      const label = await requireSelectedLabel(context);
+                      return (
+                        readLabelSession(context.settingsSessionId)
+                          ?.pendingDeletionLabelId === label.id
+                      );
+                    },
+                    load: () => ({ buttonLabel: "Confirm delete" }),
+                    mutate: async (context) => {
+                      const label = await requireSelectedLabel(context);
+                      if (
+                        readLabelSession(context.settingsSessionId)
+                          ?.pendingDeletionLabelId !== label.id
+                      ) {
+                        return invalid([issue("Delete confirmation expired.")]);
                       }
                       return labelMutation(async () => {
                         await labelStore.delete(requireGuild(context).id, label.id);

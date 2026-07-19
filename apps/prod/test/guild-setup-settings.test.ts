@@ -328,6 +328,11 @@ const labelDeleteRoute = {
   page: 0,
 };
 
+const labelConfirmDeleteRoute = {
+  ...labelDeleteRoute,
+  fieldId: "label-delete-confirm",
+};
+
 describe("guild setup settings integration", () => {
   it("adds Manage Server roles to every permission preset on first reconciliation", async () => {
     const { runtime, permissionAdministration } = await setup({}, true);
@@ -800,7 +805,13 @@ describe("guild setup settings integration", () => {
       "Confirm delete",
     );
 
-    const confirmDelete = component("button", labelDeleteRoute);
+    const repeatedDelete = component("button", labelDeleteRoute);
+    await runtime.handleInteraction(repeatedDelete as unknown as Interaction);
+    await expect(
+      labelStore.findByName(guildId, "connectivity"),
+    ).resolves.toMatchObject({ id: expect.any(String) });
+
+    const confirmDelete = component("button", labelConfirmDeleteRoute);
     await runtime.handleInteraction(confirmDelete as unknown as Interaction);
     expect(
       JSON.stringify(confirmDelete.editReply.mock.calls[0]?.[0]),

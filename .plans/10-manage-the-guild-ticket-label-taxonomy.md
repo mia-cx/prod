@@ -49,3 +49,4 @@ ticket.
 - 2026-07-19: The Labels page lists every label above its selector, then renders Edit and Delete together in one Action Row for the selected label. Descriptions are optional and no longer framed as AI-specific.
 - 2026-07-19: Follow-up review made nested-control visibility transitive, enforced ticket existence and guild ownership with two cascading foreign keys, and added recursive enforcement of Discord's 40-component message limit without changing the accepted Labels UI.
 - 2026-07-19: Label selection and delete-confirmation state now expires after 15 minutes and is capped at 1,000 least-recently-used settings sessions.
+- 2026-07-19: Modal drafts can be scoped to dynamic editor identity, preventing an invalid label draft from following selection to another label. Delete and Confirm delete use distinct visibility-gated controls, so repeated delivery of the original Delete interaction cannot bypass confirmation.
