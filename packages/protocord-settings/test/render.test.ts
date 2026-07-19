@@ -396,7 +396,7 @@ describe("Components v2 settings rendering", () => {
     expect(payload).not.toContain("**Current:**");
   });
 
-  it("renders modal and mutation buttons in one action row", async () => {
+  it("appends grouped fields in their own container", async () => {
     const renderer = createSettingsRenderer<Context>({
       title: "Inline actions",
       categories: [
@@ -406,26 +406,40 @@ describe("Components v2 settings rendering", () => {
           authorize: () => true,
           fields: [
             {
-              kind: "action-row",
-              id: "actions",
-              label: "Actions",
-              items: [
+              kind: "container",
+              id: "editor",
+              label: "Editor",
+              fields: [
                 {
-                  kind: "modal",
-                  id: "edit",
-                  label: "Edit",
-                  title: "Edit setting",
-                  inputs: [{ id: "name", label: "Name" }],
-                  load: () => ({}),
-                  mutate: () => undefined,
+                  kind: "display",
+                  id: "details",
+                  label: "Details",
+                  presentation: { kind: "plain" },
+                  load: () => ({ value: "**Name:** `bug`" }),
                 },
                 {
-                  kind: "button",
-                  id: "delete",
-                  label: "Delete",
-                  style: ButtonStyle.Danger,
-                  load: () => ({}),
-                  mutate: () => undefined,
+                  kind: "action-row",
+                  id: "actions",
+                  label: "Actions",
+                  items: [
+                    {
+                      kind: "modal",
+                      id: "edit",
+                      label: "Edit",
+                      title: "Edit setting",
+                      inputs: [{ id: "name", label: "Name" }],
+                      load: () => ({}),
+                      mutate: () => undefined,
+                    },
+                    {
+                      kind: "button",
+                      id: "delete",
+                      label: "Delete",
+                      style: ButtonStyle.Danger,
+                      load: () => ({}),
+                      mutate: () => undefined,
+                    },
+                  ],
                 },
               ],
             },
@@ -438,10 +452,14 @@ describe("Components v2 settings rendering", () => {
       { categoryId: "setup" },
       { userId: "admin" },
     );
-    const rows = JSON.stringify(rendered.components).match(
+    const appended = rendered.components[2];
+    const rows = JSON.stringify(appended).match(
       /"type":1,"components":\[\{"type":2[^\]]+"label":"Edit"[^\]]+"label":"Delete"[^\]]+\]/g,
     );
 
+    expect(rendered.components).toHaveLength(3);
+    expect(JSON.stringify(rendered.components[1])).not.toContain("**Name:**");
+    expect(JSON.stringify(appended)).toContain("**Name:** `bug`");
     expect(rows).toHaveLength(1);
   });
 

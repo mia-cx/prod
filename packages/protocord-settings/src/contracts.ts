@@ -219,7 +219,7 @@ export type SettingsModalField<Context> = SettingsFieldBase<"modal", Context> &
       values: SettingsModalValues,
       context: Context,
     ): Awaitable<SettingsMutationCallbackResult>;
-    }>;
+  }>;
 
 export type SettingsActionRowItem<Context> =
   | SettingsButtonField<Context>
@@ -231,7 +231,7 @@ export type SettingsActionRowField<Context> =
       items: readonly SettingsActionRowItem<Context>[];
     }>;
 
-export type SettingsField<Context> =
+export type SettingsContainerChildField<Context> =
   | SettingsDisplayField<Context>
   | SettingsButtonField<Context>
   | SettingsActionRowField<Context>
@@ -239,6 +239,16 @@ export type SettingsField<Context> =
   | SettingsMentionableSelectField<Context>
   | SettingsChannelSelectField<Context>
   | SettingsModalField<Context>;
+
+export type SettingsContainerField<Context> =
+  SettingsFieldBase<"container", Context> &
+    Readonly<{
+      fields: readonly SettingsContainerChildField<Context>[];
+    }>;
+
+export type SettingsField<Context> =
+  | SettingsContainerChildField<Context>
+  | SettingsContainerField<Context>;
 
 export type SettingsSubcategory<Context> = Readonly<{
   id: string;

@@ -22,6 +22,8 @@ import type {
   SettingsActionRowField,
   SettingsCategory,
   SettingsChannelSelectField,
+  SettingsContainerChildField,
+  SettingsContainerField,
   SettingsDefinition,
   SettingsField,
   SettingsMentionableSelectField,
@@ -236,10 +238,15 @@ async function renderSettingsView<Context>(
     category,
     request.subcategoryId ?? category.id,
   );
-  const visibleFields: SettingsField<Context>[] = [];
+  const visibleFields: SettingsContainerChildField<Context>[] = [];
+  const visibleContainers: SettingsContainerField<Context>[] = [];
   for (const field of subcategory.fields) {
     if (field.visible === undefined || (await field.visible(context))) {
-      visibleFields.push(field);
+      if (field.kind === "container") {
+        visibleContainers.push(field);
+      } else {
+        visibleFields.push(field);
+      }
     }
   }
   const fieldPages = paginateFields(
@@ -285,12 +292,39 @@ async function renderSettingsView<Context>(
             definition.accentColor,
           ),
         ]),
+    ...(await renderAppendedContainers(
+      visibleContainers,
+      location,
+      context,
+      definition.accentColor,
+    )),
   ];
   constrainTextDisplays(components);
   return {
     components,
     location,
   };
+}
+
+async function renderAppendedContainers<Context>(
+  fields: readonly SettingsContainerField<Context>[],
+  location: ResolvedSettingsLocation,
+  context: Context,
+  accentColor: number | undefined,
+): Promise<readonly APIContainerComponent[]> {
+  const rendered: APIContainerComponent[] = [];
+  for (const field of fields) {
+    const children: APIComponentInContainer[] = [];
+    for (const child of field.fields) {
+      if (child.visible === undefined || (await child.visible(context))) {
+        children.push(...(await renderField(child, location, context)));
+      }
+    }
+    if (children.length > 0) {
+      rendered.push(container("field", children, accentColor));
+    }
+  }
+  return rendered;
 }
 
 async function findAuthorizedCategories<Context>(
@@ -334,9 +368,9 @@ function fixedComponentCount(directCategory: boolean): number {
 }
 
 function paginateFields<Context>(
-  fields: readonly SettingsField<Context>[],
+  fields: readonly SettingsContainerChildField<Context>[],
   fixedComponents: number,
-): readonly (readonly SettingsField<Context>[])[] {
+): readonly (readonly SettingsContainerChildField<Context>[])[] {
   const unpaginatedCost = fields.reduce(
     (cost, field) => cost + fieldComponentCost(field),
     0,
@@ -356,8 +390,8 @@ function paginateFields<Context>(
       "settings navigation leaves no room for fields",
     );
   }
-  const pages: SettingsField<Context>[][] = [];
-  let currentPage: SettingsField<Context>[] = [];
+  const pages: SettingsContainerChildField<Context>[][] = [];
+  let currentPage: SettingsContainerChildField<Context>[] = [];
   let currentCost = 0;
   for (const field of fields) {
     const cost = fieldComponentCost(field);
@@ -381,7 +415,9 @@ function paginateFields<Context>(
   return pages;
 }
 
-function fieldComponentCost<Context>(field: SettingsField<Context>): number {
+function fieldComponentCost<Context>(
+  field: SettingsContainerChildField<Context>,
+): number {
   if (field.kind === "modal" && field.presentation?.kind === "preview") {
     return 2;
   }
@@ -393,7 +429,7 @@ function fieldComponentCost<Context>(field: SettingsField<Context>): number {
 }
 
 async function renderField<Context>(
-  field: SettingsField<Context>,
+  field: SettingsContainerChildField<Context>,
   location: ResolvedSettingsLocation,
   context: Context,
 ): Promise<readonly APIComponentInContainer[]> {
@@ -862,7 +898,7 @@ function actionRow<Component extends APIComponentInMessageActionRow>(
 }
 
 function container(
-  label: "home" | "category" | "subcategory",
+  label: "home" | "category" | "subcategory" | "field",
   components: APIComponentInContainer[],
   accentColor: number | undefined,
 ): APIContainerComponent {

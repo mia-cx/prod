@@ -1,5 +1,6 @@
 import type {
   SettingsActionRowField,
+  SettingsContainerField,
   SettingsDefinition,
   SettingsField,
   SettingsModalField,
@@ -121,15 +122,7 @@ function validateFields<Context>(
       `${owner} may define at most ${SETTINGS_LIMITS.fieldsPerSubcategory} fields`,
     );
   }
-  assertUnique(
-    fields.flatMap((field) => [
-      field.id,
-      ...(field.kind === "action-row"
-        ? field.items.map(({ id }) => id)
-        : []),
-    ]),
-    `field in ${owner}`,
-  );
+  assertUnique(fields.flatMap(fieldIds), `field in ${owner}`);
   for (const field of fields) {
     validateField(field, owner);
   }
@@ -145,9 +138,32 @@ function validateField<Context>(
   if (field.kind === "action-row") {
     validateActionRowField(field, subcategoryId);
   }
+  if (field.kind === "container") {
+    validateContainerField(field, subcategoryId);
+  }
   if (field.kind === "modal") {
     validateModalField(field, subcategoryId);
   }
+}
+
+function fieldIds<Context>(field: SettingsField<Context>): readonly string[] {
+  if (field.kind === "action-row") {
+    return [field.id, ...field.items.map(({ id }) => id)];
+  }
+  if (field.kind === "container") {
+    return [field.id, ...field.fields.flatMap(fieldIds)];
+  }
+  return [field.id];
+}
+
+function validateContainerField<Context>(
+  field: SettingsContainerField<Context>,
+  owner: string,
+): void {
+  if (field.fields.length === 0) {
+    fail(`container field ${field.id} in ${owner} must not be empty`);
+  }
+  validateFields(field.fields, `container field ${field.id}`);
 }
 
 function validateActionRowField<Context>(

@@ -741,7 +741,7 @@ describe("Discord settings runtime", () => {
     expect(state.name).toBe("Prod Support");
   });
 
-  it("routes modal and mutation buttons nested in an action row", async () => {
+  it("routes modal and mutation buttons nested in an appended container", async () => {
     const mutate = vi.fn();
     const rowRuntime = createSettingsRuntime<Context>({
       definition: {
@@ -757,25 +757,32 @@ describe("Discord settings runtime", () => {
                 label: "General",
                 fields: [
                   {
-                    kind: "action-row",
-                    id: "actions",
-                    label: "Actions",
-                    items: [
+                    kind: "container",
+                    id: "editor",
+                    label: "Editor",
+                    fields: [
                       {
-                        kind: "modal",
-                        id: "edit",
-                        label: "Edit",
-                        title: "Edit setting",
-                        inputs: [{ id: "name", label: "Name" }],
-                        load: () => ({ values: { name: "Bug" } }),
-                        mutate: () => undefined,
-                      },
-                      {
-                        kind: "button",
-                        id: "delete",
-                        label: "Delete",
-                        load: () => ({}),
-                        mutate,
+                        kind: "action-row",
+                        id: "actions",
+                        label: "Actions",
+                        items: [
+                          {
+                            kind: "modal",
+                            id: "edit",
+                            label: "Edit",
+                            title: "Edit setting",
+                            inputs: [{ id: "name", label: "Name" }],
+                            load: () => ({ values: { name: "Bug" } }),
+                            mutate: () => undefined,
+                          },
+                          {
+                            kind: "button",
+                            id: "delete",
+                            label: "Delete",
+                            load: () => ({}),
+                            mutate,
+                          },
+                        ],
                       },
                     ],
                   },

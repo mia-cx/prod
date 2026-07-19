@@ -825,6 +825,10 @@ function findRouteField<Context>(
       const item = field.items.find(({ id }) => id === fieldId);
       if (item !== undefined) return item;
     }
+    if (field.kind === "container") {
+      const child = findRouteField(field.fields, fieldId);
+      if (child !== undefined) return child;
+    }
   }
   return undefined;
 }
