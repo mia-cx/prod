@@ -217,23 +217,6 @@ export function createPermissionSettingsCategory<
       `${draftKey(context)}:${preset}`;
     const fields: SettingsField<Context>[] = [
       {
-        kind: "display",
-        id: "current",
-        label: "Current subjects",
-        load: async (context) => {
-          const subjects = await options.service.listPresetSubjects(
-            requireGuildId(context),
-            preset,
-          );
-          return {
-            value:
-              subjects.length === 0
-                ? "None configured."
-                : subjects.map(subjectLabel).join("\n"),
-          };
-        },
-      },
-      {
         kind: "mentionable-select",
         id: "subjects",
         label: details.label,

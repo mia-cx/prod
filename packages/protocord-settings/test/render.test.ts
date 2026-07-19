@@ -279,6 +279,76 @@ describe("Components v2 settings rendering", () => {
     });
   });
 
+  it("uses native state instead of current-value text for every select type", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Stateful selects",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "string-select",
+              id: "mode",
+              label: "Mode",
+              load: () => ({
+                value: "Current mode",
+                selectedValues: ["friendly"],
+                options: [{ label: "Friendly", value: "friendly" }],
+              }),
+              mutate: () => undefined,
+            },
+            {
+              kind: "mentionable-select",
+              id: "members",
+              label: "Members",
+              load: () => ({
+                value: "Current members",
+                defaults: [
+                  { kind: "user" as const, id: "123456789012345670" },
+                  { kind: "role" as const, id: "123456789012345671" },
+                ],
+                minValues: 0,
+                maxValues: 2,
+              }),
+              mutate: () => undefined,
+            },
+            {
+              kind: "channel-select",
+              id: "channel",
+              label: "Channel",
+              load: () => ({
+                value: "Current channel",
+                defaultChannelIds: ["123456789012345672"],
+                minValues: 1,
+                maxValues: 1,
+              }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const payload = JSON.stringify(rendered.components);
+
+    expect(payload).not.toContain("Current mode");
+    expect(payload).not.toContain("Current members");
+    expect(payload).not.toContain("Current channel");
+    expect(payload).toContain('"value":"friendly","default":true');
+    expect(payload).toContain(
+      '"default_values":[{"id":"123456789012345670","type":"user"},{"id":"123456789012345671","type":"role"}]',
+    );
+    expect(payload).toContain(
+      '"default_values":[{"id":"123456789012345672","type":"channel"}]',
+    );
+  });
+
   it("reserves notice space when paginating direct category fields", async () => {
     const renderer = createSettingsRenderer<Context>({
       title: "Direct settings",

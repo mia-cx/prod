@@ -159,7 +159,7 @@ describe("permission settings category", () => {
     );
   });
 
-  it("renders explicit subject types in the native preset selector", async () => {
+  it("encodes explicit subject types in the native preset selector", async () => {
     const subjects = Array.from({ length: 2 }, (_, index) => ({
       subjectType: index % 2 === 0 ? ("user" as const) : ("role" as const),
       subjectId: `12345678901234567${String(index)}`,
@@ -181,8 +181,11 @@ describe("permission settings category", () => {
 
     expect(rendered.location.pageCount).toBe(1);
     const content = JSON.stringify(rendered.components);
-    expect(content).toContain("User · 123456789012345670");
-    expect(content).toContain("Role · 123456789012345671");
+    expect(content).toContain(
+      '"default_values":[{"id":"123456789012345670","type":"user"},{"id":"123456789012345671","type":"role"}]',
+    );
+    expect(content).not.toContain("Current subjects");
+    expect(content).not.toContain("configured");
   });
 
   it("clears a preset by removing every mentionable selection", async () => {
@@ -209,7 +212,7 @@ describe("permission settings category", () => {
       category.subcategories
         ?.find(({ id }) => id === "support_staff")
         ?.fields.map(({ id }) => id),
-    ).toEqual(["current", "subjects"]);
+    ).toEqual(["subjects"]);
   });
 
   it("preserves unseen additions from another settings message", async () => {
