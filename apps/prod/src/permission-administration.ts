@@ -125,6 +125,12 @@ export type PermissionAdministrationServiceOptions = Readonly<{
 }>;
 
 export interface PermissionAdministrationService {
+  hasGuildRecords(guildId: string): Promise<boolean>;
+  initializePresetsIfEmpty(input: {
+    guildId: string;
+    subjects: readonly PermissionSubject[];
+    actorUserId: string;
+  }): Promise<boolean>;
   listPresetSubjects(
     guildId: string,
     preset: PermissionPreset,
@@ -243,6 +249,37 @@ export const createPermissionAdministrationService = (
     options.rules.listForContext(createProdAuthorizationContext(guildId));
 
   const service: PermissionAdministrationService = {
+    hasGuildRecords: (guildId) =>
+      options.contributions.hasGuildRecords(guildId),
+    initializePresetsIfEmpty: async (input) => {
+      if (await options.contributions.hasGuildRecords(input.guildId)) {
+        return false;
+      }
+      for (const subject of input.subjects) validateSubject(subject);
+      const changes: PermissionContributionChange[] = PERMISSION_PRESETS.map(
+        (preset) => ({
+          kind: "replace-source" as const,
+          guildId: input.guildId,
+          origin: presetOrigin(preset),
+          contributions: input.subjects.flatMap((subject) =>
+            PERMISSION_PRESET_RULES[preset].map(({ object, verb }) => ({
+              identity: {
+                guildId: input.guildId,
+                subject,
+                object,
+                verb,
+              },
+              permit: "allow" as const,
+            })),
+          ),
+        }),
+      );
+      await options.contributions.apply({
+        changes,
+        actorUserId: input.actorUserId,
+      });
+      return true;
+    },
     listPresetSubjects: async (guildId: string, preset: PermissionPreset) => {
       const identities = await options.contributions.listForSource(
         guildId,

@@ -51,6 +51,8 @@ const setup = (initialSubjects: readonly PermissionSubject[] = []) => {
     },
   );
   const service: PermissionAdministrationService = {
+    hasGuildRecords: async () => false,
+    initializePresetsIfEmpty: async () => false,
     listPresetSubjects: async (_guildId, preset) => subjects.get(preset) ?? [],
     setPresetSubjects: async () => undefined,
     updatePresetSubjects,

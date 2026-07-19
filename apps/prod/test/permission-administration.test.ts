@@ -47,6 +47,54 @@ const otherRole = { subjectType: "role" as const, subjectId: "role-2" };
 const user = { subjectType: "user" as const, subjectId: "user-1" };
 
 describe("permission administration", () => {
+  it("initializes every preset once for the supplied subjects", async () => {
+    const { service } = await setup();
+
+    await expect(
+      service.initializePresetsIfEmpty({
+        guildId: "guild-1",
+        subjects: [role],
+        actorUserId: "bot-1",
+      }),
+    ).resolves.toBe(true);
+
+    for (const preset of [
+      "support_staff",
+      "assignment_manager",
+      "configurator",
+    ] as const) {
+      await expect(
+        service.listPresetSubjects("guild-1", preset),
+      ).resolves.toEqual([role]);
+    }
+  });
+
+  it("does not initialize a guild again after its configuration is cleared", async () => {
+    const { service } = await setup();
+    await service.initializePresetsIfEmpty({
+      guildId: "guild-1",
+      subjects: [role],
+      actorUserId: "bot-1",
+    });
+    await service.setPresetSubjects({
+      guildId: "guild-1",
+      preset: "support_staff",
+      subjects: [],
+      actorUserId: "admin-1",
+    });
+
+    await expect(
+      service.initializePresetsIfEmpty({
+        guildId: "guild-1",
+        subjects: [otherRole],
+        actorUserId: "bot-1",
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      service.listPresetSubjects("guild-1", "support_staff"),
+    ).resolves.toEqual([]);
+  });
+
   it.each([
     "support_staff" as const,
     "assignment_manager" as const,

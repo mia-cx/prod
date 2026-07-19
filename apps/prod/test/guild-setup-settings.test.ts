@@ -120,12 +120,20 @@ const setup = async (
       ? { permissionAdministration, permissionAuthorization }
       : {}),
   });
-  return { connection, store, supportHub, runtime };
+  return {
+    connection,
+    store,
+    supportHub,
+    runtime,
+    permissionAdministration,
+  };
 };
 
 const guildRecord: Record<string, unknown> = {
   id: guildId,
   ownerId,
+  client: { user: { id: "bot-1" } },
+  roles: { cache: new Collection() },
 };
 guildRecord.members = {
   fetch: async (userId: string) => ({
@@ -285,6 +293,60 @@ const modalRoute = (
 });
 
 describe("guild setup settings integration", () => {
+  it("adds Manage Server roles to every permission preset on first reconciliation", async () => {
+    const { runtime, permissionAdministration } = await setup({}, true);
+    const bootstrapGuildId = "123456789012345690";
+    const managerRoleId = "123456789012345691";
+    const ordinaryRoleId = "123456789012345692";
+    const bootstrapGuild = {
+      id: bootstrapGuildId,
+      ownerId,
+      client: { user: { id: "bot-1" } },
+      roles: {
+        cache: new Collection([
+          [
+            bootstrapGuildId,
+            {
+              id: bootstrapGuildId,
+              permissions: permissions(PermissionFlagsBits.ManageGuild),
+            },
+          ],
+          [
+            managerRoleId,
+            {
+              id: managerRoleId,
+              permissions: permissions(PermissionFlagsBits.ManageGuild),
+            },
+          ],
+          [
+            ordinaryRoleId,
+            { id: ordinaryRoleId, permissions: permissions() },
+          ],
+        ]),
+      },
+    } as unknown as Guild;
+    const client = {
+      guilds: {
+        fetch: vi.fn(),
+        cache: new Map([[bootstrapGuildId, bootstrapGuild]]),
+      },
+    } as unknown as Client<true>;
+
+    await runtime.reconcile!(client);
+
+    for (const preset of [
+      "support_staff",
+      "assignment_manager",
+      "configurator",
+    ] as const) {
+      await expect(
+        permissionAdministration.listPresetSubjects(bootstrapGuildId, preset),
+      ).resolves.toEqual([
+        { subjectType: "role", subjectId: managerRoleId },
+      ]);
+    }
+  });
+
   it("renders direct Setup fields and nested Identity pages", async () => {
     const { runtime } = await setup();
     const opened = command(ownerId);

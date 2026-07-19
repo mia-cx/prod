@@ -76,6 +76,7 @@ export type PermissionOriginEvent = Readonly<{
 }>;
 
 export interface PermissionContributionStore {
+  hasGuildRecords(guildId: string): Promise<boolean>;
   apply(input: {
     changes: readonly PermissionContributionChange[];
     actorUserId: string;
@@ -348,6 +349,13 @@ export const createPermissionContributionStore = (
   };
 
   const service: PermissionContributionStore = {
+    hasGuildRecords: async (guildId) =>
+      database
+        .select({ id: permissionRules.id })
+        .from(permissionRules)
+        .where(eq(permissionRules.guildId, guildId))
+        .limit(1)
+        .get() !== undefined,
     apply: async ({ changes, actorUserId }) => {
       database.transaction((transaction) => {
         const affected = new Map<string, PermissionRuleIdentity>();

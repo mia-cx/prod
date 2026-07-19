@@ -91,6 +91,40 @@ export function createGuildSetupSettingsConsumer(
     ticketProvisioning,
     executeGuildOperation,
   );
+  const permissionInitializations = new Map<string, Promise<void>>();
+  const initializePermissions = async (guild: Guild): Promise<void> => {
+    if (permissionSettings === undefined) return;
+    const active = permissionInitializations.get(guild.id);
+    if (active !== undefined) return active;
+    const initialization = (async () => {
+      if (await permissionSettings.administration.hasGuildRecords(guild.id)) {
+        return;
+      }
+      const subjects = [...guild.roles.cache.values()]
+        .filter(
+          (role) =>
+            role.id !== guild.id &&
+            role.permissions.has(PermissionFlagsBits.ManageGuild),
+        )
+        .map((role) => ({
+          subjectType: "role" as const,
+          subjectId: role.id,
+        }));
+      if (subjects.length === 0) return;
+      await permissionSettings.administration.initializePresetsIfEmpty({
+        guildId: guild.id,
+        subjects,
+        actorUserId:
+          guild.client.user?.id ?? "system:guild-permission-bootstrap",
+      });
+    })();
+    permissionInitializations.set(guild.id, initialization);
+    try {
+      await initialization;
+    } finally {
+      permissionInitializations.delete(guild.id);
+    }
+  };
   const authorizeSetup = async (context: GuildSetupSettingsContext) => {
     if (context.guild === undefined) {
       return {
@@ -474,6 +508,9 @@ export function createGuildSetupSettingsConsumer(
     authorization: () => undefined,
     execute: async (invocation) => {
       const interaction = invocation.rawEvent as ChatInputCommandInteraction;
+      if (interaction.guild !== null) {
+        await initializePermissions(interaction.guild);
+      }
       return runtime.open(
         interaction,
         settingsContext(interaction, isApplicationOperator),
@@ -483,12 +520,19 @@ export function createGuildSetupSettingsConsumer(
 
   return Object.freeze({
     action,
-    reconcile: (guild: Guild) => setup.get(guild),
-    handle: (interaction) =>
-      runtime.handle(
+    reconcile: async (guild: Guild) => {
+      await initializePermissions(guild);
+      return setup.get(guild);
+    },
+    handle: async (interaction) => {
+      if (interaction.guild !== null) {
+        await initializePermissions(interaction.guild);
+      }
+      return runtime.handle(
         interaction,
         settingsContext(interaction, isApplicationOperator),
-      ),
+      );
+    },
   });
 }
 

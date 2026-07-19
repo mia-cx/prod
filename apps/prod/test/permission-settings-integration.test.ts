@@ -133,6 +133,25 @@ describe("permission settings integration", () => {
     const guildRecord: Record<string, unknown> = {
       id: guildId,
       ownerId: managerId,
+      client: { user: { id: "bot-1" } },
+      roles: {
+        cache: new Collection([
+          [
+            guildId,
+            {
+              id: guildId,
+              permissions: { has: () => false },
+            },
+          ],
+          [
+            configuratorRoleId,
+            {
+              id: configuratorRoleId,
+              permissions: { has: () => false },
+            },
+          ],
+        ]),
+      },
     };
     const member: DiscordMemberLike = {
       id: managerId,
