@@ -349,6 +349,44 @@ describe("Components v2 settings rendering", () => {
     );
   });
 
+  it("renders display and button copy without a current-state prefix", async () => {
+    const renderer = createSettingsRenderer<Context>({
+      title: "Plain copy",
+      categories: [
+        {
+          id: "setup",
+          label: "Setup",
+          authorize: () => true,
+          fields: [
+            {
+              kind: "display",
+              id: "summary",
+              label: "Summary",
+              load: () => ({ value: "Nothing configured." }),
+            },
+            {
+              kind: "button",
+              id: "refresh",
+              label: "Refresh",
+              load: () => ({ value: "Reload the data." }),
+              mutate: () => undefined,
+            },
+          ],
+        },
+      ],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "setup" },
+      { userId: "admin" },
+    );
+    const payload = JSON.stringify(rendered.components);
+
+    expect(payload).toContain("Nothing configured.");
+    expect(payload).toContain("Reload the data.");
+    expect(payload).not.toContain("**Current:**");
+  });
+
   it("reserves notice space when paginating direct category fields", async () => {
     const renderer = createSettingsRenderer<Context>({
       title: "Direct settings",

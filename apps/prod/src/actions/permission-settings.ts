@@ -461,22 +461,7 @@ export function createPermissionSettingsCategory<
     },
   ];
 
-  const inspectionFields: SettingsField<Context>[] = [
-    {
-      kind: "display",
-      id: "summary",
-      label: "Active rules",
-      load: async (context) => {
-        const page = await options.service.listRules({
-          guildId: requireGuildId(context),
-          limit: 1,
-        });
-        return {
-          value: `${String(page.total)} active ${page.total === 1 ? "rule" : "rules"}. Rules are grouped into paginated removal controls below.`,
-        };
-      },
-    },
-  ];
+  const inspectionFields: SettingsField<Context>[] = [];
   const rulePageKey = (context: Context) => draftKey(context);
   const getRulePage = (context: Context) =>
     ruleRemovalPages.get(rulePageKey(context)) ?? 0;
@@ -484,7 +469,8 @@ export function createPermissionSettingsCategory<
     {
       kind: "string-select",
       id: "rules",
-      label: "Inspect or remove rules on current page",
+      label: "Rules",
+      description: "Select one active rule to remove.",
       load: async (context) => {
         const guildId = requireGuildId(context);
         const summary = await options.service.listRules({ guildId, limit: 1 });
@@ -500,10 +486,6 @@ export function createPermissionSettingsCategory<
           limit: RULES_PER_CONTROL,
         });
         return {
-          value:
-            page.items.length === 0
-              ? "No active rules in this range."
-              : `Page ${String(pageNumber + 1)} of ${String(lastPage + 1)}\n${page.items.map((rule) => `${ruleLabel(rule)} · ${ruleDescription(rule)}`).join("\n")}`,
           options:
             page.items.length === 0
               ? emptyOption("No rules in this range")
@@ -531,9 +513,15 @@ export function createPermissionSettingsCategory<
     {
       kind: "button",
       id: "rules-previous",
-      label: "Previous rule page",
+      label: "Previous page",
+      visible: async (context) =>
+        (
+          await options.service.listRules({
+            guildId: requireGuildId(context),
+            limit: 1,
+          })
+        ).total > RULES_PER_CONTROL,
       load: (context) => ({
-        value: "Show the previous page of active rules.",
         buttonLabel: "Previous",
         disabled: getRulePage(context) === 0,
       }),
@@ -547,14 +535,20 @@ export function createPermissionSettingsCategory<
     {
       kind: "button",
       id: "rules-next",
-      label: "Next rule page",
+      label: "Next page",
+      visible: async (context) =>
+        (
+          await options.service.listRules({
+            guildId: requireGuildId(context),
+            limit: 1,
+          })
+        ).total > RULES_PER_CONTROL,
       load: async (context) => {
         const page = await options.service.listRules({
           guildId: requireGuildId(context),
           limit: 1,
         });
         return {
-          value: "Show the next page of active rules.",
           buttonLabel: "Next",
           disabled:
             (getRulePage(context) + 1) * RULES_PER_CONTROL >= page.total,

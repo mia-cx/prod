@@ -500,6 +500,28 @@ describe("permission settings category", () => {
     );
   });
 
+  it("renders an empty rule inspector without summaries or pagination", async () => {
+    const { category } = setup();
+    const renderer = createSettingsRenderer({
+      title: "Prod settings",
+      categories: [category],
+    });
+
+    const rendered = await renderer.render(
+      { categoryId: "permissions", subcategoryId: "rules", page: 0 },
+      context,
+    );
+    const payload = JSON.stringify(rendered.components);
+
+    expect(payload).toContain("## Rules");
+    expect(payload).toContain("Select one active rule to remove.");
+    expect(payload).toContain("No rules in this range");
+    expect(payload).not.toContain("Active rules");
+    expect(payload).not.toContain("Previous page");
+    expect(payload).not.toContain("Next page");
+    expect(payload).not.toContain("**Current:**");
+  });
+
   it("exposes no category- or channel-context administration control", () => {
     const { category } = setup();
     const serialized = JSON.stringify(category);

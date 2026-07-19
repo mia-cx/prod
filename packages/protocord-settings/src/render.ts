@@ -947,11 +947,15 @@ function fieldText<Context>(
     field.kind === "string-select" ||
     field.kind === "mentionable-select" ||
     field.kind === "channel-select";
-  return [
-    `## ${field.label}`,
+  const renderedValue =
     value === undefined || stateIsRenderedByControl
       ? undefined
-      : `**Current:** ${value}`,
+      : field.kind === "modal"
+        ? `**Current:** ${value}`
+        : value;
+  return [
+    `## ${field.label}`,
+    renderedValue,
     field.description,
   ]
     .filter((part) => part !== undefined)
