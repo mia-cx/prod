@@ -378,7 +378,7 @@ export const createTicketProvisioningDiscord =
           type: ChannelType.PrivateThread,
           invitable: false,
           autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
-          reason: `Provision Prod ticket ${ticket.id}`,
+          reason: `Provision Prod ticket ${ticket.number}`,
         });
         return thread.id;
       },
@@ -398,7 +398,7 @@ export const createTicketProvisioningDiscord =
             throw error;
           });
         if (wasArchived) {
-          await thread.setArchived(false, `Recover Prod ticket ${ticket.id}`);
+          await thread.setArchived(false, `Recover Prod ticket ${ticket.number}`);
         }
         return Object.freeze({ wasArchived, reporterWasMember });
       },
@@ -469,7 +469,7 @@ export const createTicketProvisioningDiscord =
           await thread
             .setArchived(
               true,
-              `Roll back failed Prod ticket recovery ${ticket.id}`,
+              `Roll back failed Prod ticket recovery ${ticket.number}`,
             )
             .catch((error: unknown) => rollbackErrors.push(error));
         }

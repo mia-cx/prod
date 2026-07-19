@@ -1429,7 +1429,7 @@ describe("Discord ticket privacy adapter", () => {
     ).resolves.toEqual({ wasArchived: true, reporterWasMember: false });
     expect(setArchived).toHaveBeenCalledWith(
       false,
-      "Recover Prod ticket ticket-stale",
+      "Recover Prod ticket 1",
     );
     expect(getThreadMember).toHaveBeenCalledWith(
       Routes.threadMembers("thread-match", "reporter-1"),
@@ -1578,7 +1578,7 @@ describe("Discord ticket privacy adapter", () => {
     expect(remove).toHaveBeenCalledWith("reporter-1");
     expect(setArchived).toHaveBeenCalledWith(
       true,
-      "Roll back failed Prod ticket recovery ticket-stale",
+      "Roll back failed Prod ticket recovery 42",
     );
   });
 
