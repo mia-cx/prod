@@ -133,7 +133,6 @@ const setup = async (
         defaultModelId: "google/gemma-4-31b-it",
       },
     ),
-    modelCatalog: { listModels: async () => [] },
     deploymentCredentialConfigured: false,
     ...(withPermissionSettings
       ? { permissionAdministration, permissionAuthorization }

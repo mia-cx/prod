@@ -1,22 +1,21 @@
-import { validateSettingsDefinition } from "@protocord/settings";
+import {
+  createSettingsRenderer,
+  validateSettingsDefinition,
+} from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createModelSettingsCategory,
   type GuildModelConfiguration,
   type ModelConfigurationStore,
-  type ProviderCatalog,
 } from "../src/index.js";
 
 type Context = Readonly<{ guildId: string; authorized: boolean }>;
 const guildId = "123456789012345678";
 const secret = "sk-or-v1-never-render-this-1234";
+const secretHint = "sk-o•••••••••••••••••••••••1234";
 
-const setup = (
-  catalog: ProviderCatalog = {
-    listModels: async () => [{ id: "openai/gpt-5-mini", name: "GPT-5 mini" }],
-  },
-) => {
+const setup = () => {
   let configuration: GuildModelConfiguration = {
     guildId,
     purpose: "triage",
@@ -30,7 +29,7 @@ const setup = (
     }),
     setGuildApiKey: vi.fn(async (input) => {
       expect(input.apiKey).toBe(secret);
-      configuration = { ...configuration, guildApiKeyHint: "••••1234" };
+      configuration = { ...configuration, guildApiKeyHint: secretHint };
     }),
     clearGuildApiKey: vi.fn(async () => {
       configuration = {
@@ -43,7 +42,6 @@ const setup = (
   };
   const category = createModelSettingsCategory<Context>({
     store,
-    catalog,
     authorize: (context) => context.authorized,
     getGuildId: (context) => context.guildId,
     deploymentCredentialConfigured: true,
@@ -53,19 +51,20 @@ const setup = (
 
 const field = (
   category: ReturnType<typeof setup>["category"],
-  subcategoryId: string,
   fieldId: string,
 ) => {
-  const subcategory = category.subcategories?.find(
-    ({ id }) => id === subcategoryId,
-  );
-  const result = subcategory?.fields.find(({ id }) => id === fieldId);
-  if (result === undefined) throw new Error(`Missing field ${fieldId}`);
-  return result;
+  for (const candidate of category.fields ?? []) {
+    if (candidate.id === fieldId) return candidate;
+    if (candidate.kind === "action-row") {
+      const item = candidate.items.find(({ id }) => id === fieldId);
+      if (item !== undefined) return item;
+    }
+  }
+  throw new Error(`Missing field ${fieldId}`);
 };
 
 describe("model settings category", () => {
-  it("exports a complete settings-consumer category with caller authorization", async () => {
+  it("exports one direct model page with caller authorization", async () => {
     const { category } = setup();
     expect(() =>
       validateSettingsDefinition({ title: "Settings", categories: [category] }),
@@ -73,108 +72,129 @@ describe("model settings category", () => {
     expect(await category.authorize({ guildId, authorized: false })).toBe(
       false,
     );
-    expect(category.subcategories?.map(({ id }) => id)).toEqual([
-      "triage",
-      "credentials",
+    expect(category.subcategories).toBeUndefined();
+    expect(category.fields?.map(({ id }) => id)).toEqual([
+      "provider",
+      "guild-api-key",
+      "model-id",
+      "credential-actions",
     ]);
   });
 
-  it("selects catalog suggestions and permits independent manual model entry", async () => {
+  it("renders the provider, API key, and selected model without a page selector", async () => {
+    const { category } = setup();
+    const renderer = createSettingsRenderer({
+      title: "Prod settings",
+      categories: [category],
+    });
+
+    const view = await renderer.render(
+      { categoryId: "model" },
+      { guildId, authorized: true },
+    );
+    const payload = JSON.stringify(view.components);
+    expect(payload).not.toContain("Choose a settings page");
+    expect(payload).not.toContain("Catalog suggestions");
+    expect(payload).toContain("Provider");
+    expect(payload).toContain("**API key:**");
+    expect(payload).toContain("Set API key");
+    expect(payload).toContain("**Model:**");
+    expect(payload).toContain("Set Model");
+  });
+
+  it("offers only OpenRouter and accepts any valid model ID", async () => {
     const { category, store } = setup();
     const context = { guildId, authorized: true };
-    const catalog = field(category, "triage", "catalog-model");
-    const manual = field(category, "triage", "manual-model");
-    if (catalog.kind !== "string-select" || manual.kind !== "modal") {
+    const provider = field(category, "provider");
+    const model = field(category, "model-id");
+    if (provider.kind !== "string-select" || model.kind !== "modal") {
       throw new Error("Unexpected field kinds");
     }
 
-    await catalog.mutate(["openai/gpt-5-mini"], context);
-    await manual.mutate({ "model-id": "google/gemini-2.5-flash" }, context);
-    expect(store.setModel).toHaveBeenNthCalledWith(1, {
-      guildId,
-      purpose: "triage",
-      provider: "openrouter",
-      modelId: "openai/gpt-5-mini",
+    await expect(provider.load(context)).resolves.toMatchObject({
+      options: [{ label: "OpenRouter", value: "openrouter", default: true }],
+      selectedValues: ["openrouter"],
     });
-    expect(store.setModel).toHaveBeenNthCalledWith(2, {
+    await model.mutate({ "model-id": "google/gemini-2.5-flash" }, context);
+    expect(store.setModel).toHaveBeenCalledWith({
       guildId,
       purpose: "triage",
       provider: "openrouter",
       modelId: "google/gemini-2.5-flash",
     });
-    await expect(manual.load(context)).resolves.toMatchObject({
-      value: "Current: `google/gemini-2.5-flash`",
+    await expect(model.load(context)).resolves.toMatchObject({
+      value: "`google/gemini-2.5-flash`",
+      buttonLabel: "Set Model",
     });
-  });
-
-  it("keeps manual entry usable and renders no adapter details during catalog failure", async () => {
-    const adapterSecret = "adapter-authorization-header";
-    const { category } = setup({
-      listModels: async () => {
-        throw new Error(adapterSecret);
-      },
-    });
-    const catalog = field(category, "triage", "catalog-model");
-    const manual = field(category, "triage", "manual-model");
-    if (catalog.kind !== "string-select" || manual.kind !== "modal") {
-      throw new Error("Unexpected field kinds");
-    }
-
-    const view = await catalog.load({ guildId, authorized: true });
-    expect(view.value).toContain("Enter a model ID manually");
-    expect(view.options).toHaveLength(1);
-    expect(JSON.stringify(view)).not.toContain(adapterSecret);
-    await expect(
-      manual.mutate(
-        { "model-id": "manual/model" },
-        { guildId, authorized: true },
-      ),
-    ).resolves.toBeUndefined();
   });
 
   it("sets, masks, and clears BYOK without returning the complete key", async () => {
     const { category, store } = setup();
     const context = { guildId, authorized: true };
-    const key = field(category, "credentials", "guild-api-key");
-    const status = field(category, "credentials", "credential-status");
-    const clear = field(category, "credentials", "clear-guild-api-key");
-    if (
-      key.kind !== "modal" ||
-      status.kind !== "display" ||
-      clear.kind !== "button"
-    ) {
+    const key = field(category, "guild-api-key");
+    const clear = field(category, "clear-guild-api-key");
+    if (key.kind !== "modal" || clear.kind !== "button") {
       throw new Error("Unexpected field kinds");
     }
+    expect(key.presentation).toEqual({ kind: "inline" });
     expect(key.inputs).toContainEqual(
       expect.objectContaining({ id: "api-key", sensitive: true }),
     );
 
     await key.mutate({ "api-key": secret }, context);
-    const configuredViews = await Promise.all([
-      key.load(context),
-      status.load(context),
-      clear.load(context),
-    ]);
-    expect(JSON.stringify(configuredViews)).not.toContain(secret);
-    expect(JSON.stringify(configuredViews)).toContain("••••1234");
+    const configuredView = await key.load(context);
+    expect(JSON.stringify(configuredView)).not.toContain(secret);
+    expect(configuredView).toEqual({
+      value: `\`${secretHint}\``,
+      buttonLabel: "Set API key",
+    });
+    await expect(clear.visible?.(context)).resolves.toBe(true);
+
+    const renderer = createSettingsRenderer({
+      title: "Prod settings",
+      categories: [category],
+    });
+    const configuredPage = await renderer.render(
+      { categoryId: "model" },
+      context,
+    );
+    const payload = JSON.stringify(configuredPage.components);
+    expect(payload).toContain(`\`${secretHint}\``);
+    expect(payload).toContain("**API key:**");
+    expect(payload).toContain("**Model:**");
+    expect(payload).not.toContain("Configured");
+    expect(payload).not.toContain("## API key");
+    expect(payload).not.toContain("## Model");
+    expect(payload).toContain("Clear API key");
+    expect(payload).not.toContain("Credential actions");
+    expect(payload).not.toContain(secret);
 
     await clear.mutate(context);
     expect(store.clearGuildApiKey).toHaveBeenCalledWith(guildId, "triage");
-    await expect(status.load(context)).resolves.toEqual({
-      value: "Using deployment-default credentials.",
+    await expect(key.load(context)).resolves.toEqual({
+      value: "Using the deployment API key",
+      buttonLabel: "Set API key",
     });
   });
 
-  it("rejects URLs, whitespace, and empty credentials with actionable validation", async () => {
+  it("rejects unsupported providers, URLs, whitespace, and empty credentials", async () => {
     const { category } = setup();
     const context = { guildId, authorized: true };
-    const manual = field(category, "triage", "manual-model");
-    const key = field(category, "credentials", "guild-api-key");
-    if (manual.kind !== "modal" || key.kind !== "modal") {
+    const provider = field(category, "provider");
+    const model = field(category, "model-id");
+    const key = field(category, "guild-api-key");
+    if (
+      provider.kind !== "string-select" ||
+      model.kind !== "modal" ||
+      key.kind !== "modal"
+    ) {
       throw new Error("Unexpected field kinds");
     }
+    expect(provider.mutate(["unsupported"], context)).toMatchObject({
+      status: "invalid",
+    });
     await expect(
-      manual.mutate({ "model-id": "https://example.test/model" }, context),
+      model.mutate({ "model-id": "https://example.test/model" }, context),
     ).resolves.toMatchObject({ status: "invalid" });
     await expect(
       key.mutate({ "api-key": " key with spaces " }, context),

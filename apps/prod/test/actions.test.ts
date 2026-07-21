@@ -10,10 +10,7 @@ import {
   type Message,
 } from "discord.js";
 import type { Logger } from "pino";
-import type {
-  ModelConfigurationStore,
-  ProviderCatalog,
-} from "@mia-cx/protocord-model-settings";
+import type { ModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 import type { DiscordInteractionHandleResult } from "protocord";
 import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
@@ -140,9 +137,6 @@ const modelConfigurationStore: ModelConfigurationStore = {
   setGuildApiKey: async () => undefined,
   clearGuildApiKey: async () => undefined,
 };
-const modelCatalog: ProviderCatalog = {
-  listModels: async () => [],
-};
 const runtimeOptions = {
   textCommandPrefix: "!",
   guildSettingsStore,
@@ -150,7 +144,6 @@ const runtimeOptions = {
   supportHubDiscord,
   ticketProvisioningService,
   modelConfigurationStore,
-  modelCatalog,
   deploymentCredentialConfigured: false,
 };
 

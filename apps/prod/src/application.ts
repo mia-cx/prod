@@ -20,7 +20,6 @@ import { createSqliteLabelTaxonomyStore } from "./label-taxonomy.js";
 import { createPermissionAdministrationService } from "./permission-administration.js";
 import { createPermissionContributionStore } from "./permission-contribution-store.js";
 import { applyMigrations } from "./migrations.js";
-import { createOpenRouterCatalog } from "./openrouter.js";
 import { createSupportHubDiscord } from "./support-hub.js";
 import {
   createTicketProvisioningDiscord,
@@ -116,9 +115,6 @@ export const startProd = async (
           defaultModelId: config.defaultTriageModel,
         },
       ),
-      modelCatalog: createOpenRouterCatalog({
-        baseUrl: config.openRouterBaseUrl,
-      }),
       deploymentCredentialConfigured: config.openRouterApiKey !== undefined,
       executeGuildOperation,
       permissionAdministration,

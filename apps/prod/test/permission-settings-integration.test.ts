@@ -182,7 +182,6 @@ describe("permission settings integration", () => {
           defaultModelId: "google/gemma-4-31b-it",
         },
       ),
-      modelCatalog: { listModels: async () => [] },
       deploymentCredentialConfigured: false,
       permissionAdministration: administration,
       permissionAuthorization,

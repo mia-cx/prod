@@ -1,9 +1,6 @@
 import type { ApplicationCommandData, Interaction, Message } from "discord.js";
 import type { Logger } from "pino";
-import type {
-  ModelConfigurationStore,
-  ProviderCatalog,
-} from "@mia-cx/protocord-model-settings";
+import type { ModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 import {
   createDiscordUserSubject,
   type AuthorizationContext,
@@ -63,7 +60,6 @@ export type ProdActionRuntimeOptions = Readonly<{
   supportHubDiscord: SupportHubDiscord;
   ticketProvisioningService: TicketProvisioningService;
   modelConfigurationStore: ModelConfigurationStore;
-  modelCatalog: ProviderCatalog;
   deploymentCredentialConfigured: boolean;
   executeGuildOperation?: ExecuteGuildOperation;
   permissionAdministration?: PermissionAdministrationService;
@@ -101,7 +97,6 @@ export const createProdActionRuntime = (
     options.supportHubDiscord,
     options.ticketProvisioningService,
     options.modelConfigurationStore,
-    options.modelCatalog,
     options.deploymentCredentialConfigured,
     options.executeGuildOperation,
     options.permissionAdministration === undefined ||

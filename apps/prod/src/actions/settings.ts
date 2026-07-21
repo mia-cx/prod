@@ -13,7 +13,6 @@ import type { Logger } from "pino";
 import {
   createModelSettingsCategory,
   type ModelConfigurationStore,
-  type ProviderCatalog,
 } from "@mia-cx/protocord-model-settings";
 import {
   createSettingsRuntime,
@@ -134,7 +133,6 @@ export function createGuildSetupSettingsConsumer(
   supportHub: SupportHubDiscord,
   ticketProvisioning: TicketProvisioningService,
   modelConfigurationStore: ModelConfigurationStore,
-  modelCatalog: ProviderCatalog,
   deploymentCredentialConfigured: boolean,
   executeGuildOperation?: ExecuteGuildOperation,
   permissionSettings?: PermissionSettingsDependencies,
@@ -313,7 +311,6 @@ export function createGuildSetupSettingsConsumer(
   };
   const modelCategory = createModelSettingsCategory<GuildSetupSettingsContext>({
     store: modelConfigurationStore,
-    catalog: modelCatalog,
     authorize: authorizeSetup,
     getGuildId: (context) => requireGuild(context).id,
     deploymentCredentialConfigured,
