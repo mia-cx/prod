@@ -19,6 +19,7 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node --input-type=module -e \"await import('./dist/index.js'); await import('./dist/schema.js')\"",
     "clean": "rm -rf dist coverage",
     "lint": "eslint src test --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
