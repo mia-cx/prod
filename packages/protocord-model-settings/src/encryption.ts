@@ -45,8 +45,12 @@ export const decodeEncryptionKey = (encoded: string): Buffer => {
   return decoded;
 };
 
+const HINT_MIN_REVEAL_LENGTH = 16;
+
 const keyHint = (apiKey: string): string =>
-  apiKey.length < 8 ? "Configured" : `••••${apiKey.slice(-4)}`;
+  apiKey.length < HINT_MIN_REVEAL_LENGTH
+    ? "•".repeat(8)
+    : `${apiKey.slice(0, 4)}${"•".repeat(apiKey.length - 8)}${apiKey.slice(-4)}`;
 
 const associatedData = (context: ApiKeyEncryptionContext): Buffer =>
   Buffer.from(
@@ -64,15 +68,11 @@ export const encryptApiKey = (
   apiKey: string,
   encryptionKey: BinaryLike,
   context: ApiKeyEncryptionContext,
-  createNonce: () => Buffer = () => randomBytes(NONCE_BYTES),
 ): EncryptedApiKey => {
   if (apiKey.trim().length === 0) {
     throw new TypeError("API key must not be empty");
   }
-  const nonce = createNonce();
-  if (nonce.length !== NONCE_BYTES) {
-    throw new TypeError("AES-256-GCM nonce must contain 12 bytes");
-  }
+  const nonce = randomBytes(NONCE_BYTES);
   const cipher = createCipheriv("aes-256-gcm", encryptionKey, nonce, {
     authTagLength: AUTH_TAG_BYTES,
   });

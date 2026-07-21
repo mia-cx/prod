@@ -23,7 +23,6 @@ export type CreateSqliteModelConfigurationStoreOptions = Readonly<{
   encryptionKey: string;
   defaultModelId: string;
   now?: () => string;
-  createNonce?: () => Buffer;
 }>;
 
 export type SqliteModelConfigurationStore = SecureModelConfigurationStore;
@@ -131,16 +130,11 @@ export const createSqliteModelConfigurationStore = (
     },
     setGuildApiKey: async (input: SetGuildApiKeyInput) => {
       assertIdentifier("guildId", input.guildId);
-      const encrypted = encryptApiKey(
-        input.apiKey,
-        encryptionKey,
-        {
-          guildId: input.guildId,
-          purpose: input.purpose,
-          provider: "openrouter",
-        },
-        options.createNonce,
-      );
+      const encrypted = encryptApiKey(input.apiKey, encryptionKey, {
+        guildId: input.guildId,
+        purpose: input.purpose,
+        provider: "openrouter",
+      });
       ensure(input.guildId, input.purpose);
       database
         .update(modelConfigurations)
@@ -170,7 +164,7 @@ export const createSqliteModelConfigurationStore = (
           apiKeyNonce: null,
           apiKeyAuthTag: null,
           apiKeyHint: null,
-          apiKeyEnvelopeVersion: 1,
+          apiKeyEnvelopeVersion: 0,
           updatedAt: now(),
         })
         .where(

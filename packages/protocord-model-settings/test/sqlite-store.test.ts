@@ -12,6 +12,7 @@ import {
 const encryptionKey = randomBytes(32).toString("base64");
 const guildId = "123456789012345678";
 const apiKey = "sk-or-v1-secret-value-1234";
+const apiKeyHint = "sk-o••••••••••••••••••1234";
 
 describe("SQLite model configuration store", () => {
   let sqlite: Database.Database;
@@ -75,11 +76,20 @@ describe("SQLite model configuration store", () => {
     expect(first.api_key_nonce).not.toBe(second.api_key_nonce);
     expect(first.encrypted_api_key).not.toBe(second.encrypted_api_key);
     expect(first.api_key_auth_tag).toBeTruthy();
-    expect(first.api_key_hint).toBe("••••1234");
+    expect(first.api_key_hint).toBe(apiKeyHint);
     expect(JSON.stringify(first)).not.toContain(apiKey);
     await expect(store.get(guildId, "triage")).resolves.toMatchObject({
-      guildApiKeyHint: "••••1234",
+      guildApiKeyHint: apiKeyHint,
     });
+  });
+
+  it("masks short keys entirely instead of revealing most characters", async () => {
+    const store = createStore();
+    const shortKey = "sk-abc123";
+    await store.setGuildApiKey({ guildId, purpose: "triage", apiKey: shortKey });
+
+    const { guildApiKeyHint } = await store.get(guildId, "triage");
+    expect(guildApiKeyHint).toBe("••••••••");
   });
 
   it("prefers guild BYOK, then falls back to deployment credentials after clearing", async () => {
