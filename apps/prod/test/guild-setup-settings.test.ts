@@ -120,19 +120,17 @@ const setup = async (
     contributions: createPermissionContributionStore(connection.database),
     authorize: async () => undefined,
   });
+  const modelStore = createSqliteModelConfigurationStore(connection.database, {
+    encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+    defaultModelId: "google/gemma-4-31b-it",
+  });
   const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
     textCommandPrefix: "",
     guildSettingsStore: store,
     labelTaxonomyStore: labelStore,
     supportHubDiscord: supportHub,
     ticketProvisioningService,
-    modelConfigurationStore: createSqliteModelConfigurationStore(
-      connection.database,
-      {
-        encryptionKey: Buffer.alloc(32, 7).toString("base64"),
-        defaultModelId: "google/gemma-4-31b-it",
-      },
-    ),
+    modelConfigurationStore: modelStore,
     deploymentCredentialConfigured: false,
     ...(withPermissionSettings
       ? { permissionAdministration, permissionAuthorization }
@@ -142,6 +140,7 @@ const setup = async (
     connection,
     store,
     labelStore,
+    modelStore,
     supportHub,
     runtime,
     permissionAdministration,
@@ -284,7 +283,9 @@ const component = (
   return interaction as typeof interaction & {
     editReply: ReturnType<typeof vi.fn>;
     followUp: ReturnType<typeof vi.fn>;
+    reply: ReturnType<typeof vi.fn>;
     showModal: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -341,6 +342,22 @@ const labelDeleteRoute = {
 const labelConfirmDeleteRoute = {
   ...labelDeleteRoute,
   fieldId: "label-delete-confirm",
+};
+
+const modelModalRoute = (fieldId: "guild-api-key" | "model-id") => ({
+  action: "modal-submit" as const,
+  categoryId: "model",
+  subcategoryId: "model",
+  fieldId,
+  page: 0,
+});
+
+const clearModelApiKeyRoute = {
+  action: "button" as const,
+  categoryId: "model",
+  subcategoryId: "model",
+  fieldId: "clear-guild-api-key",
+  page: 0,
 };
 
 describe("guild setup settings integration", () => {
@@ -577,6 +594,151 @@ describe("guild setup settings integration", () => {
     expect(
       styleButton.showModal.mock.calls[0]?.[0]?.components[0]?.component,
     ).not.toHaveProperty("max_length");
+  });
+
+  it("renders the OpenRouter model settings category", async () => {
+    const { runtime } = await setup();
+    const modelCategory = component(
+      "string",
+      {
+        action: "category",
+        categoryId: "setup",
+        subcategoryId: "setup",
+        page: 0,
+      },
+      { selectedValues: ["model"] },
+    );
+
+    await runtime.handleInteraction(modelCategory as unknown as Interaction);
+
+    const page = JSON.stringify(modelCategory.editReply.mock.calls[0]?.[0]);
+    expect(page).toContain("OpenRouter");
+    expect(page).toContain("**Model:**");
+    expect(page).toContain("google/gemma-4-31b-it");
+    expect(page).toContain("**API key:**");
+    expect(page).toContain("No API key configured");
+  });
+
+  it("opens and submits the model ID modal with a persisted rerender", async () => {
+    const { runtime, modelStore } = await setup();
+    const open = component("button", {
+      ...modelModalRoute("model-id"),
+      action: "modal",
+    });
+    await runtime.handleInteraction(open as unknown as Interaction);
+    expect(open.showModal).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Set model ID" }),
+    );
+    const modalCustomId = open.showModal.mock.calls[0]?.[0]?.custom_id;
+    expect(modalCustomId).toEqual(expect.any(String));
+    const decoded = decodeSettingsCustomId(modalCustomId as string);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) throw new Error("Expected a settings modal route");
+
+    const submit = component("modal", decoded.route, {
+      modalValues: { "model-id": "anthropic/claude-sonnet-4" },
+    });
+    await runtime.handleInteraction(submit as unknown as Interaction);
+
+    await expect(modelStore.get(guildId, "triage")).resolves.toMatchObject({
+      modelId: "anthropic/claude-sonnet-4",
+    });
+    expect(JSON.stringify(submit.editReply.mock.calls[0]?.[0])).toContain(
+      "anthropic/claude-sonnet-4",
+    );
+  });
+
+  it("sets a guild API key without exposing it in reply payloads", async () => {
+    const { runtime, modelStore } = await setup();
+    const apiKey = "sk-or-v1-integration-secret-9876";
+    const open = component("button", {
+      ...modelModalRoute("guild-api-key"),
+      action: "modal",
+    });
+    await runtime.handleInteraction(open as unknown as Interaction);
+    expect(open.showModal).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Set OpenRouter API key" }),
+    );
+    const modalCustomId = open.showModal.mock.calls[0]?.[0]?.custom_id;
+    expect(modalCustomId).toEqual(expect.any(String));
+    const decoded = decodeSettingsCustomId(modalCustomId as string);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) throw new Error("Expected a settings modal route");
+
+    const submit = component("modal", decoded.route, {
+      modalValues: { "api-key": apiKey },
+    });
+    await runtime.handleInteraction(submit as unknown as Interaction);
+
+    await expect(modelStore.get(guildId, "triage")).resolves.toMatchObject({
+      guildApiKeyHint: "sk-o••••••••9876",
+    });
+    const page = JSON.stringify(submit.editReply.mock.calls[0]?.[0]);
+    expect(page).toContain("sk-o••••••••9876");
+    const replyPayloads = JSON.stringify([
+      open.reply.mock.calls,
+      open.followUp.mock.calls,
+      open.editReply.mock.calls,
+      open.showModal.mock.calls,
+      submit.reply.mock.calls,
+      submit.followUp.mock.calls,
+      submit.update.mock.calls,
+      submit.editReply.mock.calls,
+    ]);
+    expect(replyPayloads).not.toContain(apiKey);
+  });
+
+  it("clears the guild API key and rerenders the no-key status", async () => {
+    const { runtime, modelStore } = await setup();
+    await modelStore.setGuildApiKey({
+      guildId,
+      purpose: "triage",
+      apiKey: "sk-or-v1-clear-this-secret-4321",
+    });
+    const clear = component("button", clearModelApiKeyRoute);
+
+    await runtime.handleInteraction(clear as unknown as Interaction);
+
+    await expect(modelStore.get(guildId, "triage")).resolves.not.toHaveProperty(
+      "guildApiKeyHint",
+    );
+    const page = JSON.stringify(clear.editReply.mock.calls[0]?.[0]);
+    expect(page).toContain("No API key configured");
+    expect(page).not.toContain("Clear API key");
+  });
+
+  it("rechecks authorization before a model settings mutation", async () => {
+    const { runtime, store, modelStore } = await setup();
+    await store.configureHub(guildId, hubChannelId, ownership());
+    const open = component("button", {
+      ...modelModalRoute("model-id"),
+      action: "modal",
+    });
+    await runtime.handleInteraction(open as unknown as Interaction);
+    const modalCustomId = open.showModal.mock.calls[0]?.[0]?.custom_id;
+    expect(modalCustomId).toEqual(expect.any(String));
+    const decoded = decodeSettingsCustomId(modalCustomId as string);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) throw new Error("Expected a settings modal route");
+    const unauthorized = component("modal", decoded.route, {
+      userId: "ordinary-member",
+      allowed: [],
+      modalValues: { "model-id": "anthropic/claude-sonnet-4" },
+    });
+
+    await runtime.handleInteraction(unauthorized as unknown as Interaction);
+
+    expect(unauthorized.editReply).not.toHaveBeenCalled();
+    expect(unauthorized.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "Manage Server permission or bot operator access is required for settings.",
+        flags: MessageFlags.Ephemeral,
+      }),
+    );
+    await expect(modelStore.get(guildId, "triage")).resolves.toMatchObject({
+      modelId: "google/gemma-4-31b-it",
+    });
   });
 
   it("recovers a promoted hub transition without globally reasserting access", async () => {
