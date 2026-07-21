@@ -278,6 +278,7 @@ describe("the app dev process", () => {
     let firstFixturePid: number | undefined;
 
     try {
+      await fixture.waitForOutput("fixture development-conditions=true");
       await fixture.waitForOutput("fixture ready");
       firstFixturePid = fixture.fixturePid();
       await writeFile(join(packageSourceDirectory, "changed.ts"), "export {};\n");

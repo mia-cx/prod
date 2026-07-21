@@ -84,6 +84,7 @@ afterEach(() => {
 const setup = async (
   overrides: Partial<SupportHubDiscord> = {},
   withPermissionSettings = false,
+  deploymentCredentialConfigured = false,
 ) => {
   const connection = openDatabase(":memory:");
   connections.push(connection);
@@ -131,7 +132,7 @@ const setup = async (
     supportHubDiscord: supportHub,
     ticketProvisioningService,
     modelConfigurationStore: modelStore,
-    deploymentCredentialConfigured: false,
+    deploymentCredentialConfigured,
     ...(withPermissionSettings
       ? { permissionAdministration, permissionAuthorization }
       : {}),
@@ -617,6 +618,26 @@ describe("guild setup settings integration", () => {
     expect(page).toContain("google/gemma-4-31b-it");
     expect(page).toContain("**API key:**");
     expect(page).toContain("No API key configured");
+  });
+
+  it("reports the deployment API key as the credential source when configured", async () => {
+    const { runtime } = await setup({}, false, true);
+    const modelCategory = component(
+      "string",
+      {
+        action: "category",
+        categoryId: "setup",
+        subcategoryId: "setup",
+        page: 0,
+      },
+      { selectedValues: ["model"] },
+    );
+
+    await runtime.handleInteraction(modelCategory as unknown as Interaction);
+
+    const page = JSON.stringify(modelCategory.editReply.mock.calls[0]?.[0]);
+    expect(page).toContain("Using the deployment API key");
+    expect(page).not.toContain("No API key configured");
   });
 
   it("opens and submits the model ID modal with a persisted rerender", async () => {

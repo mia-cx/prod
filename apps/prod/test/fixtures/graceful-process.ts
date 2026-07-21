@@ -9,4 +9,7 @@ process.once("SIGINT", () => {
 });
 
 console.log(`fixture pid=${process.pid}`);
+console.log(
+  `fixture development-conditions=${process.execArgv.includes("--conditions=development")}`,
+);
 console.log("fixture ready");
