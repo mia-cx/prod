@@ -4,6 +4,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import {
   InvalidModelConfigurationError,
   ModelCredentialError,
+  isValidModelIdentifier,
   type GuildModelConfiguration,
   type ModelPurpose,
   type SecureModelConfigurationStore,
@@ -28,12 +29,7 @@ export type CreateSqliteModelConfigurationStoreOptions = Readonly<{
 export type SqliteModelConfigurationStore = SecureModelConfigurationStore;
 
 const assertIdentifier = (label: string, value: string): void => {
-  if (
-    value.length === 0 ||
-    value.length > 200 ||
-    /[\s`]/u.test(value) ||
-    value.includes("://")
-  ) {
+  if (!isValidModelIdentifier(value)) {
     throw new InvalidModelConfigurationError(`${label} is invalid`);
   }
 };
@@ -112,12 +108,23 @@ export const createSqliteModelConfigurationStore = (
     setModel: async (input: SetModelInput) => {
       assertIdentifier("guildId", input.guildId);
       assertIdentifier("modelId", input.modelId);
-      ensure(input.guildId, input.purpose);
+      const row = ensure(input.guildId, input.purpose);
       database
         .update(modelConfigurations)
         .set({
           provider: input.provider,
           modelId: input.modelId,
+          // A provider switch invalidates the AAD-bound credential; clear it
+          // so resolve() falls back instead of failing decryption forever.
+          ...(input.provider === row.provider
+            ? {}
+            : {
+                encryptedApiKey: null,
+                apiKeyNonce: null,
+                apiKeyAuthTag: null,
+                apiKeyHint: null,
+                apiKeyEnvelopeVersion: 0,
+              }),
           updatedAt: now(),
         })
         .where(

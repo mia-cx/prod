@@ -53,6 +53,13 @@ export interface SecureModelConfigurationStore
   ): Promise<ResolvedModelConfiguration | UnavailableModelConfiguration>;
 }
 
+const MODEL_IDENTIFIER_PATTERN = /^[\w.:-]+(?:\/[\w.:-]+)*$/u;
+const MODEL_IDENTIFIER_MAX_LENGTH = 200;
+
+export const isValidModelIdentifier = (value: string): boolean =>
+  value.length <= MODEL_IDENTIFIER_MAX_LENGTH &&
+  MODEL_IDENTIFIER_PATTERN.test(value);
+
 export class InvalidModelConfigurationError extends Error {
   override readonly name = "InvalidModelConfigurationError";
 }

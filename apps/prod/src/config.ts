@@ -1,12 +1,15 @@
 import { Schema } from "effect";
-import { decodeEncryptionKey } from "@mia-cx/protocord-model-settings";
+import {
+  decodeEncryptionKey,
+  isValidModelIdentifier,
+} from "@mia-cx/protocord-model-settings";
 
 const NonEmptyString = Schema.String.pipe(Schema.minLength(1));
 const NoWhitespaceString = NonEmptyString.pipe(
   Schema.pattern(/^\S+$/),
 );
-const ModelIdentifier = NoWhitespaceString.pipe(
-  Schema.filter((value) => !value.includes("://") && value.length <= 200, {
+const ModelIdentifier = NonEmptyString.pipe(
+  Schema.filter(isValidModelIdentifier, {
     message: () => "must be a model identifier, not a URL",
   }),
 );

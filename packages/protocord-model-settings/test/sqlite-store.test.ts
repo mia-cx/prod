@@ -83,6 +83,27 @@ describe("SQLite model configuration store", () => {
     });
   });
 
+  it("clears the stored credential when the provider changes", async () => {
+    const store = createStore();
+    await store.setGuildApiKey({ guildId, purpose: "triage", apiKey });
+    await store.setModel({
+      guildId,
+      purpose: "triage",
+      provider: "other-provider" as never,
+      modelId: "openai/gpt-5-mini",
+    });
+
+    await expect(store.get(guildId, "triage")).resolves.not.toHaveProperty(
+      "guildApiKeyHint",
+    );
+    await expect(
+      store.resolve(guildId, "triage", "deployment-secret"),
+    ).resolves.toMatchObject({
+      available: true,
+      credentialSource: "deployment",
+    });
+  });
+
   it("masks short keys entirely instead of revealing most characters", async () => {
     const store = createStore();
     const shortKey = "sk-abc123";

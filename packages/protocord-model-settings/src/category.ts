@@ -8,6 +8,7 @@ import type {
 
 import {
   InvalidModelConfigurationError,
+  isValidModelIdentifier,
   type ModelConfigurationStore,
 } from "./contracts.js";
 
@@ -36,12 +37,7 @@ const modalText = (values: SettingsModalValues, inputId: string): string => {
 };
 
 const modelIdIssue = (value: string): SettingsValidationIssue | undefined => {
-  if (
-    value.length === 0 ||
-    value.length > 200 ||
-    /[\s`]/u.test(value) ||
-    value.includes("://")
-  ) {
+  if (!isValidModelIdentifier(value)) {
     return issue(
       "Enter a model ID such as anthropic/claude-sonnet-4, not a URL.",
       "model-id",

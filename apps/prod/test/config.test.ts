@@ -58,6 +58,12 @@ describe("loadConfig", () => {
         DEFAULT_TRIAGE_MODEL: "a model id",
       }),
     ).toThrow(new ConfigurationError("DEFAULT_TRIAGE_MODEL is invalid"));
+    expect(() =>
+      loadConfig({
+        ...requiredEnvironment,
+        DEFAULT_TRIAGE_MODEL: "model`with`backticks",
+      }),
+    ).toThrow(new ConfigurationError("DEFAULT_TRIAGE_MODEL is invalid"));
   });
 
   it("lists every configured secret for log redaction", () => {
