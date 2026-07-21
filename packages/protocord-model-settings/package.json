@@ -16,7 +16,22 @@
       "default": "./dist/schema.js"
     }
   },
-  "files": ["dist"],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./schema": {
+        "types": "./dist/schema.d.ts",
+        "import": "./dist/schema.js",
+        "default": "./dist/schema.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "postbuild": "node --input-type=module -e \"await import('./dist/index.js'); await import('./dist/schema.js')\"",
