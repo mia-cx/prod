@@ -2,7 +2,11 @@ import { randomBytes } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { encryptApiKey } from "../src/index.js";
+import {
+  InvalidEncryptionKeyError,
+  decodeEncryptionKey,
+  encryptApiKey,
+} from "../src/index.js";
 
 const encryptionKey = randomBytes(32);
 const context = {
@@ -12,6 +16,17 @@ const context = {
 };
 
 describe("API key encryption", () => {
+  it("rejects non-canonical base64 keys that still decode to 32 bytes", () => {
+    const encoded = encryptionKey.toString("base64");
+    const tampered = `${encoded.slice(0, -1)}!${encoded.slice(-1)}`;
+    expect(Buffer.from(tampered, "base64")).toHaveLength(32);
+
+    expect(decodeEncryptionKey(encoded)).toEqual(encryptionKey);
+    expect(() => decodeEncryptionKey(tampered)).toThrow(
+      InvalidEncryptionKeyError,
+    );
+  });
+
   it("rejects empty and whitespace-only keys", () => {
     expect(() => encryptApiKey("", encryptionKey, context)).toThrow(TypeError);
     expect(() => encryptApiKey("   ", encryptionKey, context)).toThrow(
