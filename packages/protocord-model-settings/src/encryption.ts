@@ -45,12 +45,13 @@ export const decodeEncryptionKey = (encoded: string): Buffer => {
   return decoded;
 };
 
-const HINT_MIN_REVEAL_LENGTH = 16;
+const HINT_MIN_REVEAL_LENGTH = 24;
+const HINT_MASK = "••••••••";
 
 const keyHint = (apiKey: string): string =>
   apiKey.length < HINT_MIN_REVEAL_LENGTH
-    ? "•".repeat(8)
-    : `${apiKey.slice(0, 4)}${"•".repeat(apiKey.length - 8)}${apiKey.slice(-4)}`;
+    ? HINT_MASK
+    : `${apiKey.slice(0, 4)}${HINT_MASK}${apiKey.slice(-4)}`;
 
 const associatedData = (context: ApiKeyEncryptionContext): Buffer =>
   Buffer.from(

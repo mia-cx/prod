@@ -31,7 +31,7 @@ const assertIdentifier = (label: string, value: string): void => {
   if (
     value.length === 0 ||
     value.length > 200 ||
-    /\s/u.test(value) ||
+    /[\s`]/u.test(value) ||
     value.includes("://")
   ) {
     throw new InvalidModelConfigurationError(`${label} is invalid`);
@@ -130,12 +130,12 @@ export const createSqliteModelConfigurationStore = (
     },
     setGuildApiKey: async (input: SetGuildApiKeyInput) => {
       assertIdentifier("guildId", input.guildId);
+      const row = ensure(input.guildId, input.purpose);
       const encrypted = encryptApiKey(input.apiKey, encryptionKey, {
-        guildId: input.guildId,
-        purpose: input.purpose,
-        provider: "openrouter",
+        guildId: row.guildId,
+        purpose: row.purpose,
+        provider: row.provider,
       });
-      ensure(input.guildId, input.purpose);
       database
         .update(modelConfigurations)
         .set({

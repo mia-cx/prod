@@ -39,7 +39,7 @@ const modelIdIssue = (value: string): SettingsValidationIssue | undefined => {
   if (
     value.length === 0 ||
     value.length > 200 ||
-    /\s/u.test(value) ||
+    /[\s`]/u.test(value) ||
     value.includes("://")
   ) {
     return issue(
@@ -51,7 +51,7 @@ const modelIdIssue = (value: string): SettingsValidationIssue | undefined => {
 };
 
 const apiKeyIssue = (value: string): SettingsValidationIssue | undefined => {
-  if (value.length === 0 || value.length > 4_000 || /\s/u.test(value)) {
+  if (value.length === 0 || value.length > 4_000 || /[\s`]/u.test(value)) {
     return issue(
       "Enter the API key without spaces or surrounding whitespace.",
       "api-key",

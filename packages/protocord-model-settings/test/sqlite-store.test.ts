@@ -12,7 +12,7 @@ import {
 const encryptionKey = randomBytes(32).toString("base64");
 const guildId = "123456789012345678";
 const apiKey = "sk-or-v1-secret-value-1234";
-const apiKeyHint = "sk-o••••••••••••••••••1234";
+const apiKeyHint = "sk-o••••••••1234";
 
 describe("SQLite model configuration store", () => {
   let sqlite: Database.Database;
@@ -135,14 +135,21 @@ describe("SQLite model configuration store", () => {
         "triage",
       ),
     ).rejects.toThrow(ModelCredentialError);
-    sqlite
-      .prepare(
-        "UPDATE mia_cx_model_configurations SET api_key_nonce = 'malformed'",
-      )
-      .run();
-    await expect(store.resolve(guildId, "triage")).rejects.toThrow(
-      ModelCredentialError,
-    );
+    for (const column of [
+      "api_key_nonce",
+      "encrypted_api_key",
+      "api_key_auth_tag",
+    ]) {
+      await store.setGuildApiKey({ guildId, purpose: "triage", apiKey });
+      sqlite
+        .prepare(
+          `UPDATE mia_cx_model_configurations SET ${column} = 'malformed'`,
+        )
+        .run();
+      await expect(store.resolve(guildId, "triage")).rejects.toThrow(
+        ModelCredentialError,
+      );
+    }
   });
 
   it("binds encrypted credentials to their guild and purpose row", async () => {
