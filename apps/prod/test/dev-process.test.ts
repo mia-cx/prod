@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -132,6 +132,7 @@ const waitForOutput = (
 const startDevFixture = (
   entry: string,
   watchDirectories: readonly string[] = [],
+  environment?: NodeJS.ProcessEnv,
 ) => {
   let output = "";
   let fixturePid: number | undefined;
@@ -142,6 +143,9 @@ const startDevFixture = (
     {
       cwd: appDirectory,
       detached: true,
+      ...(environment === undefined
+        ? {}
+        : { env: { ...process.env, ...environment } }),
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -259,6 +263,34 @@ describe("the app dev process", () => {
     } finally {
       await fixture.cleanup();
       await rm(watchDirectory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("restarts after an auto-discovered workspace package source changes", async () => {
+    const packagesRoot = await mkdtemp(join(tmpdir(), "prod-dev-packages-"));
+    const packageSourceDirectory = join(packagesRoot, "example", "src");
+    await mkdir(packageSourceDirectory, { recursive: true });
+    const fixture = startDevFixture(
+      "test/fixtures/graceful-process.ts",
+      [],
+      { DEV_WATCH_PACKAGES_ROOT: packagesRoot },
+    );
+    let firstFixturePid: number | undefined;
+
+    try {
+      await fixture.waitForOutput("fixture ready");
+      firstFixturePid = fixture.fixturePid();
+      await writeFile(join(packageSourceDirectory, "changed.ts"), "export {};\n");
+      await fixture.waitForOutput("fixture ready", 2);
+
+      expect(fixture.fixturePid()).not.toBe(firstFixturePid);
+      if (firstFixturePid === undefined) {
+        throw new Error("Initial fixture process ID was not captured");
+      }
+      await waitForProcessExit(firstFixturePid);
+    } finally {
+      await fixture.cleanup();
+      await rm(packagesRoot, { recursive: true, force: true });
     }
   }, 15_000);
 

@@ -19,8 +19,8 @@ if (entry === undefined) {
     resolve(directory),
   );
   const packageDirectory = resolve(
-    dirname(fileURLToPath(import.meta.url)),
-    "../../../packages",
+    process.env.DEV_WATCH_PACKAGES_ROOT ??
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../packages"),
   );
   const packageSourceDirectories = readdirSync(packageDirectory, {
     withFileTypes: true,
