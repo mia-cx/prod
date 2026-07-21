@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { watch } from "node:fs";
+import { readdirSync, watch } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const entry = process.argv[2];
 
@@ -14,18 +15,45 @@ if (entry === undefined) {
   let stopping = false;
 
   const sourceDirectory = dirname(resolve(entry));
-  const watcher = watch(sourceDirectory, { recursive: true });
+  const explicitWatchDirectories = process.argv.slice(3).map((directory) =>
+    resolve(directory),
+  );
+  const packageDirectory = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../packages",
+  );
+  const packageSourceDirectories = readdirSync(packageDirectory, {
+    withFileTypes: true,
+  })
+    .filter((item) => item.isDirectory())
+    .map((item) => resolve(packageDirectory, item.name, "src"));
+  const watchDirectories = [
+    sourceDirectory,
+    ...(explicitWatchDirectories.length === 0
+      ? packageSourceDirectories
+      : explicitWatchDirectories),
+  ];
+  const watchers = watchDirectories.map((directory) =>
+    watch(directory, { recursive: true }),
+  );
+  const closeWatchers = () => {
+    for (const watcher of watchers) watcher.close();
+  };
 
   const start = () => {
-    child = spawn(process.execPath, ["--import", "tsx", entry], {
-      detached: process.platform !== "win32",
-      stdio: "inherit",
-    });
+    child = spawn(
+      process.execPath,
+      ["--conditions=development", "--import", "tsx", entry],
+      {
+        detached: process.platform !== "win32",
+        stdio: "inherit",
+      },
+    );
 
     child.once("error", (error) => {
       console.error(error);
       stopping = true;
-      watcher.close();
+      closeWatchers();
       process.exitCode = 1;
     });
 
@@ -39,7 +67,7 @@ if (entry === undefined) {
       }
 
       if (!stopping) {
-        watcher.close();
+        closeWatchers();
         process.exitCode = code ?? (signal === null ? 0 : 1);
       }
     });
@@ -53,16 +81,19 @@ if (entry === undefined) {
     child?.kill("SIGTERM");
   };
 
-  watcher.on("change", () => {
-    clearTimeout(restartTimer);
-    restartTimer = setTimeout(restart, 75);
-  });
-  watcher.on("error", (error) => {
-    console.error(error);
-    stopping = true;
-    child?.kill("SIGTERM");
-    process.exitCode = 1;
-  });
+  for (const watcher of watchers) {
+    watcher.on("change", () => {
+      clearTimeout(restartTimer);
+      restartTimer = setTimeout(restart, 75);
+    });
+    watcher.on("error", (error) => {
+      console.error(error);
+      stopping = true;
+      closeWatchers();
+      child?.kill("SIGTERM");
+      process.exitCode = 1;
+    });
+  }
 
   const stop = (signal) => {
     if (stopping) {
@@ -70,7 +101,7 @@ if (entry === undefined) {
     }
     stopping = true;
     clearTimeout(restartTimer);
-    watcher.close();
+    closeWatchers();
     child?.kill(signal);
   };
 
