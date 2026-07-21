@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createModelSettingsCategory,
+  InvalidModelConfigurationError,
   type GuildModelConfiguration,
   type ModelConfigurationStore,
 } from "../src/index.js";
@@ -199,5 +200,24 @@ describe("model settings category", () => {
     await expect(
       key.mutate({ "api-key": " key with spaces " }, context),
     ).resolves.toMatchObject({ status: "invalid" });
+  });
+
+  it("maps store rejections to invalid results and rethrows other errors", async () => {
+    const { category, store } = setup();
+    const context = { guildId, authorized: true };
+    const model = field(category, "model-id");
+    if (model.kind !== "modal") throw new Error("Unexpected field kind");
+
+    vi.mocked(store.setModel).mockRejectedValueOnce(
+      new InvalidModelConfigurationError("modelId is invalid"),
+    );
+    await expect(
+      model.mutate({ "model-id": "anthropic/claude-sonnet-4" }, context),
+    ).resolves.toMatchObject({ status: "invalid" });
+
+    vi.mocked(store.setModel).mockRejectedValueOnce(new Error("disk failure"));
+    await expect(
+      model.mutate({ "model-id": "anthropic/claude-sonnet-4" }, context),
+    ).rejects.toThrow("disk failure");
   });
 });
