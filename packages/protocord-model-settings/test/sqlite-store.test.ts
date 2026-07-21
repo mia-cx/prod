@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  InvalidModelConfigurationError,
   ModelCredentialError,
   createSqliteModelConfigurationStore,
 } from "../src/index.js";
@@ -44,6 +45,28 @@ describe("SQLite model configuration store", () => {
       encryptionKey: key,
       defaultModelId: "anthropic/claude-sonnet-4",
     });
+
+  it("rejects invalid identifiers at every store boundary", async () => {
+    expect(() =>
+      createSqliteModelConfigurationStore(drizzle(sqlite), {
+        encryptionKey,
+        defaultModelId: "not a valid id",
+      }),
+    ).toThrow(InvalidModelConfigurationError);
+
+    const store = createStore();
+    await expect(store.get("bad guild/id", "triage")).rejects.toThrow(
+      InvalidModelConfigurationError,
+    );
+    await expect(
+      store.setModel({
+        guildId,
+        purpose: "triage",
+        provider: "openrouter",
+        modelId: "https://example.test/model",
+      }),
+    ).rejects.toThrow(InvalidModelConfigurationError);
+  });
 
   it("persists model selection without exposing encrypted credential material", async () => {
     const store = createStore();

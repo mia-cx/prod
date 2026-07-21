@@ -45,6 +45,12 @@ describe("loadConfig", () => {
     ).not.toHaveProperty("openRouterApiKey");
   });
 
+  it("rejects deployment API keys containing whitespace", () => {
+    expect(() =>
+      loadConfig({ ...requiredEnvironment, OPENROUTER_API_KEY: "key with space" }),
+    ).toThrow(new ConfigurationError("OPENROUTER_API_KEY is invalid"));
+  });
+
   it("rejects malformed default triage models", () => {
     expect(() =>
       loadConfig({
