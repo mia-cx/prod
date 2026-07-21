@@ -19,7 +19,6 @@ describe("loadConfig", () => {
       logLevel: "info",
       apiKeyEncryptionKey: requiredEnvironment.API_KEY_ENCRYPTION_KEY,
       defaultTriageModel: "google/gemma-4-31b-it",
-      openRouterBaseUrl: "https://openrouter.ai/api/v1/",
     });
   });
 
@@ -29,28 +28,20 @@ describe("loadConfig", () => {
         ...requiredEnvironment,
         OPENROUTER_API_KEY: "deployment-key",
         DEFAULT_TRIAGE_MODEL: "openai/gpt-5-mini",
-        OPENROUTER_BASE_URL: "https://router.example.test/v1",
       }),
     ).toMatchObject({
       openRouterApiKey: "deployment-key",
       defaultTriageModel: "openai/gpt-5-mini",
-      openRouterBaseUrl: "https://router.example.test/v1/",
     });
   });
 
-  it("rejects malformed encryption keys and non-HTTPS provider URLs safely", () => {
+  it("rejects malformed encryption keys safely", () => {
     expect(() =>
       loadConfig({
         ...requiredEnvironment,
         API_KEY_ENCRYPTION_KEY: "not-a-key",
       }),
     ).toThrow(new ConfigurationError("API_KEY_ENCRYPTION_KEY is invalid"));
-    expect(() =>
-      loadConfig({
-        ...requiredEnvironment,
-        OPENROUTER_BASE_URL: "http://router.example.test/v1",
-      }),
-    ).toThrow(new ConfigurationError("OPENROUTER_BASE_URL is invalid"));
   });
 
   it("accepts an explicit prefix while validating optional values", () => {

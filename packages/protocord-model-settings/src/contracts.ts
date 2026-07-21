@@ -53,24 +53,6 @@ export interface SecureModelConfigurationStore
   ): Promise<ResolvedModelConfiguration | UnavailableModelConfiguration>;
 }
 
-export type ProviderModel = Readonly<{
-  id: string;
-  name: string;
-  description?: string;
-}>;
-
-export type ProviderCatalog = Readonly<{
-  listModels(provider: ModelProvider): Promise<readonly ProviderModel[]>;
-}>;
-
-export type ProviderCatalogResult =
-  | Readonly<{ available: true; models: readonly ProviderModel[] }>
-  | Readonly<{
-      available: false;
-      models: readonly [];
-      message: "Model suggestions are temporarily unavailable. Enter a model ID manually.";
-    }>;
-
 export class InvalidModelConfigurationError extends Error {
   override readonly name = "InvalidModelConfigurationError";
 }

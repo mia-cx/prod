@@ -37,7 +37,6 @@ export type ProdConfig = Readonly<{
   openRouterApiKey?: string;
   apiKeyEncryptionKey: string;
   defaultTriageModel: string;
-  openRouterBaseUrl: string;
 }>;
 
 export class ConfigurationError extends Error {
@@ -114,22 +113,6 @@ const decodeEncryptionKeyConfig = (environment: Environment): string => {
   }
 };
 
-const decodeOpenRouterBaseUrl = (environment: Environment): string => {
-  const value = decodeOptional(
-    environment,
-    "OPENROUTER_BASE_URL",
-    NonEmptyString,
-    "https://openrouter.ai/api/v1/",
-  );
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") throw new TypeError();
-    return url.href.endsWith("/") ? url.href : `${url.href}/`;
-  } catch {
-    throw new ConfigurationError("OPENROUTER_BASE_URL is invalid");
-  }
-};
-
 export const loadConfig = (environment: Environment): ProdConfig =>
   Object.freeze({
     discordToken: decodeRequired(environment, "DISCORD_TOKEN", NonEmptyString),
@@ -169,5 +152,4 @@ export const loadConfig = (environment: Environment): ProdConfig =>
       ModelIdentifier,
       "google/gemma-4-31b-it",
     ),
-    openRouterBaseUrl: decodeOpenRouterBaseUrl(environment),
   });
