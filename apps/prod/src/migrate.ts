@@ -1,4 +1,4 @@
-import { loadConfig } from "./config.js";
+import { configSecrets, loadConfig } from "./config.js";
 import { openDatabase } from "./database.js";
 import { createLogger } from "./logger.js";
 import { applyMigrations } from "./migrations.js";
@@ -6,11 +6,7 @@ import { applyMigrations } from "./migrations.js";
 const config = loadConfig(process.env);
 const logger = createLogger({
   level: config.logLevel,
-  secrets: [
-    config.discordToken,
-    config.apiKeyEncryptionKey,
-    ...(config.openRouterApiKey === undefined ? [] : [config.openRouterApiKey]),
-  ],
+  secrets: configSecrets(config),
 });
 const connection = openDatabase(config.databaseUrl);
 

@@ -113,6 +113,12 @@ const decodeEncryptionKeyConfig = (environment: Environment): string => {
   }
 };
 
+export const configSecrets = (config: ProdConfig): readonly string[] => [
+  config.discordToken,
+  config.apiKeyEncryptionKey,
+  ...(config.openRouterApiKey === undefined ? [] : [config.openRouterApiKey]),
+];
+
 export const loadConfig = (environment: Environment): ProdConfig =>
   Object.freeze({
     discordToken: decodeRequired(environment, "DISCORD_TOKEN", NonEmptyString),

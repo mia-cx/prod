@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { ConfigurationError, loadConfig } from "../src/config.js";
+import {
+  ConfigurationError,
+  configSecrets,
+  loadConfig,
+} from "../src/config.js";
 
 const requiredEnvironment = {
   DISCORD_TOKEN: "development-secret-token",
@@ -33,6 +37,46 @@ describe("loadConfig", () => {
       openRouterApiKey: "deployment-key",
       defaultTriageModel: "openai/gpt-5-mini",
     });
+  });
+
+  it("treats an empty deployment API key as absent", () => {
+    expect(
+      loadConfig({ ...requiredEnvironment, OPENROUTER_API_KEY: "" }),
+    ).not.toHaveProperty("openRouterApiKey");
+  });
+
+  it("rejects malformed default triage models", () => {
+    expect(() =>
+      loadConfig({
+        ...requiredEnvironment,
+        DEFAULT_TRIAGE_MODEL: "https://example.test/model",
+      }),
+    ).toThrow(new ConfigurationError("DEFAULT_TRIAGE_MODEL is invalid"));
+    expect(() =>
+      loadConfig({
+        ...requiredEnvironment,
+        DEFAULT_TRIAGE_MODEL: "a model id",
+      }),
+    ).toThrow(new ConfigurationError("DEFAULT_TRIAGE_MODEL is invalid"));
+  });
+
+  it("lists every configured secret for log redaction", () => {
+    expect(configSecrets(loadConfig(requiredEnvironment))).toEqual([
+      "development-secret-token",
+      requiredEnvironment.API_KEY_ENCRYPTION_KEY,
+    ]);
+    expect(
+      configSecrets(
+        loadConfig({
+          ...requiredEnvironment,
+          OPENROUTER_API_KEY: "deployment-key",
+        }),
+      ),
+    ).toEqual([
+      "development-secret-token",
+      requiredEnvironment.API_KEY_ENCRYPTION_KEY,
+      "deployment-key",
+    ]);
   });
 
   it("rejects malformed encryption keys safely", () => {
