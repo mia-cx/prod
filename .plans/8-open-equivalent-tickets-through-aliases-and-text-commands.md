@@ -34,7 +34,7 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 - [x] Add an unconsumed-message seam: the gateway forwards a message downstream only when text-command dispatch did not consume it, so consumed text commands can never reach the future AI pipeline; cover with gateway/runtime tests.
 - [x] Audit alias-equivalence test coverage (same domain behavior across all six triggers with correct origin metadata) and add any missing focused tests.
 - [x] Run the full `pnpm check` and update the plan.
-- [~] Push and file the PR with the human validation gate called out.
+- [x] Push and file the PR with the human validation gate called out.
 
 ## Notes
 
@@ -50,4 +50,5 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 - Codex-only review-loop round four was clean across correctness, security, and coverage. The only residual suggestion was an explicit whitespace-only text-summary case; provisioning already normalizes that boundary, so it was classified as non-loop-worthy.
 - Full repository validation passed: `pnpm --config.verify-deps-before-run=false check` completed all 32 boundary, lint, typecheck, test, and build tasks successfully.
 - The PR must use `Refs #8`, not `Closes #8`, because the issue's mandatory real-Discord validation remains outstanding.
+- PR: https://github.com/mia-cx/prod/pull/36
 - PR precedent: #28 used `Closes #7` with the mandatory HITL checklist completed before merge; #8 follows the same pattern.
