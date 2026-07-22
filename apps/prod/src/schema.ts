@@ -99,6 +99,8 @@ export const ticketEvents = sqliteTable(
         "compensation_completed",
         "compensation_failed",
         "recovery_started",
+        "assignee_added",
+        "assignee_removed",
       ],
     }).notNull(),
     detailsJson: text("details_json").notNull(),
@@ -261,6 +263,23 @@ export const ticketLabels = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.ticketId, table.labelId] }),
     index("ticket_labels_label").on(table.labelId),
+  ],
+);
+
+export const ticketAssignees = sqliteTable(
+  "ticket_assignees",
+  {
+    ticketId: text("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    assigneeUserId: text("assignee_user_id").notNull(),
+    assignedByUserId: text("assigned_by_user_id").notNull(),
+    method: text({ enum: ["self_claim", "delegated"] }).notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.ticketId, table.assigneeUserId] }),
+    index("ticket_assignees_assignee").on(table.assigneeUserId),
   ],
 );
 

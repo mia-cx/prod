@@ -6,11 +6,17 @@ import {
   parseReporterHubAccessSnapshot,
   type ReporterHubAccessSnapshot,
 } from "./reporter-hub-access.js";
-import { reporterHubAccess, ticketEvents, tickets } from "./schema.js";
+import {
+  reporterHubAccess,
+  ticketAssignees,
+  ticketEvents,
+  tickets,
+} from "./schema.js";
 
 export type TicketAlias = "issue" | "report" | "debugshare";
 export type TicketStatus = "provisioning" | "open" | "closed" | "failed";
 export type TriageStatus = "collecting" | "ready" | "paused";
+export type AssignmentMethod = "self_claim" | "delegated";
 export type TicketEventType = (typeof ticketEvents.$inferInsert)["eventType"];
 
 export type Ticket = Readonly<{
@@ -40,6 +46,14 @@ export type TicketEvent = Readonly<{
   createdAt: string;
 }>;
 
+export type TicketAssignee = Readonly<{
+  ticketId: string;
+  assigneeUserId: string;
+  assignedByUserId: string;
+  method: AssignmentMethod;
+  createdAt: string;
+}>;
+
 export interface TicketStore {
   create(
     input: Readonly<{
@@ -52,6 +66,29 @@ export interface TicketStore {
     }>,
   ): Promise<Ticket>;
   get(ticketId: string): Promise<Ticket | undefined>;
+  getByThreadId(threadId: string): Promise<Ticket | undefined>;
+  listAssignees(ticketId: string): Promise<readonly TicketAssignee[]>;
+  addAssignee(
+    input: Readonly<{
+      ticketId: string;
+      assigneeUserId: string;
+      assignedByUserId: string;
+      method: AssignmentMethod;
+    }>,
+  ): Promise<
+    Readonly<{
+      added: boolean;
+      assigneeCount: number;
+      triagePaused: boolean;
+    }>
+  >;
+  removeAssignee(
+    input: Readonly<{
+      ticketId: string;
+      assigneeUserId: string;
+      removedByUserId: string;
+    }>,
+  ): Promise<Readonly<{ removed: boolean; assigneeCount: number }>>;
   listProvisioning(): Promise<readonly Ticket[]>;
   listOpen(): Promise<readonly Ticket[]>;
   hasActiveTickets(guildId: string, hubChannelId: string): Promise<boolean>;
@@ -154,6 +191,17 @@ const ticketFromRow = (row: typeof tickets.$inferSelect): Ticket =>
     updatedAt: row.updatedAt,
   });
 
+const ticketAssigneeFromRow = (
+  row: typeof ticketAssignees.$inferSelect,
+): TicketAssignee =>
+  Object.freeze({
+    ticketId: row.ticketId,
+    assigneeUserId: row.assigneeUserId,
+    assignedByUserId: row.assignedByUserId,
+    method: row.method,
+    createdAt: row.createdAt,
+  });
+
 export const createSqliteTicketStore = (
   database: ProdDatabase,
   options: CreateSqliteTicketStoreOptions = {},
@@ -209,6 +257,20 @@ export const createSqliteTicketStore = (
     if (row === undefined) throw new Error(`Ticket ${ticketId} does not exist`);
     if (row.status !== "provisioning") {
       throw new Error(`Ticket ${ticketId} is not provisioning`);
+    }
+    return row;
+  };
+  const requireOpenForAssignment = (
+    writer: Pick<ProdDatabase, "select">,
+    ticketId: string,
+  ): typeof tickets.$inferSelect => {
+    const row = writer
+      .select()
+      .from(tickets)
+      .where(eq(tickets.id, ticketId))
+      .get();
+    if (row === undefined || row.status !== "open") {
+      throw new Error("Ticket assignment needs an open ticket");
     }
     return row;
   };
@@ -321,6 +383,167 @@ export const createSqliteTicketStore = (
         .where(eq(tickets.id, ticketId))
         .get();
       return row === undefined ? undefined : ticketFromRow(row);
+    },
+    getByThreadId: async (threadId: string) => {
+      assertId("thread id", threadId);
+      const row = database
+        .select()
+        .from(tickets)
+        .where(eq(tickets.threadId, threadId))
+        .get();
+      return row === undefined ? undefined : ticketFromRow(row);
+    },
+    listAssignees: async (ticketId: string) => {
+      assertId("ticket id", ticketId);
+      return database
+        .select()
+        .from(ticketAssignees)
+        .where(eq(ticketAssignees.ticketId, ticketId))
+        .orderBy(ticketAssignees.createdAt, ticketAssignees.assigneeUserId)
+        .all()
+        .map(ticketAssigneeFromRow);
+    },
+    addAssignee: async (input: Parameters<TicketStore["addAssignee"]>[0]) => {
+      for (const [label, value] of [
+        ["ticket id", input.ticketId],
+        ["assignee user id", input.assigneeUserId],
+        ["assigned by user id", input.assignedByUserId],
+      ] as const) {
+        assertId(label, value);
+      }
+      let result:
+        | Readonly<{
+            added: boolean;
+            assigneeCount: number;
+            triagePaused: boolean;
+          }>
+        | undefined;
+      database.transaction((transaction) => {
+        const ticket = requireOpenForAssignment(transaction, input.ticketId);
+        const existing = transaction
+          .select({ assigneeUserId: ticketAssignees.assigneeUserId })
+          .from(ticketAssignees)
+          .where(
+            and(
+              eq(ticketAssignees.ticketId, input.ticketId),
+              eq(ticketAssignees.assigneeUserId, input.assigneeUserId),
+            ),
+          )
+          .get();
+        const assigneeCount = transaction
+          .select({ assigneeUserId: ticketAssignees.assigneeUserId })
+          .from(ticketAssignees)
+          .where(eq(ticketAssignees.ticketId, input.ticketId))
+          .all().length;
+        if (existing !== undefined) {
+          result = Object.freeze({
+            added: false,
+            assigneeCount,
+            triagePaused: false,
+          });
+          return;
+        }
+
+        const timestamp = now();
+        transaction
+          .insert(ticketAssignees)
+          .values({ ...input, createdAt: timestamp })
+          .run();
+        const triagePaused =
+          assigneeCount === 0 && ticket.triageStatus !== "paused";
+        if (triagePaused) {
+          transaction
+            .update(tickets)
+            .set({ triageStatus: "paused", updatedAt: timestamp })
+            .where(eq(tickets.id, input.ticketId))
+            .run();
+        }
+        insertEvent(
+          transaction,
+          ticket,
+          "assignee_added",
+          {
+            assigneeUserId: input.assigneeUserId,
+            assignedByUserId: input.assignedByUserId,
+            method: input.method,
+            triagePaused,
+          },
+          timestamp,
+        );
+        result = Object.freeze({
+          added: true,
+          assigneeCount: assigneeCount + 1,
+          triagePaused,
+        });
+      });
+      if (result === undefined) {
+        throw new Error("Ticket assignment transaction did not run");
+      }
+      return result;
+    },
+    removeAssignee: async (
+      input: Parameters<TicketStore["removeAssignee"]>[0],
+    ) => {
+      for (const [label, value] of [
+        ["ticket id", input.ticketId],
+        ["assignee user id", input.assigneeUserId],
+        ["removed by user id", input.removedByUserId],
+      ] as const) {
+        assertId(label, value);
+      }
+      let result:
+        | Readonly<{ removed: boolean; assigneeCount: number }>
+        | undefined;
+      database.transaction((transaction) => {
+        const ticket = requireOpenForAssignment(transaction, input.ticketId);
+        const existing = transaction
+          .select({ assigneeUserId: ticketAssignees.assigneeUserId })
+          .from(ticketAssignees)
+          .where(
+            and(
+              eq(ticketAssignees.ticketId, input.ticketId),
+              eq(ticketAssignees.assigneeUserId, input.assigneeUserId),
+            ),
+          )
+          .get();
+        const assigneeCount = transaction
+          .select({ assigneeUserId: ticketAssignees.assigneeUserId })
+          .from(ticketAssignees)
+          .where(eq(ticketAssignees.ticketId, input.ticketId))
+          .all().length;
+        if (existing === undefined) {
+          result = Object.freeze({ removed: false, assigneeCount });
+          return;
+        }
+
+        transaction
+          .delete(ticketAssignees)
+          .where(
+            and(
+              eq(ticketAssignees.ticketId, input.ticketId),
+              eq(ticketAssignees.assigneeUserId, input.assigneeUserId),
+            ),
+          )
+          .run();
+        insertEvent(
+          transaction,
+          ticket,
+          "assignee_removed",
+          {
+            assigneeUserId: input.assigneeUserId,
+            removedByUserId: input.removedByUserId,
+          },
+          now(),
+        );
+        result = Object.freeze({
+          removed: true,
+          assigneeCount: assigneeCount - 1,
+        });
+      });
+      if (result === undefined) {
+        throw new Error("Ticket assignment transaction did not run");
+      }
+      return result;
     },
     listProvisioning: async () =>
       database
