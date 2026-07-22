@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createAuthorizationService,
   createDiscordUserSubject,
+  createSqlitePermissionRuleStore,
   type AuthorizationDecision,
   type AuthorizationService,
   type DiscordMemberLike,
@@ -9,8 +11,16 @@ import {
 
 import { openDatabase } from "../src/database.js";
 import { applyMigrations } from "../src/migrations.js";
+import {
+  createProdAuthorizationContext,
+  createProdAuthorizationResourceValidator,
+} from "../src/authorization.js";
 import { createTicketAssignmentService } from "../src/ticket-assignment.js";
-import { createSqliteTicketStore, type TicketStore } from "../src/tickets.js";
+import {
+  createSqliteTicketStore,
+  TicketAssignmentStateError,
+  type TicketStore,
+} from "../src/tickets.js";
 
 const member = (id: string, guildId = "guild-1"): DiscordMemberLike => ({
   id,
@@ -72,6 +82,63 @@ const createOpenTicket = async (store: TicketStore, id = "ticket-1") => {
 };
 
 describe("ticket assignment service", () => {
+  it("composes persisted role rules with the production ticket resource check", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const tickets = createSqliteTicketStore(connection.database);
+    const rules = createSqlitePermissionRuleStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(tickets);
+      const context = createProdAuthorizationContext("guild-1");
+      for (const [id, verb] of [
+        ["assign-rule", "assign_other"],
+        ["claim-rule", "claim_self"],
+      ] as const) {
+        await rules.upsert({
+          context,
+          rule: {
+            id,
+            context,
+            subject: { subjectType: "role", subjectId: "staff-role" },
+            object: { objectType: "ticket", objectId: "*" },
+            verb,
+            permit: "allow",
+          },
+          actor: { actorType: "user", actorId: "admin-1" },
+        });
+      }
+      const authorization = createAuthorizationService({
+        store: rules,
+        validateResource: createProdAuthorizationResourceValidator(tickets),
+      });
+      const withStaffRole = (id: string): DiscordMemberLike => ({
+        ...member(id),
+        roles: {
+          cache: new Map([["staff-role", { id: "staff-role" }]]),
+        },
+      });
+      const service = createTicketAssignmentService({
+        tickets,
+        authorization,
+        createUserAuthorizationSubject: createDiscordUserSubject,
+      });
+
+      await expect(
+        service.assign({
+          guildId: "guild-1",
+          threadId: "thread-ticket-1",
+          actor: withStaffRole("actor-1"),
+          target: withStaffRole("target-1"),
+        }),
+      ).resolves.toMatchObject({ added: true, assigneeCount: 1 });
+      await expect(tickets.listAssignees(ticket.id)).resolves.toMatchObject([
+        { assigneeUserId: "target-1", assignedByUserId: "actor-1" },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("authorizes a claim against the exact guild and ticket resource", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -425,6 +492,75 @@ describe("ticket assignment service", () => {
       await expect(tickets.listAssignees(ticket.id)).resolves.toMatchObject([
         { assigneeUserId: "target-2" },
       ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("does not let delegated unassignment bypass self-unclaim permission", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const tickets = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(tickets);
+      await tickets.addAssignee({
+        ticketId: ticket.id,
+        assigneeUserId: "actor-1",
+        assignedByUserId: "actor-1",
+        method: "self_claim",
+      });
+      const service = createTicketAssignmentService({
+        tickets,
+        authorization: authorizationFor("actor-1:unassign_other"),
+        createUserAuthorizationSubject: createDiscordUserSubject,
+      });
+
+      await expect(
+        service.unassign({
+          guildId: "guild-1",
+          threadId: "thread-ticket-1",
+          actor: member("actor-1"),
+          target: member("actor-1"),
+        }),
+      ).rejects.toMatchObject({
+        code: "unauthorized",
+        message: "You do not have permission to unclaim this ticket.",
+      });
+      await expect(tickets.listAssignees(ticket.id)).resolves.toHaveLength(1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("maps a ticket closing between lookup and mutation to the thread error", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const tickets = createSqliteTicketStore(connection.database);
+    try {
+      await createOpenTicket(tickets);
+      const racingTickets: TicketStore = {
+        ...tickets,
+        addAssignee: async () => {
+          throw new TicketAssignmentStateError();
+        },
+      };
+      const service = createTicketAssignmentService({
+        tickets: racingTickets,
+        authorization: authorizationFor("actor-1:claim_self"),
+        createUserAuthorizationSubject: createDiscordUserSubject,
+      });
+
+      await expect(
+        service.claim({
+          guildId: "guild-1",
+          threadId: "thread-ticket-1",
+          actor: member("actor-1"),
+        }),
+      ).rejects.toMatchObject({
+        code: "not_a_ticket_thread",
+        message:
+          "This command can only be used in an open ticket thread for this server.",
+      });
     } finally {
       connection.close();
     }

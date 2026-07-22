@@ -269,13 +269,21 @@ describe("Prod action runtime", () => {
         expect.objectContaining({
           name: "assign",
           options: [
-            expect.objectContaining({ name: "member", required: true }),
+            expect.objectContaining({
+              type: ApplicationCommandOptionType.User,
+              name: "member",
+              required: true,
+            }),
           ],
         }),
         expect.objectContaining({
           name: "unassign",
           options: [
-            expect.objectContaining({ name: "member", required: true }),
+            expect.objectContaining({
+              type: ApplicationCommandOptionType.User,
+              name: "member",
+              required: true,
+            }),
           ],
         }),
       ]);

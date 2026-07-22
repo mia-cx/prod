@@ -159,6 +159,15 @@ export class TicketAdmissionError extends Error {
   }
 }
 
+export class TicketAssignmentStateError extends Error {
+  override readonly name = "TicketAssignmentStateError";
+  readonly code = "not_open";
+
+  constructor() {
+    super("Ticket assignment needs an open ticket");
+  }
+}
+
 export const DEFAULT_TICKET_ADMISSION = Object.freeze({
   maxActiveTicketsPerReporter: 5,
   maxTicketsPerReporterWindow: 3,
@@ -270,7 +279,7 @@ export const createSqliteTicketStore = (
       .where(eq(tickets.id, ticketId))
       .get();
     if (row === undefined || row.status !== "open") {
-      throw new Error("Ticket assignment needs an open ticket");
+      throw new TicketAssignmentStateError();
     }
     return row;
   };
@@ -492,8 +501,7 @@ export const createSqliteTicketStore = (
         assertId(label, value);
       }
       let result:
-        | Readonly<{ removed: boolean; assigneeCount: number }>
-        | undefined;
+        Readonly<{ removed: boolean; assigneeCount: number }> | undefined;
       database.transaction((transaction) => {
         const ticket = requireOpenForAssignment(transaction, input.ticketId);
         const existing = transaction

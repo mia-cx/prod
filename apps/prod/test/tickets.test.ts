@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
 import { openDatabase } from "../src/database.js";
 import { applyMigrations } from "../src/migrations.js";
+import { tickets } from "../src/schema.js";
 import type { ReporterHubAccessSnapshot } from "../src/reporter-hub-access.js";
-import {
-  createSqliteTicketStore,
-  type TicketStore,
-} from "../src/tickets.js";
+import { createSqliteTicketStore, type TicketStore } from "../src/tickets.js";
 
 const emptySnapshot: ReporterHubAccessSnapshot = {
   version: 1,
@@ -326,6 +325,12 @@ describe("SQLite ticket store", () => {
       await expect(store.get(ticket.id)).resolves.toMatchObject({
         triageStatus: "paused",
       });
+
+      connection.database
+        .update(tickets)
+        .set({ triageStatus: "ready" })
+        .where(eq(tickets.id, ticket.id))
+        .run();
       await expect(
         store.addAssignee({
           ticketId: ticket.id,
@@ -337,6 +342,9 @@ describe("SQLite ticket store", () => {
         added: true,
         assigneeCount: 2,
         triagePaused: false,
+      });
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        triageStatus: "ready",
       });
 
       expect(await store.listAssignees(ticket.id)).toEqual([

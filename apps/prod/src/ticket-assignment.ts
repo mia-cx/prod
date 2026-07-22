@@ -7,7 +7,11 @@ import type {
 } from "@protocord/permissions";
 
 import { createProdAuthorizationContext } from "./authorization.js";
-import type { Ticket, TicketStore } from "./tickets.js";
+import {
+  TicketAssignmentStateError,
+  type Ticket,
+  type TicketStore,
+} from "./tickets.js";
 
 export type TicketSelfAssignmentInput = Readonly<{
   guildId: string;
@@ -86,6 +90,22 @@ const requireOpenTicket = async (
   return ticket;
 };
 
+const mapAssignmentStateRace = async <Result>(
+  mutation: () => Promise<Result>,
+): Promise<Result> => {
+  try {
+    return await mutation();
+  } catch (error) {
+    if (error instanceof TicketAssignmentStateError) {
+      throw new TicketAssignmentError(
+        "not_a_ticket_thread",
+        "This command can only be used in an open ticket thread for this server.",
+      );
+    }
+    throw error;
+  }
+};
+
 export const createTicketAssignmentService = (
   dependencies: CreateTicketAssignmentServiceDependencies,
 ): TicketAssignmentService => {
@@ -131,12 +151,14 @@ export const createTicketAssignmentService = (
         "claim_self",
         "You do not have permission to claim this ticket.",
       );
-      const result = await dependencies.tickets.addAssignee({
-        ticketId: ticket.id,
-        assigneeUserId: input.actor.id,
-        assignedByUserId: input.actor.id,
-        method: "self_claim",
-      });
+      const result = await mapAssignmentStateRace(() =>
+        dependencies.tickets.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: input.actor.id,
+          assignedByUserId: input.actor.id,
+          method: "self_claim",
+        }),
+      );
       return Object.freeze({ ticket, ...result });
     },
     unclaim: async (input) => {
@@ -153,11 +175,13 @@ export const createTicketAssignmentService = (
         "unclaim_self",
         "You do not have permission to unclaim this ticket.",
       );
-      const result = await dependencies.tickets.removeAssignee({
-        ticketId: ticket.id,
-        assigneeUserId: input.actor.id,
-        removedByUserId: input.actor.id,
-      });
+      const result = await mapAssignmentStateRace(() =>
+        dependencies.tickets.removeAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: input.actor.id,
+          removedByUserId: input.actor.id,
+        }),
+      );
       return Object.freeze({ ticket, ...result });
     },
     assign: async (input) => {
@@ -180,12 +204,14 @@ export const createTicketAssignmentService = (
           "That member is not eligible to be assigned to this ticket.",
         );
       }
-      const result = await dependencies.tickets.addAssignee({
-        ticketId: ticket.id,
-        assigneeUserId: input.target.id,
-        assignedByUserId: input.actor.id,
-        method: "delegated",
-      });
+      const result = await mapAssignmentStateRace(() =>
+        dependencies.tickets.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: input.target.id,
+          assignedByUserId: input.actor.id,
+          method: "delegated",
+        }),
+      );
       return Object.freeze({ ticket, ...result });
     },
     unassign: async (input) => {
@@ -202,11 +228,22 @@ export const createTicketAssignmentService = (
         "unassign_other",
         "You do not have delegated assignment permission for this ticket.",
       );
-      const result = await dependencies.tickets.removeAssignee({
-        ticketId: ticket.id,
-        assigneeUserId: input.target.id,
-        removedByUserId: input.actor.id,
-      });
+      if (input.target.id === input.actor.id) {
+        await requireActorPermission(
+          input.actor,
+          context,
+          ticket,
+          "unclaim_self",
+          "You do not have permission to unclaim this ticket.",
+        );
+      }
+      const result = await mapAssignmentStateRace(() =>
+        dependencies.tickets.removeAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: input.target.id,
+          removedByUserId: input.actor.id,
+        }),
+      );
       return Object.freeze({ ticket, ...result });
     },
   };
