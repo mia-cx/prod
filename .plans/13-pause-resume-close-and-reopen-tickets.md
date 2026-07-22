@@ -1,0 +1,43 @@
+# #13 Pause, resume, close, and reopen tickets
+
+## Summary
+
+Implement authorized manual triage control and the full ticket close/reopen
+lifecycle. Staff can pause and resume AI triage on tickets in allowed states,
+close tickets (marking them closed with triage paused, auditing the
+transition, and locking/archiving the private thread), and reopen tickets
+(restoring reporter hub access, unlocking/unarchiving the thread, keeping
+triage paused, and preserving summaries, labels, suggestions, and assignees).
+Closing a reporter's final open ticket removes their shared hub overwrite;
+other open tickets retain it. Duplicate and concurrent transitions resolve
+safely via state-conditional transactional updates.
+
+## Acceptance criteria
+
+- [ ] Pause and resume are valid only for allowed ticket states.
+- [ ] Closing sets closed plus paused, audits the transition, and locks/archives the thread.
+- [ ] Closing the final open ticket removes the reporter hub overwrite while other open tickets retain it.
+- [ ] Reopening restores access, unlocks/unarchives, and remains paused.
+- [ ] Summaries, labels, suggestions, and assignees survive reopen.
+- [ ] Duplicate and concurrent transitions resolve safely.
+- [ ] Automated checks pass before the mandatory real-environment validation gate is handed to a human.
+
+## TODOs
+
+- [ ] Add lifecycle event types and state-conditional transactional store methods (close, reopen, pause triage, resume triage) with persistence tests.
+- [ ] Add thread lock/unlock adapter methods and close/reopen Discord orchestration with final-ticket hub-overwrite maintenance and focused tests.
+- [ ] Register staff `/close`, `/reopen`, and `/triage pause|resume` actions with ticket-scoped authorization and runtime tests.
+- [ ] Run the full automated checks and document the pending human validation gate.
+
+## Notes
+
+- Blockers #7 and #9 are closed; branch `t3code/issue-thirteen` starts at `origin/main` commit `051e5c8`.
+- Spec anchors: state model and transition rules (spec §4), close/reopen sequences (spec §15), command table `/close [ticket] [reason]`, `/reopen <ticket>`, `/triage pause|resume [ticket]` with no text triggers (spec §8), edge cases (spec §16).
+- `tickets.status` already includes `closed`; pause is `triageStatus: "paused"` — no new columns needed. `ticketEvents.eventType` enum needs lifecycle members (TS-only; the SQL column is unconstrained text, so no migration).
+- Allowed transitions: close from open (any triage status) → closed+paused; reopen from closed → open+paused; pause from open+collecting → paused; resume from open+ready|paused → collecting. Guard with re-read inside `database.transaction`, mirroring `requireProvisioning`.
+- Reuse `hasOtherActiveTicket` + the compensate-style restore sequence (`getReporterAccess` → `restoreReporterAccess` → `finishReporterAccess`) for final-ticket overwrite removal; count other open tickets after marking closed.
+- Thread ops: `setLocked` is new (no existing helper); order is lock→archive on close, unarchive→unlock on reopen. Serialize under the existing guild + hub keyed executors.
+- Authorization: verbs `close`, `reopen`, `pause_triage`, `resume_triage` and presets already exist in protocord-permissions and `permission-administration.ts`; actions check permissions inside execute via `AuthorizationService.require` (settings.ts pattern). `application.ts` `validateResource` must learn `objectType: "ticket"`.
+- Reopening never resumes AI automatically; summaries/labels/suggestions/assignees are simply not touched by reopen — tests must prove they survive.
+- Implementer: codex `gpt-5.6-sol` at high reasoning effort; orchestration, verification, and commits stay here.
+- Mandatory HITL gate: issue #13 stays open until a human validates pause/resume/close/reopen against real Discord with staff and reporter accounts.
