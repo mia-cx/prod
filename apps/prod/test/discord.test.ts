@@ -346,6 +346,32 @@ describe("createDiscordGateway", () => {
     await gateway.close();
   });
 
+  it("handles unconsumed messages without a downstream consumer", async () => {
+    const handleMessage = vi.fn(async () => false);
+    const handleError = vi.fn();
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleMessage,
+        handleError,
+      },
+    });
+    const message = {
+      id: "message-unconsumed-text-only",
+      content: "hello",
+      author: { bot: false },
+      webhookId: null,
+    };
+
+    discordMock.messageHandler?.(message);
+
+    await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledWith(message));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handleError).not.toHaveBeenCalled();
+    await gateway.close();
+  });
+
   it.each([
     ["bot", { author: { bot: true }, webhookId: null }],
     ["webhook", { author: { bot: false }, webhookId: "webhook-1" }],
