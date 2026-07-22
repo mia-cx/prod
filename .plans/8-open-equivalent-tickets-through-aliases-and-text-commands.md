@@ -28,7 +28,8 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 - [x] Record the plan for #8 with the audit of what #7 already delivered.
 - [x] Add an unconsumed-message seam: the gateway forwards a message downstream only when text-command dispatch did not consume it, so consumed text commands can never reach the future AI pipeline; cover with gateway/runtime tests.
 - [x] Audit alias-equivalence test coverage (same domain behavior across all six triggers with correct origin metadata) and add any missing focused tests.
-- [ ] Run the full `pnpm check`, update the plan, push, and file the PR with the human validation gate called out.
+- [x] Run the full `pnpm check` and update the plan.
+- [ ] Push and file the PR with the human validation gate called out.
 
 ## Notes
 
@@ -41,4 +42,6 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 - Codex-only review-loop round one found that bot/webhook messages marked unconsumed by the text provider would reach the downstream seam, plus missing text-alias and runtime-composition coverage. The gateway now drops bot/webhook messages before either handler, all three text aliases prove their originating metadata and transient reply behavior, and the disabled-prefix runtime path proves the downstream hook is preserved.
 - Codex-only review-loop round two found that the text triggers discarded their optional summary despite the product spec requiring the same summary behavior across all six triggers, and that composition coverage exercised the downstream hook only with text commands disabled. Text triggers now pass a non-empty argument tail as the opening summary, and runtime tests preserve both handlers in enabled-prefix mode as well as the downstream-only disabled-prefix mode.
 - Codex-only review-loop round three found one remaining coverage gap around downstream-handler rejection. The gateway suite now proves downstream failures are awaited and routed through the centralized action error handler.
+- Codex-only review-loop round four was clean across correctness, security, and coverage. The only residual suggestion was an explicit whitespace-only text-summary case; provisioning already normalizes that boundary, so it was classified as non-loop-worthy.
+- Full repository validation passed: `pnpm --config.verify-deps-before-run=false check` completed all 32 boundary, lint, typecheck, test, and build tasks successfully.
 - PR precedent: #28 used `Closes #7` with the mandatory HITL checklist completed before merge; #8 follows the same pattern.
