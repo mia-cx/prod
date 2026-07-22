@@ -202,6 +202,37 @@ describe("model settings category", () => {
     ).resolves.toMatchObject({ status: "invalid" });
   });
 
+  it("validates submissions before mutation with the same rules", async () => {
+    const { category } = setup();
+    const provider = field(category, "provider");
+    const model = field(category, "model-id");
+    const key = field(category, "guild-api-key");
+    const context = { guildId, authorized: true };
+    if (
+      provider.kind !== "string-select" ||
+      model.kind !== "modal" ||
+      key.kind !== "modal" ||
+      provider.validate === undefined ||
+      model.validate === undefined ||
+      key.validate === undefined
+    ) {
+      throw new Error("Unexpected field shapes");
+    }
+
+    expect(provider.validate(["openrouter"], context)).toEqual([]);
+    expect(provider.validate(["unsupported"], context)).toHaveLength(1);
+    expect(
+      model.validate({ "model-id": "anthropic/claude-sonnet-4" }, context),
+    ).toEqual([]);
+    expect(
+      model.validate({ "model-id": "https://example.test/m" }, context),
+    ).toHaveLength(1);
+    expect(key.validate({ "api-key": secret }, context)).toEqual([]);
+    expect(key.validate({ "api-key": " spaced key " }, context)).toHaveLength(
+      1,
+    );
+  });
+
   it("maps store rejections to invalid results and rethrows other errors", async () => {
     const { category, store } = setup();
     const context = { guildId, authorized: true };

@@ -196,6 +196,21 @@ describe("SQLite model configuration store", () => {
     }
   });
 
+  it("fails closed when credential columns are partially missing", async () => {
+    const store = createStore();
+    await store.setGuildApiKey({ guildId, purpose: "triage", apiKey });
+    sqlite
+      .prepare("UPDATE mia_cx_model_configurations SET api_key_hint = NULL")
+      .run();
+
+    await expect(store.get(guildId, "triage")).rejects.toThrow(
+      ModelCredentialError,
+    );
+    await expect(
+      store.resolve(guildId, "triage", "deployment-secret"),
+    ).rejects.toThrow(ModelCredentialError);
+  });
+
   it("binds encrypted credentials to their guild and purpose row", async () => {
     const store = createStore();
     const otherGuildId = "223456789012345678";
