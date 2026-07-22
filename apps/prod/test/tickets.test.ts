@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { openDatabase } from "../src/database.js";
 import { applyMigrations } from "../src/migrations.js";
@@ -514,6 +514,72 @@ describe("SQLite ticket store", () => {
         { assigneeUserId: "user-1", removedByUserId: "manager-2" },
         { assigneeUserId: "user-2", removedByUserId: "manager-2" },
       ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("removes an assignee from only the selected ticket", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const first = await createOpenTicket(store, "ticket-first");
+      const second = await createOpenTicket(store, "ticket-second");
+      for (const ticket of [first, second]) {
+        await store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "shared-user",
+          assignedByUserId: "manager-1",
+          method: "delegated",
+        });
+      }
+
+      await expect(
+        store.removeAssignee({
+          ticketId: first.id,
+          assigneeUserId: "shared-user",
+          removedByUserId: "manager-1",
+        }),
+      ).resolves.toEqual({ removed: true, assigneeCount: 0 });
+      await expect(store.listAssignees(first.id)).resolves.toEqual([]);
+      await expect(store.listAssignees(second.id)).resolves.toMatchObject([
+        { ticketId: second.id, assigneeUserId: "shared-user" },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("rolls back assignment state when its audit event cannot be written", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(store);
+      connection.database.run(
+        sql.raw(`
+        CREATE TRIGGER reject_assignment_audit
+        BEFORE INSERT ON ticket_events
+        WHEN NEW.event_type = 'assignee_added'
+        BEGIN
+          SELECT RAISE(ABORT, 'audit rejected');
+        END
+      `),
+      );
+
+      await expect(
+        store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-1",
+          assignedByUserId: "user-1",
+          method: "self_claim",
+        }),
+      ).rejects.toThrow("audit rejected");
+      await expect(store.listAssignees(ticket.id)).resolves.toEqual([]);
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        triageStatus: "collecting",
+      });
     } finally {
       connection.close();
     }

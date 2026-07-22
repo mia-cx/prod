@@ -532,6 +532,41 @@ describe("ticket assignment service", () => {
     }
   });
 
+  it("allows self-targeted delegated unassignment with both permissions", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const tickets = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(tickets);
+      await tickets.addAssignee({
+        ticketId: ticket.id,
+        assigneeUserId: "actor-1",
+        assignedByUserId: "actor-1",
+        method: "self_claim",
+      });
+      const service = createTicketAssignmentService({
+        tickets,
+        authorization: authorizationFor(
+          "actor-1:unassign_other",
+          "actor-1:unclaim_self",
+        ),
+        createUserAuthorizationSubject: createDiscordUserSubject,
+      });
+
+      await expect(
+        service.unassign({
+          guildId: "guild-1",
+          threadId: "thread-ticket-1",
+          actor: member("actor-1"),
+          target: member("actor-1"),
+        }),
+      ).resolves.toMatchObject({ removed: true, assigneeCount: 0 });
+      await expect(tickets.listAssignees(ticket.id)).resolves.toEqual([]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("maps a ticket closing between lookup and mutation to the thread error", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);

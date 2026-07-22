@@ -339,6 +339,26 @@ describe("Prod action runtime", () => {
               ? [expect.objectContaining({ assigneeUserId: "target-1" })]
               : [],
         );
+        if (commandName === "claim") {
+          const repeat = {
+            ...interaction,
+            deferReply: vi.fn().mockResolvedValue(undefined),
+            editReply: vi.fn().mockResolvedValue(undefined),
+          };
+          await runtime.handleInteraction(repeat as unknown as Interaction);
+          expect(repeat.editReply).toHaveBeenCalledWith({
+            content: "You are already assigned to this ticket.",
+            allowedMentions: { parse: [] },
+          });
+          await expect(ticketStore.listAssignees(ticket.id)).resolves.toEqual([
+            expect.objectContaining({ assigneeUserId: "actor-1" }),
+          ]);
+          expect(
+            (await ticketStore.listEvents(ticket.id)).filter(
+              ({ eventType }) => eventType === "assignee_added",
+            ),
+          ).toHaveLength(1);
+        }
       }
     } finally {
       connection.close();
