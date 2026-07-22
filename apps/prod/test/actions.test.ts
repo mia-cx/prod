@@ -549,45 +549,48 @@ describe("Prod action runtime", () => {
     });
   });
 
-  it("returns a minimal text-command link and deletes it after 30 seconds", async () => {
-    vi.useFakeTimers();
-    vi.mocked(ticketProvisioningService.open).mockClear();
-    const runtime = createProdActionRuntime(
-      createLogger({ level: "fatal" }),
-      runtimeOptions,
-    );
-    const deleteReply = vi.fn().mockResolvedValue(undefined);
-    const reply = vi.fn().mockResolvedValue({ delete: deleteReply });
-    const message = {
-      content: "!issue Poke crashes",
-      author: {
-        id: "user-1",
-        username: "reporter",
-        globalName: "Reporter",
-        bot: false,
-      },
-      webhookId: null,
-      channelId: "channel-1",
-      guildId: "guild-1",
-      guild: { id: "guild-1" },
-      reply,
-    } as unknown as Message;
+  it.each(["issue", "report", "debugshare"] as const)(
+    "returns a minimal link for !%s, records its origin, and deletes the reply after 30 seconds",
+    async (alias) => {
+      vi.useFakeTimers();
+      vi.mocked(ticketProvisioningService.open).mockClear();
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        runtimeOptions,
+      );
+      const deleteReply = vi.fn().mockResolvedValue(undefined);
+      const reply = vi.fn().mockResolvedValue({ delete: deleteReply });
+      const message = {
+        content: `!${alias} Poke crashes`,
+        author: {
+          id: "user-1",
+          username: "reporter",
+          globalName: "Reporter",
+          bot: false,
+        },
+        webhookId: null,
+        channelId: "channel-1",
+        guildId: "guild-1",
+        guild: { id: "guild-1" },
+        reply,
+      } as unknown as Message;
 
-    await expect(runtime.handleMessage!(message)).resolves.toBe(true);
-    expect(ticketProvisioningService.open).toHaveBeenCalledWith({
-      guild: message.guild,
-      reporterUserId: "user-1",
-      originatingAlias: "issue",
-    });
-    expect(reply).toHaveBeenCalledWith({
-      content: "https://discord.com/channels/guild-1/thread-1",
-      allowedMentions: { parse: [], repliedUser: false },
-    });
-    expect(deleteReply).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(deleteReply).toHaveBeenCalledOnce();
-    vi.useRealTimers();
-  });
+      await expect(runtime.handleMessage!(message)).resolves.toBe(true);
+      expect(ticketProvisioningService.open).toHaveBeenCalledWith({
+        guild: message.guild,
+        reporterUserId: "user-1",
+        originatingAlias: alias,
+      });
+      expect(reply).toHaveBeenCalledWith({
+        content: "https://discord.com/channels/guild-1/thread-1",
+        allowedMentions: { parse: [], repliedUser: false },
+      });
+      expect(deleteReply).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(deleteReply).toHaveBeenCalledOnce();
+      vi.useRealTimers();
+    },
+  );
 
   it("removes the text capability when the configured prefix is empty", () => {
     const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
@@ -597,6 +600,18 @@ describe("Prod action runtime", () => {
 
     expect(runtime.handleMessage).toBeUndefined();
     expect(runtime.commands).toHaveLength(7);
+  });
+
+  it("keeps the downstream hook when text commands are disabled", () => {
+    const handleUnconsumedMessage = vi.fn(async () => undefined);
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      textCommandPrefix: " \t ",
+      handleUnconsumedMessage,
+    });
+
+    expect(runtime.handleMessage).toBeUndefined();
+    expect(runtime.handleUnconsumedMessage).toBe(handleUnconsumedMessage);
   });
 
   it("resolves guilds through the ready client during startup reconciliation", async () => {

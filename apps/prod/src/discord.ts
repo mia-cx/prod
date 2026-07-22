@@ -183,6 +183,9 @@ export const createDiscordGateway = (
     if (handleMessage || handleUnconsumedMessage) {
       client.on(Events.MessageCreate, (message) => {
         void (async () => {
+          if (message.author.bot || message.webhookId) {
+            return;
+          }
           if (handleMessage && (await handleMessage(message))) {
             return;
           }
