@@ -425,6 +425,32 @@ describe("createDiscordGateway", () => {
     await gateway.close();
   });
 
+  it("reports downstream message failures through the action error handler", async () => {
+    const error = new Error("downstream message dispatch failed");
+    const handleUnconsumedMessage = vi.fn(async () => Promise.reject(error));
+    const handleError = vi.fn();
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleUnconsumedMessage,
+        handleError,
+      },
+    });
+    const message = {
+      id: "message-downstream-failed",
+      content: "hello",
+      author: { bot: false },
+      webhookId: null,
+    };
+
+    discordMock.messageHandler?.(message);
+
+    await vi.waitFor(() => expect(handleError).toHaveBeenCalledWith(error));
+    expect(handleUnconsumedMessage).toHaveBeenCalledWith(message);
+    await gateway.close();
+  });
+
   it("dispatches every message downstream and enables intents without a text handler", async () => {
     const handleUnconsumedMessage = vi.fn(async () => undefined);
     const gateway = createDiscordGateway({
