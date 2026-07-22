@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -108,12 +110,13 @@ const waitForProcessExit = (
 const waitForOutput = (
   output: () => string,
   expected: string,
+  occurrences = 1,
   timeoutMs = 5_000,
 ): Promise<void> =>
   new Promise((resolvePromise, reject) => {
     const startedAt = Date.now();
     const poll = (): void => {
-      if (output().includes(expected)) {
+      if (output().split(expected).length - 1 >= occurrences) {
         resolvePromise();
         return;
       }
@@ -126,15 +129,26 @@ const waitForOutput = (
     poll();
   });
 
-const startDevFixture = (entry: string) => {
+const startDevFixture = (
+  entry: string,
+  watchDirectories: readonly string[] = [],
+  environment?: NodeJS.ProcessEnv,
+) => {
   let output = "";
   let fixturePid: number | undefined;
   let result: ProcessResult | undefined;
-  const child = spawn(process.execPath, ["scripts/dev-watch.mjs", entry], {
-    cwd: appDirectory,
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    ["scripts/dev-watch.mjs", entry, ...watchDirectories],
+    {
+      cwd: appDirectory,
+      detached: true,
+      ...(environment === undefined
+        ? {}
+        : { env: { ...process.env, ...environment } }),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   const wrapperPid = child.pid;
   if (wrapperPid === undefined) {
     throw new Error("Dev-process wrapper did not receive a process ID");
@@ -142,7 +156,8 @@ const startDevFixture = (entry: string) => {
 
   const capture = (chunk: Buffer): void => {
     output += chunk.toString();
-    const match = /fixture pid=(\d+)/u.exec(output);
+    const matches = [...output.matchAll(/fixture pid=(\d+)/gu)];
+    const match = matches.at(-1);
     if (match?.[1]) {
       fixturePid = Number(match[1]);
     }
@@ -163,8 +178,11 @@ const startDevFixture = (entry: string) => {
   return {
     wrapperPid,
     output: () => output,
-    waitForOutput: (expected: string, timeoutMs?: number) =>
-      waitForOutput(() => output, expected, timeoutMs),
+    waitForOutput: (
+      expected: string,
+      occurrences = 1,
+      timeoutMs?: number,
+    ) => waitForOutput(() => output, expected, occurrences, timeoutMs),
     fixturePid: () => {
       if (fixturePid === undefined) {
         throw new Error("Fixture process ID was not captured");
@@ -224,6 +242,59 @@ describe("the app dev process", () => {
     }
   }, 15_000);
 
+  it("restarts after a watched workspace source changes", async () => {
+    const watchDirectory = await mkdtemp(join(tmpdir(), "prod-dev-watch-"));
+    const fixture = startDevFixture("test/fixtures/graceful-process.ts", [
+      watchDirectory,
+    ]);
+    let firstFixturePid: number | undefined;
+
+    try {
+      await fixture.waitForOutput("fixture ready");
+      firstFixturePid = fixture.fixturePid();
+      await writeFile(join(watchDirectory, "changed.ts"), "export {};\n");
+      await fixture.waitForOutput("fixture ready", 2);
+
+      expect(fixture.fixturePid()).not.toBe(firstFixturePid);
+      if (firstFixturePid === undefined) {
+        throw new Error("Initial fixture process ID was not captured");
+      }
+      await waitForProcessExit(firstFixturePid);
+    } finally {
+      await fixture.cleanup();
+      await rm(watchDirectory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("restarts after an auto-discovered workspace package source changes", async () => {
+    const packagesRoot = await mkdtemp(join(tmpdir(), "prod-dev-packages-"));
+    const packageSourceDirectory = join(packagesRoot, "example", "src");
+    await mkdir(packageSourceDirectory, { recursive: true });
+    const fixture = startDevFixture(
+      "test/fixtures/graceful-process.ts",
+      [],
+      { DEV_WATCH_PACKAGES_ROOT: packagesRoot },
+    );
+    let firstFixturePid: number | undefined;
+
+    try {
+      await fixture.waitForOutput("fixture development-conditions=true");
+      await fixture.waitForOutput("fixture ready");
+      firstFixturePid = fixture.fixturePid();
+      await writeFile(join(packageSourceDirectory, "changed.ts"), "export {};\n");
+      await fixture.waitForOutput("fixture ready", 2);
+
+      expect(fixture.fixturePid()).not.toBe(firstFixturePid);
+      if (firstFixturePid === undefined) {
+        throw new Error("Initial fixture process ID was not captured");
+      }
+      await waitForProcessExit(firstFixturePid);
+    } finally {
+      await fixture.cleanup();
+      await rm(packagesRoot, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it("force-cleans the wrapper and detached fixture when shutdown stalls", async () => {
     const fixture = startDevFixture("test/fixtures/stubborn-process.ts");
     let fixturePid: number | undefined;
@@ -255,7 +326,7 @@ describe("the app dev process", () => {
     try {
       await fixture.waitForOutput("fixture pid=");
       fixturePid = fixture.fixturePid();
-      await fixture.waitForOutput("fixture ready", 100);
+      await fixture.waitForOutput("fixture ready", 1, 100);
     } catch (error) {
       readinessError = error;
     } finally {

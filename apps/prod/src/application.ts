@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import { createSqlitePermissionRuleStore } from "@protocord/permissions";
+import { createSqliteModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 
 import type { ProdConfig } from "./config.js";
 import { createProdActionRuntime } from "./actions/runtime.js";
@@ -107,6 +108,14 @@ export const startProd = async (
       labelTaxonomyStore: createSqliteLabelTaxonomyStore(connection.database),
       supportHubDiscord: createSupportHubDiscord(),
       ticketProvisioningService,
+      modelConfigurationStore: createSqliteModelConfigurationStore(
+        connection.database,
+        {
+          encryptionKey: config.apiKeyEncryptionKey,
+          defaultModelId: config.defaultTriageModel,
+        },
+      ),
+      deploymentCredentialConfigured: config.openRouterApiKey !== undefined,
       executeGuildOperation,
       permissionAdministration,
       permissionAuthorization,

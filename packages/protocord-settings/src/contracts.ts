@@ -186,6 +186,7 @@ export type SettingsModalTextInput = SettingsModalInputBase &
     required?: boolean;
     minLength?: number;
     maxLength?: number;
+    sensitive?: boolean;
   }>;
 
 export type SettingsModalCheckboxInput = SettingsModalInputBase &

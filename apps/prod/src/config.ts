@@ -1,6 +1,18 @@
 import { Schema } from "effect";
+import {
+  decodeEncryptionKey,
+  isValidModelIdentifier,
+} from "@mia-cx/protocord-model-settings";
 
 const NonEmptyString = Schema.String.pipe(Schema.minLength(1));
+const NoWhitespaceString = NonEmptyString.pipe(
+  Schema.pattern(/^\S+$/),
+);
+const ModelIdentifier = NonEmptyString.pipe(
+  Schema.filter(isValidModelIdentifier, {
+    message: () => "must be a model identifier, not a URL",
+  }),
+);
 const DiscordSnowflake = Schema.String.pipe(Schema.pattern(/^\d{17,20}$/));
 const DatabaseUrl = Schema.String.pipe(
   Schema.filter((value) => value === ":memory:" || value.startsWith("file:"), {
@@ -25,6 +37,9 @@ export type ProdConfig = Readonly<{
   textCommandPrefix: string;
   databaseUrl: string;
   logLevel: LogLevel;
+  openRouterApiKey?: string;
+  apiKeyEncryptionKey: string;
+  defaultTriageModel: string;
 }>;
 
 export class ConfigurationError extends Error {
@@ -87,6 +102,26 @@ const decodeBotOperatorUserIds = (
   }
 };
 
+const decodeEncryptionKeyConfig = (environment: Environment): string => {
+  const value = decodeRequired(
+    environment,
+    "API_KEY_ENCRYPTION_KEY",
+    NonEmptyString,
+  );
+  try {
+    decodeEncryptionKey(value);
+    return value;
+  } catch {
+    throw new ConfigurationError("API_KEY_ENCRYPTION_KEY is invalid");
+  }
+};
+
+export const configSecrets = (config: ProdConfig): readonly string[] => [
+  config.discordToken,
+  config.apiKeyEncryptionKey,
+  ...(config.openRouterApiKey === undefined ? [] : [config.openRouterApiKey]),
+];
+
 export const loadConfig = (environment: Environment): ProdConfig =>
   Object.freeze({
     discordToken: decodeRequired(environment, "DISCORD_TOKEN", NonEmptyString),
@@ -109,4 +144,21 @@ export const loadConfig = (environment: Environment): ProdConfig =>
       "file:./data/prod.sqlite",
     ),
     logLevel: decodeOptional(environment, "LOG_LEVEL", LogLevel, "info"),
+    ...(environment.OPENROUTER_API_KEY === undefined ||
+    environment.OPENROUTER_API_KEY.length === 0
+      ? {}
+      : {
+          openRouterApiKey: decodeRequired(
+            environment,
+            "OPENROUTER_API_KEY",
+            NoWhitespaceString,
+          ),
+        }),
+    apiKeyEncryptionKey: decodeEncryptionKeyConfig(environment),
+    defaultTriageModel: decodeOptional(
+      environment,
+      "DEFAULT_TRIAGE_MODEL",
+      ModelIdentifier,
+      "google/gemma-4-31b-it",
+    ),
   });

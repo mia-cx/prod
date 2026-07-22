@@ -11,6 +11,7 @@ import {
   type DiscordMemberLike,
 } from "@protocord/permissions";
 import { encodeSettingsCustomId } from "@protocord/settings";
+import { createSqliteModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 
 import { createProdActionRuntime } from "../src/actions/runtime.js";
 import {
@@ -174,6 +175,14 @@ describe("permission settings integration", () => {
       labelTaxonomyStore: createSqliteLabelTaxonomyStore(connection.database),
       supportHubDiscord,
       ticketProvisioningService,
+      modelConfigurationStore: createSqliteModelConfigurationStore(
+        connection.database,
+        {
+          encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+          defaultModelId: "google/gemma-4-31b-it",
+        },
+      ),
+      deploymentCredentialConfigured: false,
       permissionAdministration: administration,
       permissionAuthorization,
     });

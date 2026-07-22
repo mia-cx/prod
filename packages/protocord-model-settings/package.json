@@ -5,18 +5,36 @@
   "type": "module",
   "exports": {
     ".": {
+      "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./schema": {
+      "development": "./src/schema.ts",
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.js",
       "default": "./dist/schema.js"
     }
   },
-  "files": ["dist"],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./schema": {
+        "types": "./dist/schema.d.ts",
+        "import": "./dist/schema.js",
+        "default": "./dist/schema.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node --input-type=module -e \"await import('./dist/index.js'); await import('./dist/schema.js')\"",
     "clean": "rm -rf dist coverage",
     "lint": "eslint src test --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -24,11 +42,14 @@
     "pack:check": "pnpm pack --dry-run"
   },
   "dependencies": {
-    "@protocord/settings": "workspace:*"
+    "@protocord/settings": "workspace:*",
+    "drizzle-orm": "0.45.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "better-sqlite3": "12.11.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 
 import { startProd, type RunningProd } from "./application.js";
-import { loadConfig } from "./config.js";
+import { configSecrets, loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 
 let logger: Logger = createLogger({ level: "info" });
@@ -38,7 +38,7 @@ const run = async (): Promise<void> => {
   const config = loadConfig(process.env);
   logger = createLogger({
     level: config.logLevel,
-    secrets: [config.discordToken],
+    secrets: configSecrets(config),
   });
 
   try {

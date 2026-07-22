@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { ConfigurationError, loadConfig } from "../src/config.js";
+import {
+  ConfigurationError,
+  configSecrets,
+  loadConfig,
+} from "../src/config.js";
 
 const requiredEnvironment = {
   DISCORD_TOKEN: "development-secret-token",
   DISCORD_CLIENT_ID: "123456789012345678",
+  API_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
 };
 
 describe("loadConfig", () => {
@@ -16,7 +21,83 @@ describe("loadConfig", () => {
       textCommandPrefix: "",
       databaseUrl: "file:./data/prod.sqlite",
       logLevel: "info",
+      apiKeyEncryptionKey: requiredEnvironment.API_KEY_ENCRYPTION_KEY,
+      defaultTriageModel: "google/gemma-4-31b-it",
     });
+  });
+
+  it("loads deployment model overrides without treating the API key as required", () => {
+    expect(
+      loadConfig({
+        ...requiredEnvironment,
+        OPENROUTER_API_KEY: "deployment-key",
+        DEFAULT_TRIAGE_MODEL: "openai/gpt-5-mini",
+      }),
+    ).toMatchObject({
+      openRouterApiKey: "deployment-key",
+      defaultTriageModel: "openai/gpt-5-mini",
+    });
+  });
+
+  it("treats an empty deployment API key as absent", () => {
+    expect(
+      loadConfig({ ...requiredEnvironment, OPENROUTER_API_KEY: "" }),
+    ).not.toHaveProperty("openRouterApiKey");
+  });
+
+  it("rejects deployment API keys containing whitespace", () => {
+    expect(() =>
+      loadConfig({ ...requiredEnvironment, OPENROUTER_API_KEY: "key with space" }),
+    ).toThrow(new ConfigurationError("OPENROUTER_API_KEY is invalid"));
+  });
+
+  it("rejects malformed default triage models", () => {
+    expect(() =>
+      loadConfig({
+        ...requiredEnvironment,
+        DEFAULT_TRIAGE_MODEL: "https://example.test/model",
+      }),
+    ).toThrow(new ConfigurationError("DEFAULT_TRIAGE_MODEL is invalid"));
+    expect(() =>
+      loadConfig({
+        ...requiredEnvironment,
+        DEFAULT_TRIAGE_MODEL: "a model id",
+      }),
+    ).toThrow(new ConfigurationError("DEFAULT_TRIAGE_MODEL is invalid"));
+    expect(() =>
+      loadConfig({
+        ...requiredEnvironment,
+        DEFAULT_TRIAGE_MODEL: "model`with`backticks",
+      }),
+    ).toThrow(new ConfigurationError("DEFAULT_TRIAGE_MODEL is invalid"));
+  });
+
+  it("lists every configured secret for log redaction", () => {
+    expect(configSecrets(loadConfig(requiredEnvironment))).toEqual([
+      "development-secret-token",
+      requiredEnvironment.API_KEY_ENCRYPTION_KEY,
+    ]);
+    expect(
+      configSecrets(
+        loadConfig({
+          ...requiredEnvironment,
+          OPENROUTER_API_KEY: "deployment-key",
+        }),
+      ),
+    ).toEqual([
+      "development-secret-token",
+      requiredEnvironment.API_KEY_ENCRYPTION_KEY,
+      "deployment-key",
+    ]);
+  });
+
+  it("rejects malformed encryption keys safely", () => {
+    expect(() =>
+      loadConfig({
+        ...requiredEnvironment,
+        API_KEY_ENCRYPTION_KEY: "not-a-key",
+      }),
+    ).toThrow(new ConfigurationError("API_KEY_ENCRYPTION_KEY is invalid"));
   });
 
   it("accepts an explicit prefix while validating optional values", () => {

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { openDatabase } from "../src/database.js";
-import { permissionRules } from "../src/schema.js";
+import { modelConfigurations, permissionRules } from "../src/schema.js";
 import {
   applyMigrations,
   migrationsFolder,
@@ -43,6 +43,7 @@ describe("application-owned migration history", () => {
           "guild_settings",
           "guild_label_taxonomies",
           "labels",
+          "mia_cx_model_configurations",
           "permission_rule_origins",
           "reporter_hub_access",
           "ticket_events",
@@ -72,6 +73,14 @@ describe("application-owned migration history", () => {
           id: "rule-2",
         }),
       ).rejects.toThrow(/UNIQUE constraint failed/);
+      await connection.database.insert(modelConfigurations).values({
+        guildId: "guild-1",
+        purpose: "triage",
+        provider: "openrouter",
+        modelId: "google/gemma-4-31b-it",
+        createdAt: "2026-07-17T10:00:00.000Z",
+        updatedAt: "2026-07-17T10:00:00.000Z",
+      });
     } finally {
       connection.close();
     }
