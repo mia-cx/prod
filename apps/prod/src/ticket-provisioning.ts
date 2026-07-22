@@ -102,6 +102,7 @@ export interface TicketProvisioningDiscord {
 
 export interface TicketProvisioningService {
   open(input: OpenTicketInput): Promise<Ticket>;
+  findByThread(guildId: string, threadId: string): Promise<Ticket | undefined>;
   close(
     guild: Guild,
     ticketId: string,
@@ -787,6 +788,7 @@ export const createTicketProvisioningService = (
   };
 
   const service: TicketProvisioningService = {
+    findByThread: (guildId, threadId) => store.findByThread(guildId, threadId),
     open: async (input) =>
       executeGuildOperation(input.guild.id, async () => {
         const state = await settings.get(input.guild.id);

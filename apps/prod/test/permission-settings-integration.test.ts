@@ -89,6 +89,7 @@ const guildSettingsStore: GuildSettingsStore = {
 };
 
 const ticketProvisioningService: TicketProvisioningService = {
+  findByThread: vi.fn(),
   open: vi.fn(),
   close: vi.fn(),
   reopen: vi.fn(),

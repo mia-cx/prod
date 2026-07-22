@@ -54,6 +54,7 @@ export interface TicketStore {
     }>,
   ): Promise<Ticket>;
   get(ticketId: string): Promise<Ticket | undefined>;
+  findByThread(guildId: string, threadId: string): Promise<Ticket | undefined>;
   listProvisioning(): Promise<readonly Ticket[]>;
   listOpen(): Promise<readonly Ticket[]>;
   hasActiveTickets(guildId: string, hubChannelId: string): Promise<boolean>;
@@ -413,6 +414,18 @@ export const createSqliteTicketStore = (
         .select()
         .from(tickets)
         .where(eq(tickets.id, ticketId))
+        .get();
+      return row === undefined ? undefined : ticketFromRow(row);
+    },
+    findByThread: async (guildId: string, threadId: string) => {
+      assertId("guild id", guildId);
+      assertId("thread id", threadId);
+      const row = database
+        .select()
+        .from(tickets)
+        .where(
+          and(eq(tickets.guildId, guildId), eq(tickets.threadId, threadId)),
+        )
         .get();
       return row === undefined ? undefined : ticketFromRow(row);
     },

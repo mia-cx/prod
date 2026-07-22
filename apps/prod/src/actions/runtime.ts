@@ -30,6 +30,7 @@ import type { TicketProvisioningService } from "../ticket-provisioning.js";
 import { createTicketAction } from "./create-ticket.js";
 import { pingAction } from "./ping.js";
 import { createGuildSetupSettingsConsumer } from "./settings.js";
+import { createTicketLifecycleAction } from "./ticket-lifecycle.js";
 
 export type ProdActionContext = Readonly<{
   logger: Logger;
@@ -126,6 +127,14 @@ export const createProdActionRuntime = (
   registry.registerAction(
     createTicketAction(options.ticketProvisioningService),
   );
+  if (options.permissionAuthorization !== undefined) {
+    registry.registerAction(
+      createTicketLifecycleAction(
+        options.ticketProvisioningService,
+        options.permissionAuthorization,
+      ),
+    );
+  }
   registry.registerAction(settings.action);
 
   const handleMessage = textProvider.prefix

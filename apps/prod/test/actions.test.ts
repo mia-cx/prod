@@ -11,6 +11,7 @@ import {
 } from "discord.js";
 import type { Logger } from "pino";
 import type { ModelConfigurationStore } from "@mia-cx/protocord-model-settings";
+import type { AuthorizationService } from "@protocord/permissions";
 import type { DiscordInteractionHandleResult } from "protocord";
 import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
@@ -18,6 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import type { LabelTaxonomyStore } from "../src/label-taxonomy.js";
+import type { PermissionAdministrationService } from "../src/permission-administration.js";
 import {
   createProdActionRuntime,
   logProdActionResult,
@@ -87,6 +89,7 @@ const supportHubDiscord: SupportHubDiscord = {
   deleteInformationMessage: async () => undefined,
 };
 const ticketProvisioningService: TicketProvisioningService = {
+  findByThread: vi.fn(),
   open: vi.fn().mockResolvedValue({
     id: "ticket-1",
     guildId: "guild-1",
@@ -150,6 +153,9 @@ const runtimeOptions = {
   modelConfigurationStore,
   deploymentCredentialConfigured: false,
 };
+const permissionAdministrationFixture = {
+  hasGuildRecords: vi.fn().mockResolvedValue(true),
+} as unknown as PermissionAdministrationService;
 
 function componentWithCustomId(
   value: unknown,
@@ -513,6 +519,78 @@ describe("Prod action runtime", () => {
     },
   );
 
+  it.each([
+    ["close", undefined, "close", "close"],
+    ["reopen", undefined, "reopen", "reopen"],
+    ["triage", "pause", "pauseTriage", "pause_triage"],
+    ["triage", "resume", "resumeTriage", "resume_triage"],
+  ] as const)(
+    "authorizes and executes /%s %s against the exact ticket",
+    async (command, subcommand, method, verb) => {
+      const requireAuthorization = vi.fn().mockResolvedValue(undefined);
+      const authorization = {
+        check: vi.fn(),
+        require: requireAuthorization,
+      } as AuthorizationService;
+      vi.mocked(ticketProvisioningService[method]).mockClear();
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        {
+          ...runtimeOptions,
+          permissionAuthorization: authorization,
+          permissionAdministration: permissionAdministrationFixture,
+        },
+      );
+      const interaction = lifecycleInteraction(command, subcommand);
+
+      await runtime.handleInteraction(interaction as unknown as Interaction);
+
+      expect(requireAuthorization).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: { guildId: "guild-1" },
+          object: { objectType: "ticket", objectId: "ticket-1" },
+          verb,
+        }),
+      );
+      expect(ticketProvisioningService[method]).toHaveBeenCalledWith(
+        interaction.guild,
+        "ticket-1",
+        expect.objectContaining({ actorUserId: "staff-1" }),
+      );
+      expect(interaction.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
+    },
+  );
+
+  it("infers an omitted close ticket from the current private thread", async () => {
+    const authorization = {
+      check: vi.fn(),
+      require: vi.fn().mockResolvedValue(undefined),
+    } as AuthorizationService;
+    vi.mocked(ticketProvisioningService.findByThread).mockResolvedValueOnce({
+      id: "ticket-in-thread",
+    } as never);
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      permissionAuthorization: authorization,
+      permissionAdministration: permissionAdministrationFixture,
+    });
+    const interaction = lifecycleInteraction("close", undefined, null);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(ticketProvisioningService.findByThread).toHaveBeenCalledWith(
+      "guild-1",
+      "thread-1",
+    );
+    expect(ticketProvisioningService.close).toHaveBeenCalledWith(
+      interaction.guild,
+      "ticket-in-thread",
+      expect.objectContaining({ actorUserId: "staff-1" }),
+    );
+  });
+
   it("presents persistent ticket admission rejection without provisioning", async () => {
     vi.mocked(ticketProvisioningService.open).mockRejectedValueOnce(
       new TicketAdmissionError(
@@ -737,6 +815,57 @@ const ticketInteraction = (
     guild: { id: "guild-1" },
     user: { id: "user-1", username: "reporter", globalName: "Reporter" },
     options: { getString: () => summary },
+    deferred: false,
+    replied: false,
+    isAutocomplete: () => false,
+    isChatInputCommand: () => true,
+    isMessageContextMenuCommand: () => false,
+    isUserContextMenuCommand: () => false,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
+    deferReply: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+    }),
+    editReply: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
+  };
+  return interaction as typeof interaction & {
+    guild: { id: string };
+    deferReply: ReturnType<typeof vi.fn>;
+    editReply: ReturnType<typeof vi.fn>;
+  };
+};
+
+const lifecycleInteraction = (
+  commandName: "close" | "reopen" | "triage",
+  subcommand?: "pause" | "resume",
+  ticketId: string | null = "ticket-1",
+) => {
+  const member = {
+    id: "staff-1",
+    guild: { id: "guild-1", ownerId: "owner-1" },
+    roles: { cache: new Collection() },
+    permissions: { has: () => false },
+  };
+  const interaction: Record<string, unknown> = {
+    commandName,
+    channelId: "thread-1",
+    guildId: "guild-1",
+    guild: {
+      id: "guild-1",
+      ownerId: "owner-1",
+      members: { fetch: vi.fn().mockResolvedValue(member) },
+    },
+    user: { id: "staff-1", username: "staff", globalName: "Staff" },
+    options: {
+      getString: (name: string) =>
+        name === "ticket" ? ticketId : name === "reason" ? "Resolved" : null,
+      getSubcommand: () => subcommand,
+    },
     deferred: false,
     replied: false,
     isAutocomplete: () => false,

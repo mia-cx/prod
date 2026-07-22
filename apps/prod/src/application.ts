@@ -77,9 +77,10 @@ export const startProd = async (
       connection.database,
     );
     const executeGuildOperation = createGuildOperationExecutor();
+    const ticketStore = createSqliteTicketStore(connection.database);
     const ticketProvisioningService = createTicketProvisioningService(
       guildSettingsStore,
-      createSqliteTicketStore(connection.database),
+      ticketStore,
       createTicketProvisioningDiscord(),
       { executeGuildOperation },
     );
@@ -88,10 +89,13 @@ export const startProd = async (
     );
     const permissionAuthorization = createProdAuthorizationService({
       store: sqlitePermissionRules,
-      validateResource: ({ object }) =>
-        (object.objectType === "settings" ||
+      validateResource: async ({ context, object }) =>
+        ((object.objectType === "settings" ||
           object.objectType === "permissions") &&
-        object.objectId === "*",
+          object.objectId === "*") ||
+        (object.objectType === "ticket" &&
+          (await ticketStore.get(object.objectId))?.guildId ===
+            context.guildId),
     });
     const permissionAdministration = createPermissionAdministrationService({
       rules: createProdPermissionRuleStore(sqlitePermissionRules),
