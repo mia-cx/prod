@@ -25,7 +25,12 @@ import {
   REPORTER_TICKET_HUB_OVERWRITE,
   type ReporterHubAccessSnapshot,
 } from "./reporter-hub-access.js";
-import type { Ticket, TicketAlias, TicketStore } from "./tickets.js";
+import {
+  TicketStateTransitionError,
+  type Ticket,
+  type TicketAlias,
+  type TicketStore,
+} from "./tickets.js";
 
 export { REPORTER_TICKET_HUB_OVERWRITE } from "./reporter-hub-access.js";
 
@@ -91,10 +96,32 @@ export interface TicketProvisioningDiscord {
     opening?: OpeningInstructionsMutation,
   ): Promise<void>;
   deleteTicketThread(guild: Guild, threadId: string): Promise<void>;
+  closeTicketThread(guild: Guild, ticket: Ticket): Promise<void>;
+  reopenTicketThread(guild: Guild, ticket: Ticket): Promise<void>;
 }
 
 export interface TicketProvisioningService {
   open(input: OpenTicketInput): Promise<Ticket>;
+  close(
+    guild: Guild,
+    ticketId: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket>;
+  reopen(
+    guild: Guild,
+    ticketId: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket>;
+  pauseTriage(
+    guild: Guild,
+    ticketId: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket>;
+  resumeTriage(
+    guild: Guild,
+    ticketId: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket>;
   discoverRecoveryThreads(
     resolveGuild: (guildId: string) => Promise<Guild>,
   ): Promise<Readonly<{ discovered: number; failed: number }>>;
@@ -283,11 +310,7 @@ export const createTicketProvisioningDiscord =
           hub.permissionOverwrites.cache.get(reporterUserId),
         );
       },
-      grantReporterAccess: async (
-        guild,
-        hubChannelId,
-        reporter,
-      ) => {
+      grantReporterAccess: async (guild, hubChannelId, reporter) => {
         const hub = await requireHub(guild, hubChannelId);
         await hub.permissionOverwrites.edit(
           reporter,
@@ -351,10 +374,7 @@ export const createTicketProvisioningDiscord =
         return (
           await findNamedThread(
             hub.threads,
-            new Set([
-              ticketThreadName(ticket),
-              legacyTicketThreadName(ticket),
-            ]),
+            new Set([ticketThreadName(ticket), legacyTicketThreadName(ticket)]),
             botMember.id,
           )
         )?.id;
@@ -386,7 +406,10 @@ export const createTicketProvisioningDiscord =
             throw error;
           });
         if (wasArchived) {
-          await thread.setArchived(false, `Recover Prod ticket ${ticket.number}`);
+          await thread.setArchived(
+            false,
+            `Recover Prod ticket ${ticket.number}`,
+          );
         }
         return Object.freeze({ wasArchived, reporterWasMember });
       },
@@ -496,6 +519,35 @@ export const createTicketProvisioningDiscord =
           });
         if (thread?.isThread() === true)
           await thread.delete("Compensate failed Prod ticket provisioning");
+      },
+      closeTicketThread: async (guild, ticket) => {
+        if (ticket.threadId === undefined)
+          throw new Error("Ticket thread is not stored");
+        const thread = await requirePrivateThread(guild, ticket.threadId);
+        if (thread.parentId !== ticket.hubChannelId)
+          throw new Error("Ticket thread does not belong to its stored hub");
+        if (thread.locked !== true) {
+          await thread.setLocked(true, `Close Prod ticket ${ticket.number}`);
+        }
+        if (thread.archived !== true) {
+          await thread.setArchived(true, `Close Prod ticket ${ticket.number}`);
+        }
+      },
+      reopenTicketThread: async (guild, ticket) => {
+        if (ticket.threadId === undefined)
+          throw new Error("Ticket thread is not stored");
+        const thread = await requirePrivateThread(guild, ticket.threadId);
+        if (thread.parentId !== ticket.hubChannelId)
+          throw new Error("Ticket thread does not belong to its stored hub");
+        if (thread.archived === true) {
+          await thread.setArchived(
+            false,
+            `Reopen Prod ticket ${ticket.number}`,
+          );
+        }
+        if (thread.locked === true) {
+          await thread.setLocked(false, `Reopen Prod ticket ${ticket.number}`);
+        }
       },
     };
     return Object.freeze(discord);
@@ -689,11 +741,7 @@ export const createTicketProvisioningService = (
       );
       await store.beginReporterAccess(ticket, snapshot);
       accessOwnershipStarted = true;
-      await discord.grantReporterAccess(
-        guild,
-        ticket.hubChannelId,
-        reporter,
-      );
+      await discord.grantReporterAccess(guild, ticket.hubChannelId, reporter);
       await store.recordProgress(ticket.id, "reporter_access_granted");
       if (threadId === undefined) {
         threadId = await discord.createTicketThread(guild, ticket);
@@ -759,6 +807,103 @@ export const createTicketProvisioningService = (
           return provision(input.guild, ticket, false);
         });
       }),
+    close: async (guild, ticketId, details = {}) => {
+      const initial = await store.get(ticketId);
+      if (initial === undefined || initial.guildId !== guild.id)
+        throw new Error(`Ticket ${ticketId} does not exist in this guild`);
+      return executeGuildOperation(guild.id, () =>
+        execute(`hub:${guild.id}:${initial.hubChannelId}`, async () => {
+          const fresh = await store.get(ticketId);
+          if (fresh === undefined || fresh.guildId !== guild.id)
+            throw new Error(`Ticket ${ticketId} does not exist in this guild`);
+          let closed: Ticket;
+          try {
+            closed = await store.close(ticketId, details);
+          } catch (error) {
+            if (
+              !(error instanceof TicketStateTransitionError) ||
+              error.status !== "closed"
+            ) {
+              throw error;
+            }
+            closed = fresh;
+          }
+          await discord.closeTicketThread(guild, closed);
+          if (!(await store.hasOtherActiveTicket(closed))) {
+            const snapshot = await store.getReporterAccess(closed);
+            if (snapshot !== undefined) {
+              await restoreReporterAccess(
+                guild,
+                closed.hubChannelId,
+                closed.reporterUserId,
+                snapshot,
+              );
+              await store.finishReporterAccess(closed);
+            }
+          }
+          return closed;
+        }),
+      );
+    },
+    reopen: async (guild, ticketId, details = {}) => {
+      const initial = await store.get(ticketId);
+      if (initial === undefined || initial.guildId !== guild.id)
+        throw new Error(`Ticket ${ticketId} does not exist in this guild`);
+      return executeGuildOperation(guild.id, () =>
+        execute(`hub:${guild.id}:${initial.hubChannelId}`, async () => {
+          const fresh = await store.get(ticketId);
+          if (fresh === undefined || fresh.guildId !== guild.id)
+            throw new Error(`Ticket ${ticketId} does not exist in this guild`);
+          if (fresh.status !== "closed" && fresh.status !== "open") {
+            return store.reopen(ticketId, details);
+          }
+          const reporter = await discord.validateReporter(
+            guild,
+            fresh.reporterUserId,
+          );
+          const snapshot = await discord.captureReporterAccess(
+            guild,
+            fresh.hubChannelId,
+            fresh.reporterUserId,
+          );
+          await store.beginReporterAccess(fresh, snapshot);
+          await discord.grantReporterAccess(
+            guild,
+            fresh.hubChannelId,
+            reporter,
+          );
+          await discord.reopenTicketThread(guild, fresh);
+          if (fresh.status === "open") return fresh;
+          try {
+            return await store.reopen(ticketId, details);
+          } catch (error) {
+            if (
+              error instanceof TicketStateTransitionError &&
+              error.status === "open"
+            ) {
+              return (await store.get(ticketId))!;
+            }
+            throw error;
+          }
+        }),
+      );
+    },
+    pauseTriage: async (guild, ticketId, details = {}) => {
+      const ticket = await store.get(ticketId);
+      if (ticket === undefined || ticket.guildId !== guild.id)
+        throw new Error(`Ticket ${ticketId} does not exist in this guild`);
+      return executeGuildOperation(guild.id, () =>
+        store.pauseTriage(ticketId, details),
+      );
+    },
+    resumeTriage: async (guild, ticketId, details = {}) => {
+      const ticket = await store.get(ticketId);
+      if (ticket === undefined || ticket.guildId !== guild.id)
+        throw new Error(`Ticket ${ticketId} does not exist in this guild`);
+      return executeGuildOperation(guild.id, () =>
+        store.resumeTriage(ticketId, details),
+      );
+    },
     discoverRecoveryThreads: async (resolveGuild) => {
       let discovered = 0;
       let failed = 0;
@@ -890,11 +1035,7 @@ export const createTicketProvisioningService = (
               }
               throw error;
             }
-            await discord.grantReporterAccess(
-              guild,
-              hubChannelId,
-              reporter,
-            );
+            await discord.grantReporterAccess(guild, hubChannelId, reporter);
             resumed += 1;
           }
           return resumed;

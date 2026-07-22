@@ -75,10 +75,125 @@ const discordFixture = (
   reconcileTicketPresentation: vi.fn().mockResolvedValue(undefined),
   rollbackTicketThread: vi.fn().mockResolvedValue(undefined),
   deleteTicketThread: vi.fn().mockResolvedValue(undefined),
+  closeTicketThread: vi.fn().mockResolvedValue(undefined),
+  reopenTicketThread: vi.fn().mockResolvedValue(undefined),
   ...overrides,
 });
 
 describe("ticket provisioning", () => {
+  it("closes the final reporter ticket, archives its thread, and releases hub access", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-close-final",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+
+      await expect(
+        service.close(guild, ticket.id, { actorUserId: "staff-1" }),
+      ).resolves.toMatchObject({ status: "closed", triageStatus: "paused" });
+      expect(discord.closeTicketThread).toHaveBeenCalledWith(
+        guild,
+        expect.objectContaining({ id: ticket.id, status: "closed" }),
+      );
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        "reporter-1",
+        emptyAccessSnapshot,
+      );
+      await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("retains shared reporter access until their other open ticket closes", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let thread = 0;
+    const discord = discordFixture({
+      createTicketThread: vi.fn(async () => `thread-shared-${++thread}`),
+      upsertOpeningInstructions: vi.fn(async (_guild, ticket) => ({
+        messageId: `message-${ticket.id}`,
+        created: true,
+      })),
+    });
+    let id = 0;
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => `ticket-shared-${++id}`,
+    });
+    try {
+      const first = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      const second = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "report",
+      });
+      vi.mocked(discord.restoreReporterAccess).mockClear();
+
+      await service.close(guild, first.id);
+      expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
+      await expect(store.getReporterAccess(first)).resolves.toEqual(
+        emptyAccessSnapshot,
+      );
+
+      await service.close(guild, second.id);
+      expect(discord.restoreReporterAccess).toHaveBeenCalledOnce();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("restores reporter access and thread state before reopening paused", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-reopen",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.close(guild, ticket.id);
+      vi.mocked(discord.grantReporterAccess).mockClear();
+
+      await expect(
+        service.reopen(guild, ticket.id, { actorUserId: "staff-2" }),
+      ).resolves.toMatchObject({ status: "open", triageStatus: "paused" });
+      expect(discord.grantReporterAccess).toHaveBeenCalledWith(
+        guild,
+        "hub-1",
+        reporter,
+      );
+      expect(discord.reopenTicketThread).toHaveBeenCalledWith(
+        guild,
+        expect.objectContaining({ id: ticket.id }),
+      );
+      await expect(store.getReporterAccess(ticket)).resolves.toEqual(
+        emptyAccessSnapshot,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   it("allows hub release only after dependent tickets stop being active", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -350,9 +465,7 @@ describe("ticket provisioning", () => {
         "reporter-1",
       );
       expect(ticketOpeningInstructions(ticket)).toContain("`DEBUGSHARE`");
-      expect(ticketOpeningInstructions(ticket)).toContain(
-        "ticket:1",
-      );
+      expect(ticketOpeningInstructions(ticket)).toContain("ticket:1");
       expect(
         (await store.listEvents(ticket.id)).map(({ eventType }) => eventType),
       ).toEqual([
@@ -1134,7 +1247,9 @@ describe("Discord ticket privacy adapter", () => {
                 "everyone",
                 {
                   id: "everyone",
-                  deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads),
+                  deny: new PermissionsBitField(
+                    PermissionFlagsBits.ManageThreads,
+                  ),
                 },
               ],
             ]),
@@ -1267,7 +1382,9 @@ describe("Discord ticket privacy adapter", () => {
                 "everyone",
                 {
                   id: "everyone",
-                  deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads),
+                  deny: new PermissionsBitField(
+                    PermissionFlagsBits.ManageThreads,
+                  ),
                 },
               ],
             ]),
@@ -1374,7 +1491,9 @@ describe("Discord ticket privacy adapter", () => {
                 "everyone",
                 {
                   id: "everyone",
-                  deny: new PermissionsBitField(PermissionFlagsBits.ManageThreads),
+                  deny: new PermissionsBitField(
+                    PermissionFlagsBits.ManageThreads,
+                  ),
                 },
               ],
             ]),
@@ -1587,10 +1706,7 @@ describe("Discord ticket privacy adapter", () => {
     await expect(
       adapter.prepareTicketThread(mockGuild, "thread-match", ticket),
     ).resolves.toEqual({ wasArchived: true, reporterWasMember: false });
-    expect(setArchived).toHaveBeenCalledWith(
-      false,
-      "Recover Prod ticket 1",
-    );
+    expect(setArchived).toHaveBeenCalledWith(false, "Recover Prod ticket 1");
     expect(getThreadMember).toHaveBeenCalledWith(
       Routes.threadMembers("thread-match", "reporter-1"),
     );
@@ -1630,6 +1746,51 @@ describe("Discord ticket privacy adapter", () => {
       }),
     );
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("locks then archives on close and unarchives then unlocks on reopen", async () => {
+    const calls: string[] = [];
+    const thread = {
+      type: ChannelType.PrivateThread,
+      parentId: "hub-1",
+      locked: false,
+      archived: false,
+      setLocked: vi.fn(async (locked: boolean) => {
+        calls.push(`locked:${String(locked)}`);
+        thread.locked = locked;
+      }),
+      setArchived: vi.fn(async (archived: boolean) => {
+        calls.push(`archived:${String(archived)}`);
+        thread.archived = archived;
+      }),
+    };
+    const mockGuild = {
+      channels: { fetch: vi.fn().mockResolvedValue(thread) },
+    } as unknown as Guild;
+    const ticket = {
+      id: "ticket-lifecycle-adapter",
+      number: 42,
+      guildId: "guild-1",
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+      status: "closed",
+      triageStatus: "paused",
+      threadId: "thread-1",
+      createdAt: "2026-07-17T10:00:00.000Z",
+      updatedAt: "2026-07-17T10:00:00.000Z",
+    } as const;
+    const adapter = createTicketProvisioningDiscord();
+
+    await adapter.closeTicketThread(mockGuild, ticket);
+    await adapter.reopenTicketThread(mockGuild, ticket);
+
+    expect(calls).toEqual([
+      "locked:true",
+      "archived:true",
+      "archived:false",
+      "locked:false",
+    ]);
   });
 
   it("edits deterministic instructions found by marker instead of duplicating them", async () => {
@@ -1720,28 +1881,22 @@ describe("Discord ticket privacy adapter", () => {
       },
     } as unknown as Guild;
 
-    await createTicketProvisioningDiscord().updateTicketThreadName(
-      mockGuild,
-      {
-        id: "ticket-stale",
-        number: 42,
-        guildId: "guild-1",
-        hubChannelId: "hub-1",
-        reporterUserId: "reporter-1",
-        originatingAlias: "issue",
-        status: "open",
-        triageStatus: "collecting",
-        threadId: "thread-existing",
-        openingMessageId: "message-existing",
-        createdAt: "2026-07-17T10:00:00.000Z",
-        updatedAt: "2026-07-17T10:00:00.000Z",
-      },
-    );
+    await createTicketProvisioningDiscord().updateTicketThreadName(mockGuild, {
+      id: "ticket-stale",
+      number: 42,
+      guildId: "guild-1",
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+      status: "open",
+      triageStatus: "collecting",
+      threadId: "thread-existing",
+      openingMessageId: "message-existing",
+      createdAt: "2026-07-17T10:00:00.000Z",
+      updatedAt: "2026-07-17T10:00:00.000Z",
+    });
 
-    expect(setName).toHaveBeenCalledWith(
-      "ticket-42",
-      "Number Prod ticket 42",
-    );
+    expect(setName).toHaveBeenCalledWith("ticket-42", "Number Prod ticket 42");
   });
 
   it("rolls back only mutations owned by a failed thread recovery", async () => {

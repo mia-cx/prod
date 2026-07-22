@@ -25,7 +25,7 @@ safely via state-conditional transactional updates.
 ## TODOs
 
 - [x] Add lifecycle event types and state-conditional transactional store methods (close, reopen, pause triage, resume triage) with persistence tests.
-- [ ] Add thread lock/unlock adapter methods and close/reopen Discord orchestration with final-ticket hub-overwrite maintenance and focused tests.
+- [x] Add thread lock/unlock adapter methods and close/reopen Discord orchestration with final-ticket hub-overwrite maintenance and focused tests.
 - [ ] Register staff `/close`, `/reopen`, and `/triage pause|resume` actions with ticket-scoped authorization and runtime tests.
 - [ ] Run the full automated checks and document the pending human validation gate.
 
@@ -42,4 +42,5 @@ safely via state-conditional transactional updates.
 - Implementer: codex `gpt-5.6-sol` at high reasoning effort; orchestration, verification, and commits stay here.
 - TODO 1 passed three Codex-only adversarial review rounds. A reproduced cross-connection `SQLITE_BUSY_SNAPSHOT` race was fixed with bounded retry and fresh-state re-read; rollback and linked-label preservation are covered.
 - TODO 1 validation: lifecycle suite 30/30 passed; full app suite 222/222 passed; app typecheck, lint, build, and `git diff --check` passed.
+- TODO 2 validation: ticket provisioning suite 40/40 passed; app typecheck and lint passed. Close/reopen is serialized by guild and hub, reconciles duplicate target states, preserves shared access until the final open ticket closes, and applies Discord thread state in the specified order.
 - Mandatory HITL gate: issue #13 stays open until a human validates pause/resume/close/reopen against real Discord with staff and reporter accounts.

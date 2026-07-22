@@ -100,6 +100,10 @@ const ticketProvisioningService: TicketProvisioningService = {
     createdAt: "2026-07-17T10:00:00.000Z",
     updatedAt: "2026-07-17T10:00:00.000Z",
   }),
+  close: vi.fn(),
+  reopen: vi.fn(),
+  pauseTriage: vi.fn(),
+  resumeTriage: vi.fn(),
   discoverRecoveryThreads: vi.fn().mockResolvedValue({
     discovered: 0,
     failed: 0,

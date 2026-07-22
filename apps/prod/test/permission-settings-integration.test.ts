@@ -90,6 +90,10 @@ const guildSettingsStore: GuildSettingsStore = {
 
 const ticketProvisioningService: TicketProvisioningService = {
   open: vi.fn(),
+  close: vi.fn(),
+  reopen: vi.fn(),
+  pauseTriage: vi.fn(),
+  resumeTriage: vi.fn(),
   discoverRecoveryThreads: vi.fn().mockResolvedValue({
     discovered: 0,
     failed: 0,
