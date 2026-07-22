@@ -25,6 +25,7 @@ export type DiscordActionSurface = Readonly<{
   reconcile?(client: Client<true>): Promise<void>;
   handleInteraction(interaction: Interaction): Promise<void>;
   handleMessage?(message: Message): Promise<boolean>;
+  handleUnconsumedMessage?(message: Message): Promise<void>;
   handleError(error: unknown): void;
 }>;
 
@@ -91,8 +92,9 @@ export const createDiscordGateway = (
 ): DiscordGateway => {
   const actions = options.actions;
   const handleMessage = actions?.handleMessage;
+  const handleUnconsumedMessage = actions?.handleUnconsumedMessage;
   const client = new Client({
-    intents: handleMessage
+    intents: handleMessage || handleUnconsumedMessage
       ? [
           GatewayIntentBits.Guilds,
           GatewayIntentBits.GuildMessages,
@@ -178,11 +180,14 @@ export const createDiscordGateway = (
         .handleInteraction(interaction)
         .catch((error: unknown) => actions.handleError(error));
     });
-    if (handleMessage) {
+    if (handleMessage || handleUnconsumedMessage) {
       client.on(Events.MessageCreate, (message) => {
-        void handleMessage(message).catch((error: unknown) =>
-          actions.handleError(error),
-        );
+        void (async () => {
+          if (handleMessage && (await handleMessage(message))) {
+            return;
+          }
+          await handleUnconsumedMessage?.(message);
+        })().catch((error: unknown) => actions.handleError(error));
       });
     }
   }

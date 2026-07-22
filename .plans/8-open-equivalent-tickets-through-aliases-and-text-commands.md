@@ -25,8 +25,8 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 
 ## TODOs
 
-- [ ] Record the plan for #8 with the audit of what #7 already delivered.
-- [ ] Add an unconsumed-message seam: the gateway forwards a message downstream only when text-command dispatch did not consume it, so consumed text commands can never reach the future AI pipeline; cover with gateway/runtime tests.
+- [x] Record the plan for #8 with the audit of what #7 already delivered.
+- [x] Add an unconsumed-message seam: the gateway forwards a message downstream only when text-command dispatch did not consume it, so consumed text commands can never reach the future AI pipeline; cover with gateway/runtime tests.
 - [ ] Audit alias-equivalence test coverage (same domain behavior across all six triggers with correct origin metadata) and add any missing focused tests.
 - [ ] Run the full `pnpm check`, update the plan, push, and file the PR with the human validation gate called out.
 
@@ -36,4 +36,6 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 - Implementation delegated to Codex (gpt-5.6-sol, high reasoning effort) per user instruction; orchestration, verification, and commits stay with Claude.
 - Evidence for the shipped scope: `apps/prod/src/actions/create-ticket.ts` (aliases + both trigger kinds, ephemeral defer), `packages/protocord/src/text-commands.ts` (prefix normalization, empty-prefix disable, bot/webhook filter), `apps/prod/src/config.ts` (`TEXT_COMMAND_PREFIX`, default empty), `apps/prod/src/schema.ts` (`originating_alias`), `apps/prod/src/actions/runtime.ts` (30s auto-delete reply), `apps/prod/src/discord.ts` (intents gated on prefix presence).
 - Gap evidence: `apps/prod/src/discord.ts` `MessageCreate` listener calls `handleMessage` fire-and-forget and ignores the returned `consumed` boolean; no downstream message-consumer seam exists.
+- Seam implementation (Codex gpt-5.6-sol:high): `DiscordActionSurface.handleUnconsumedMessage` added; the `MessageCreate` listener awaits `handleMessage` and forwards downstream only when not consumed; dispatch errors are terminal (no fall-through); message intents now also key on the downstream hook; runtime passes the optional hook through for future application wiring. Four gateway tests cover consumed, unconsumed, rejection, and downstream-only paths.
+- Seam validation: `pnpm --filter @prod/app test` (201/201, with `--config.verify-deps-before-run=false` — the preflight needs a TTY in this environment), typecheck, and lint all passed.
 - PR precedent: #28 used `Closes #7` with the mandatory HITL checklist completed before merge; #8 follows the same pattern.
