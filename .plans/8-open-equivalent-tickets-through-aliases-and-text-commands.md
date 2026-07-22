@@ -15,13 +15,18 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 
 ## Acceptance criteria
 
-- [ ] All aliases produce equivalent ticket domain behavior while recording the originating trigger.
-- [ ] The configured prefix is honored and an empty prefix disables text triggers.
-- [ ] Text acknowledgements expose only a minimal thread link and auto-delete.
-- [ ] Bot and webhook messages are ignored.
-- [ ] Text command messages never continue into the AI message pipeline.
-- [ ] Slash output remains ephemeral.
-- [ ] Automated checks pass before the mandatory human validation gate is handed off.
+- [x] All aliases produce equivalent ticket domain behavior while recording the originating trigger.
+- [x] The configured prefix is honored and an empty prefix disables text triggers.
+- [x] Text acknowledgements expose only a minimal thread link and auto-delete.
+- [x] Bot and webhook messages are ignored.
+- [x] Text command messages never continue into the AI message pipeline.
+- [x] Slash output remains ephemeral.
+- [x] Automated checks pass before the mandatory human validation gate is handed off.
+
+## Human validation
+
+- [ ] Provide development Discord credentials and a reporter account. Exercise every slash alias and text alias with default, custom, and disabled prefix configurations; confirm equivalent tickets, correct origin metadata, transient acknowledgements, and no duplicate AI processing.
+- [ ] Record the validation outcome without secrets, raw tokens, private ticket content, or unredacted diagnostics.
 
 ## TODOs
 
@@ -29,7 +34,7 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 - [x] Add an unconsumed-message seam: the gateway forwards a message downstream only when text-command dispatch did not consume it, so consumed text commands can never reach the future AI pipeline; cover with gateway/runtime tests.
 - [x] Audit alias-equivalence test coverage (same domain behavior across all six triggers with correct origin metadata) and add any missing focused tests.
 - [x] Run the full `pnpm check` and update the plan.
-- [ ] Push and file the PR with the human validation gate called out.
+- [~] Push and file the PR with the human validation gate called out.
 
 ## Notes
 
@@ -44,4 +49,5 @@ AI message pipeline (`@protocord/ai` is still a boundary stub).
 - Codex-only review-loop round three found one remaining coverage gap around downstream-handler rejection. The gateway suite now proves downstream failures are awaited and routed through the centralized action error handler.
 - Codex-only review-loop round four was clean across correctness, security, and coverage. The only residual suggestion was an explicit whitespace-only text-summary case; provisioning already normalizes that boundary, so it was classified as non-loop-worthy.
 - Full repository validation passed: `pnpm --config.verify-deps-before-run=false check` completed all 32 boundary, lint, typecheck, test, and build tasks successfully.
+- The PR must use `Refs #8`, not `Closes #8`, because the issue's mandatory real-Discord validation remains outstanding.
 - PR precedent: #28 used `Closes #7` with the mandatory HITL checklist completed before merge; #8 follows the same pattern.
