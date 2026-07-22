@@ -24,7 +24,7 @@ safely via state-conditional transactional updates.
 
 ## TODOs
 
-- [ ] Add lifecycle event types and state-conditional transactional store methods (close, reopen, pause triage, resume triage) with persistence tests.
+- [x] Add lifecycle event types and state-conditional transactional store methods (close, reopen, pause triage, resume triage) with persistence tests.
 - [ ] Add thread lock/unlock adapter methods and close/reopen Discord orchestration with final-ticket hub-overwrite maintenance and focused tests.
 - [ ] Register staff `/close`, `/reopen`, and `/triage pause|resume` actions with ticket-scoped authorization and runtime tests.
 - [ ] Run the full automated checks and document the pending human validation gate.
@@ -40,4 +40,6 @@ safely via state-conditional transactional updates.
 - Authorization: verbs `close`, `reopen`, `pause_triage`, `resume_triage` and presets already exist in protocord-permissions and `permission-administration.ts`; actions check permissions inside execute via `AuthorizationService.require` (settings.ts pattern). `application.ts` `validateResource` must learn `objectType: "ticket"`.
 - Reopening never resumes AI automatically; summaries/labels/suggestions/assignees are simply not touched by reopen — tests must prove they survive.
 - Implementer: codex `gpt-5.6-sol` at high reasoning effort; orchestration, verification, and commits stay here.
+- TODO 1 passed three Codex-only adversarial review rounds. A reproduced cross-connection `SQLITE_BUSY_SNAPSHOT` race was fixed with bounded retry and fresh-state re-read; rollback and linked-label preservation are covered.
+- TODO 1 validation: lifecycle suite 30/30 passed; full app suite 222/222 passed; app typecheck, lint, build, and `git diff --check` passed.
 - Mandatory HITL gate: issue #13 stays open until a human validates pause/resume/close/reopen against real Discord with staff and reporter accounts.
