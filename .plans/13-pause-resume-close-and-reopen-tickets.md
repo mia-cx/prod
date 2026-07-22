@@ -14,20 +14,20 @@ safely via state-conditional transactional updates.
 
 ## Acceptance criteria
 
-- [ ] Pause and resume are valid only for allowed ticket states.
-- [ ] Closing sets closed plus paused, audits the transition, and locks/archives the thread.
-- [ ] Closing the final open ticket removes the reporter hub overwrite while other open tickets retain it.
-- [ ] Reopening restores access, unlocks/unarchives, and remains paused.
-- [ ] Summaries, labels, suggestions, and assignees survive reopen.
-- [ ] Duplicate and concurrent transitions resolve safely.
-- [ ] Automated checks pass before the mandatory real-environment validation gate is handed to a human.
+- [x] Pause and resume are valid only for allowed ticket states.
+- [x] Closing sets closed plus paused, audits the transition, and locks/archives the thread.
+- [x] Closing the final open ticket removes the reporter hub overwrite while other open tickets retain it.
+- [x] Reopening restores access, unlocks/unarchives, and remains paused.
+- [x] Summaries, labels, suggestions, and assignees survive reopen.
+- [x] Duplicate and concurrent transitions resolve safely.
+- [x] Automated checks pass before the mandatory real-environment validation gate is handed to a human.
 
 ## TODOs
 
 - [x] Add lifecycle event types and state-conditional transactional store methods (close, reopen, pause triage, resume triage) with persistence tests.
 - [x] Add thread lock/unlock adapter methods and close/reopen Discord orchestration with final-ticket hub-overwrite maintenance and focused tests.
 - [x] Register staff `/close`, `/reopen`, and `/triage pause|resume` actions with ticket-scoped authorization and runtime tests.
-- [ ] Run the full automated checks and document the pending human validation gate.
+- [x] Run the full automated checks and document the pending human validation gate.
 
 ## Notes
 
@@ -44,4 +44,6 @@ safely via state-conditional transactional updates.
 - TODO 1 validation: lifecycle suite 30/30 passed; full app suite 222/222 passed; app typecheck, lint, build, and `git diff --check` passed.
 - TODO 2 validation: ticket provisioning suite 40/40 passed; app typecheck and lint passed. Close/reopen is serialized by guild and hub, reconciles duplicate target states, preserves shared access until the final open ticket closes, and applies Discord thread state in the specified order.
 - TODO 3 validation: action and ticket suites 56/56 passed; app typecheck and lint passed. Lifecycle commands are ephemeral, infer optional ticket IDs from the current thread, require exact-ticket permissions, and application resource validation confirms the ticket belongs to the authorization guild.
+- TODO 4 validation: `corepack pnpm check` passed all 32 Turbo tasks across 8 packages; the Prod app passed 231/231 tests across 21 files. Package boundaries, lint, typecheck, tests, and builds all passed.
 - Mandatory HITL gate: issue #13 stays open until a human validates pause/resume/close/reopen against real Discord with staff and reporter accounts.
+- Human handoff: configure development Discord credentials and authorized staff/reporter accounts; open two tickets for one reporter; verify pause/resume state, close lock+archive, retained hub overwrite after the first close, overwrite restoration after the final close, reopen access+unarchive+unlock with triage still paused, preserved metadata, and harmless repeated/invalid commands. Record only the outcome—never tokens, private ticket content, or raw diagnostics.
