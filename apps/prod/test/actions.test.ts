@@ -580,6 +580,7 @@ describe("Prod action runtime", () => {
         guild: message.guild,
         reporterUserId: "user-1",
         originatingAlias: alias,
+        summary: "Poke crashes",
       });
       expect(reply).toHaveBeenCalledWith({
         content: "https://discord.com/channels/guild-1/thread-1",
@@ -602,17 +603,26 @@ describe("Prod action runtime", () => {
     expect(runtime.commands).toHaveLength(7);
   });
 
-  it("keeps the downstream hook when text commands are disabled", () => {
-    const handleUnconsumedMessage = vi.fn(async () => undefined);
-    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
-      ...runtimeOptions,
-      textCommandPrefix: " \t ",
-      handleUnconsumedMessage,
-    });
+  it.each([
+    ["enabled", "!", true],
+    ["disabled", " \t ", false],
+  ] as const)(
+    "keeps the downstream hook when text commands are %s",
+    (_state, textCommandPrefix, expectsTextHandler) => {
+      const handleUnconsumedMessage = vi.fn(async () => undefined);
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        {
+          ...runtimeOptions,
+          textCommandPrefix,
+          handleUnconsumedMessage,
+        },
+      );
 
-    expect(runtime.handleMessage).toBeUndefined();
-    expect(runtime.handleUnconsumedMessage).toBe(handleUnconsumedMessage);
-  });
+      expect(runtime.handleMessage === undefined).toBe(!expectsTextHandler);
+      expect(runtime.handleUnconsumedMessage).toBe(handleUnconsumedMessage);
+    },
+  );
 
   it("resolves guilds through the ready client during startup reconciliation", async () => {
     vi.mocked(ticketProvisioningService.discoverRecoveryThreads).mockClear();
