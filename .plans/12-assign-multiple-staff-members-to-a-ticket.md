@@ -23,9 +23,9 @@ assignee pauses triage, and removing the final assignee leaves triage paused.
 ## TODOs
 
 - [x] Add the `ticket_assignees` schema, migration, assignment ticket events, and ticket-store assignment methods (idempotent add/remove with provenance, thread lookup, first-assignee triage pause in one transaction) with persistence tests.
-- [ ] Implement the ticket assignment service enforcing `claim_self`/`unclaim_self`/`assign_other`/`unassign_other` authorization, target self-claim eligibility for delegated adds, idempotent outcomes, and audit events, with unit tests.
-- [ ] Register `/claim`, `/unclaim`, `/assign`, `/unassign` actions resolving the ticket from the invoking thread with ephemeral presentation, and extend the authorization resource validator plus application wiring to ticket objects, with runtime tests.
-- [ ] Run the full automated checks, record results, and document the pending human validation gate.
+- [x] Implement the ticket assignment service enforcing `claim_self`/`unclaim_self`/`assign_other`/`unassign_other` authorization, target self-claim eligibility for delegated adds, idempotent outcomes, and audit events, with unit tests.
+- [x] Register `/claim`, `/unclaim`, `/assign`, `/unassign` actions resolving the ticket from the invoking thread with ephemeral presentation, and extend the authorization resource validator plus application wiring to ticket objects, with runtime tests.
+- [x] Run the full automated checks, record results, and document the pending human validation gate.
 
 ## Notes
 
@@ -37,3 +37,4 @@ assignee pauses triage, and removing the final assignee leaves triage paused.
 - Mandatory HITL gate: the issue stays open after the PR; the PR uses `Refs #12` and calls out the human validation checklist.
 - Implementation is delegated to codex (gpt-5.6-sol, high reasoning) per task, with orchestrator verification of diffs and tests before each commit.
 - Persistence validation: migration `0002_shallow_the_order.sql` creates only `ticket_assignees` plus its assignee index; `addAssignee`/`removeAssignee` run status check, idempotency check, triage pause, and event insert in one transaction. App `pnpm test` (204/204), `pnpm typecheck`, and `pnpm lint` all passed locally; codex's reported `dev-process` failures were its sandbox environment only.
+- Completed implementation validation: root `pnpm check` passed all 32 tasks, including 220/220 app tests, package boundaries, lint, typecheck, and build. Real-environment Discord validation remains the mandatory human gate before closing #12.
