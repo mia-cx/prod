@@ -824,8 +824,10 @@ export const createTicketProvisioningService = (
           if (fresh === undefined || fresh.guildId !== guild.id)
             throw new Error(`Ticket ${ticketId} does not exist in this guild`);
           let closed: Ticket;
+          let closeTransitionApplied = false;
           try {
             closed = await store.close(ticketId, details);
+            closeTransitionApplied = true;
           } catch (error) {
             if (
               !(error instanceof TicketStateTransitionError) ||
@@ -847,7 +849,11 @@ export const createTicketProvisioningService = (
             });
           const cleanupErrors: unknown[] = [];
           const hasOtherActiveTicket = await store.hasOtherActiveTicket(closed);
-          if (threadError !== undefined && hasOtherActiveTicket) {
+          if (
+            threadError !== undefined &&
+            hasOtherActiveTicket &&
+            closeTransitionApplied
+          ) {
             try {
               await discord.reopenTicketThread(guild, closed);
               await store.reopen(ticketId, {
@@ -923,11 +929,13 @@ export const createTicketProvisioningService = (
             fresh.reporterUserId,
           );
           let ownershipStarted = false;
+          let discordMutationStarted = false;
           let ownedSnapshot = snapshot;
           try {
             await recheckAuthorization?.();
             ownedSnapshot = await store.beginReporterAccess(fresh, snapshot);
             ownershipStarted = true;
+            discordMutationStarted = true;
             await discord.grantReporterAccess(
               guild,
               fresh.hubChannelId,
@@ -943,11 +951,13 @@ export const createTicketProvisioningService = (
               return (await store.get(ticketId))!;
             }
             const compensationErrors: unknown[] = [];
-            await discord
-              .closeTicketThread(guild, fresh)
-              .catch((compensationError: unknown) =>
-                compensationErrors.push(compensationError),
-              );
+            if (discordMutationStarted) {
+              await discord
+                .closeTicketThread(guild, fresh)
+                .catch((compensationError: unknown) =>
+                  compensationErrors.push(compensationError),
+                );
+            }
             if (ownershipStarted && !accessIsShared) {
               await restoreReporterAccess(
                 guild,

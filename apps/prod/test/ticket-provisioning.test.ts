@@ -283,6 +283,52 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("does not reopen a settled ticket when a duplicate close cannot lock its thread", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let thread = 0;
+    const discord = discordFixture({
+      createTicketThread: vi.fn(async () => `thread-duplicate-${++thread}`),
+      upsertOpeningInstructions: vi.fn(async (_guild, ticket) => ({
+        messageId: `message-${ticket.id}`,
+        created: true,
+      })),
+    });
+    let id = 0;
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => `ticket-duplicate-${++id}`,
+    });
+    try {
+      const first = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "report",
+      });
+      await service.close(guild, first.id);
+      vi.mocked(discord.reopenTicketThread).mockClear();
+      vi.mocked(discord.closeTicketThread).mockRejectedValueOnce(
+        new Error("cannot lock"),
+      );
+
+      await expect(service.close(guild, first.id)).rejects.toThrow(
+        "cannot lock",
+      );
+      await expect(store.get(first.id)).resolves.toMatchObject({
+        status: "closed",
+        triageStatus: "paused",
+      });
+      expect(discord.reopenTicketThread).not.toHaveBeenCalled();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("compensates reporter access and thread state when reopen fails", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -317,6 +363,42 @@ describe("ticket provisioning", () => {
         expect.objectContaining({ id: ticket.id }),
       );
       expect(discord.restoreReporterAccess).toHaveBeenCalledOnce();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("does not compensate Discord when the serialized reopen authorization fails", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-reopen-denied",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.close(guild, ticket.id);
+      vi.mocked(discord.closeTicketThread).mockClear();
+      vi.mocked(discord.grantReporterAccess).mockClear();
+      vi.mocked(discord.reopenTicketThread).mockClear();
+
+      await expect(
+        service.reopen(guild, ticket.id, {}, async () => {
+          throw new Error("authorization revoked");
+        }),
+      ).rejects.toThrow("authorization revoked");
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        status: "closed",
+        triageStatus: "paused",
+      });
+      expect(discord.grantReporterAccess).not.toHaveBeenCalled();
+      expect(discord.reopenTicketThread).not.toHaveBeenCalled();
+      expect(discord.closeTicketThread).not.toHaveBeenCalled();
     } finally {
       connection.close();
     }
