@@ -189,6 +189,11 @@ describe("ticket provisioning", () => {
         guild,
         expect.objectContaining({ id: ticket.id }),
       );
+      expect(discord.addReporter).toHaveBeenCalledWith(
+        guild,
+        ticket.threadId,
+        ticket.reporterUserId,
+      );
       await expect(store.getReporterAccess(ticket)).resolves.toEqual(
         emptyAccessSnapshot,
       );
@@ -197,7 +202,7 @@ describe("ticket provisioning", () => {
     }
   });
 
-  it("still releases final reporter access when Discord thread closing fails", async () => {
+  it("compensates a failed final close back to open", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
     const store = createSqliteTicketStore(connection.database);
@@ -218,16 +223,17 @@ describe("ticket provisioning", () => {
         "thread missing",
       );
       await expect(store.get(ticket.id)).resolves.toMatchObject({
-        status: "closed",
+        status: "open",
         triageStatus: "paused",
       });
-      await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
-      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
-        guild,
-        ticket.hubChannelId,
-        ticket.reporterUserId,
+      await expect(store.getReporterAccess(ticket)).resolves.toEqual(
         emptyAccessSnapshot,
       );
+      expect(discord.reopenTicketThread).toHaveBeenCalledWith(
+        guild,
+        expect.objectContaining({ id: ticket.id }),
+      );
+      expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
     } finally {
       connection.close();
     }
@@ -368,6 +374,67 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("restores the current shared overwrite when reopen fails", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let thread = 0;
+    const restrictedSnapshot: ReporterHubAccessSnapshot = {
+      ...emptyAccessSnapshot,
+      overwriteExisted: true,
+      permissions: {
+        ...emptyAccessSnapshot.permissions,
+        SendMessagesInThreads: "deny",
+      },
+    };
+    const discord = discordFixture({
+      createTicketThread: vi.fn(async () => `thread-shared-reopen-${++thread}`),
+      upsertOpeningInstructions: vi.fn(async (_guild, ticket) => ({
+        messageId: `message-${ticket.id}`,
+        created: true,
+      })),
+    });
+    let id = 0;
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => `ticket-shared-reopen-${++id}`,
+    });
+    try {
+      const first = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "report",
+      });
+      await service.close(guild, first.id);
+      vi.mocked(discord.captureReporterAccess).mockResolvedValueOnce(
+        restrictedSnapshot,
+      );
+      vi.mocked(discord.restoreReporterAccess).mockClear();
+      vi.mocked(discord.addReporter).mockRejectedValueOnce(
+        new Error("cannot add reporter"),
+      );
+
+      await expect(service.reopen(guild, first.id)).rejects.toThrow(
+        "cannot add reporter",
+      );
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        first.hubChannelId,
+        first.reporterUserId,
+        restrictedSnapshot,
+      );
+      await expect(store.getReporterAccess(first)).resolves.toEqual(
+        emptyAccessSnapshot,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   it("does not compensate Discord when the serialized reopen authorization fails", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -386,6 +453,7 @@ describe("ticket provisioning", () => {
       vi.mocked(discord.closeTicketThread).mockClear();
       vi.mocked(discord.grantReporterAccess).mockClear();
       vi.mocked(discord.reopenTicketThread).mockClear();
+      vi.mocked(discord.restoreReporterAccess).mockClear();
 
       await expect(
         service.reopen(guild, ticket.id, {}, async () => {
@@ -399,6 +467,72 @@ describe("ticket provisioning", () => {
       expect(discord.grantReporterAccess).not.toHaveBeenCalled();
       expect(discord.reopenTicketThread).not.toHaveBeenCalled();
       expect(discord.closeTicketThread).not.toHaveBeenCalled();
+      expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
+      await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("treats a concurrent reopen winner as harmless across service instances", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const realStore = createSqliteTicketStore(connection.database);
+    let raceEnabled = false;
+    let racers = 0;
+    let releaseRace!: () => void;
+    const raceGate = new Promise<void>((resolve) => {
+      releaseRace = resolve;
+    });
+    const store = {
+      ...realStore,
+      reopen: async (...args: Parameters<typeof realStore.reopen>) => {
+        if (raceEnabled) {
+          racers += 1;
+          if (racers === 2) releaseRace();
+          await raceGate;
+        }
+        return realStore.reopen(...args);
+      },
+    };
+    const discord = discordFixture();
+    const firstService = createTicketProvisioningService(
+      settings,
+      store,
+      discord,
+      { createId: () => "ticket-concurrent-reopen" },
+    );
+    const secondService = createTicketProvisioningService(
+      settings,
+      store,
+      discord,
+    );
+    try {
+      const ticket = await firstService.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await firstService.close(guild, ticket.id);
+      vi.mocked(discord.closeTicketThread).mockClear();
+      vi.mocked(discord.restoreReporterAccess).mockClear();
+      raceEnabled = true;
+
+      await expect(
+        Promise.all([
+          firstService.reopen(guild, ticket.id),
+          secondService.reopen(guild, ticket.id),
+        ]),
+      ).resolves.toEqual([
+        expect.objectContaining({ status: "open" }),
+        expect.objectContaining({ status: "open" }),
+      ]);
+      expect(discord.closeTicketThread).not.toHaveBeenCalled();
+      expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
+      await expect(realStore.get(ticket.id)).resolves.toMatchObject({
+        status: "open",
+        triageStatus: "paused",
+      });
     } finally {
       connection.close();
     }

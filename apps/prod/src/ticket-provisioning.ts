@@ -851,7 +851,6 @@ export const createTicketProvisioningService = (
           const hasOtherActiveTicket = await store.hasOtherActiveTicket(closed);
           if (
             threadError !== undefined &&
-            hasOtherActiveTicket &&
             closeTransitionApplied
           ) {
             try {
@@ -942,6 +941,14 @@ export const createTicketProvisioningService = (
               reporter,
             );
             await discord.reopenTicketThread(guild, fresh);
+            if (fresh.threadId === undefined) {
+              throw new Error("The ticket thread has not been persisted");
+            }
+            await discord.addReporter(
+              guild,
+              fresh.threadId,
+              fresh.reporterUserId,
+            );
             return await store.reopen(ticketId, details);
           } catch (error) {
             if (
@@ -958,14 +965,18 @@ export const createTicketProvisioningService = (
                   compensationErrors.push(compensationError),
                 );
             }
-            if (ownershipStarted && !accessIsShared) {
+            if (ownershipStarted) {
               await restoreReporterAccess(
                 guild,
                 fresh.hubChannelId,
                 fresh.reporterUserId,
-                ownedSnapshot,
+                accessIsShared ? snapshot : ownedSnapshot,
               )
-                .then(() => store.finishReporterAccess(fresh))
+                .then(() =>
+                  accessIsShared
+                    ? undefined
+                    : store.finishReporterAccess(fresh),
+                )
                 .catch((compensationError: unknown) =>
                   compensationErrors.push(compensationError),
                 );
