@@ -14,6 +14,10 @@ import type { ModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 import type { DiscordInteractionHandleResult } from "protocord";
 import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
+import type {
+  AuthorizationService,
+  DiscordMemberLike,
+} from "@protocord/permissions";
 
 import type { GuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
@@ -29,6 +33,9 @@ import {
   type TicketProvisioningService,
 } from "../src/ticket-provisioning.js";
 import { TicketAdmissionError } from "../src/tickets.js";
+import { openDatabase } from "../src/database.js";
+import { applyMigrations } from "../src/migrations.js";
+import { createSqliteTicketStore } from "../src/tickets.js";
 
 const noMentions = { parse: [], repliedUser: false };
 const permissionOwnership: HubPermissionOwnership = {
@@ -198,6 +205,165 @@ const pingInteraction = (
 };
 
 describe("Prod action runtime", () => {
+  it("registers and executes all four ticket assignment commands ephemerally", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const ticketStore = createSqliteTicketStore(connection.database);
+    const ticket = await ticketStore.create({
+      id: "ticket-assignment-runtime",
+      guildId: "guild-1",
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    await ticketStore.recordProgress(
+      ticket.id,
+      "thread_created",
+      {},
+      { threadId: "thread-assignment" },
+    );
+    await ticketStore.recordProgress(
+      ticket.id,
+      "instructions_posted",
+      {},
+      { openingMessageId: "message-1" },
+    );
+    await ticketStore.markOpen(ticket.id);
+    const authorization: AuthorizationService = {
+      check: async () => ({
+        allowed: true,
+        reason: "matched_rule",
+        matchedRuleIds: ["rule-1"],
+      }),
+      require: async () => undefined,
+    };
+    const actor: DiscordMemberLike = {
+      id: "actor-1",
+      guild: { id: "guild-1", ownerId: "owner-1" },
+      roles: { cache: new Map() },
+      permissions: { has: () => false },
+    };
+    const target: DiscordMemberLike = { ...actor, id: "target-1" };
+    const fetch = vi.fn(async (id: string) =>
+      id === "actor-1" ? actor : target,
+    );
+    try {
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        {
+          ...runtimeOptions,
+          permissionAuthorization: authorization,
+          permissionAdministration: {
+            hasGuildRecords: async () => true,
+          } as never,
+          ticketStore,
+        },
+      );
+      expect(
+        runtime.commands.filter(({ name }) =>
+          ["claim", "unclaim", "assign", "unassign"].includes(name),
+        ),
+      ).toEqual([
+        expect.objectContaining({ name: "claim", options: [] }),
+        expect.objectContaining({ name: "unclaim", options: [] }),
+        expect.objectContaining({
+          name: "assign",
+          options: [
+            expect.objectContaining({
+              type: ApplicationCommandOptionType.User,
+              name: "member",
+              required: true,
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          name: "unassign",
+          options: [
+            expect.objectContaining({
+              type: ApplicationCommandOptionType.User,
+              name: "member",
+              required: true,
+            }),
+          ],
+        }),
+      ]);
+
+      for (const commandName of [
+        "claim",
+        "unclaim",
+        "assign",
+        "unassign",
+      ] as const) {
+        const interaction: Record<string, unknown> = {
+          commandName,
+          channelId: "thread-assignment",
+          guildId: "guild-1",
+          guild: { members: { fetch } },
+          user: { id: "actor-1", username: "actor" },
+          options: { getUser: () => ({ id: "target-1" }) },
+          deferred: false,
+          replied: false,
+          isAutocomplete: () => false,
+          isButton: () => false,
+          isStringSelectMenu: () => false,
+          isMentionableSelectMenu: () => false,
+          isChannelSelectMenu: () => false,
+          isModalSubmit: () => false,
+          isChatInputCommand: () => true,
+          isMessageContextMenuCommand: () => false,
+          isUserContextMenuCommand: () => false,
+          deferReply: vi.fn().mockResolvedValue(undefined),
+          editReply: vi.fn().mockResolvedValue(undefined),
+          followUp: vi.fn().mockResolvedValue(undefined),
+          deleteReply: vi.fn().mockResolvedValue(undefined),
+          reply: vi.fn().mockResolvedValue(undefined),
+        };
+        await runtime.handleInteraction(interaction as unknown as Interaction);
+        expect(interaction.deferReply).toHaveBeenCalledWith({
+          flags: MessageFlags.Ephemeral,
+        });
+        const expectedContent = {
+          claim: "You are now assigned to this ticket.",
+          unclaim: "You are no longer assigned to this ticket.",
+          assign: "That member is now assigned to this ticket.",
+          unassign: "That member is no longer assigned to this ticket.",
+        }[commandName];
+        expect(interaction.editReply).toHaveBeenCalledWith({
+          content: expectedContent,
+          allowedMentions: { parse: [] },
+        });
+        await expect(ticketStore.listAssignees(ticket.id)).resolves.toEqual(
+          commandName === "claim"
+            ? [expect.objectContaining({ assigneeUserId: "actor-1" })]
+            : commandName === "assign"
+              ? [expect.objectContaining({ assigneeUserId: "target-1" })]
+              : [],
+        );
+        if (commandName === "claim") {
+          const repeat = {
+            ...interaction,
+            deferReply: vi.fn().mockResolvedValue(undefined),
+            editReply: vi.fn().mockResolvedValue(undefined),
+          };
+          await runtime.handleInteraction(repeat as unknown as Interaction);
+          expect(repeat.editReply).toHaveBeenCalledWith({
+            content: "You are already assigned to this ticket.",
+            allowedMentions: { parse: [] },
+          });
+          await expect(ticketStore.listAssignees(ticket.id)).resolves.toEqual([
+            expect.objectContaining({ assigneeUserId: "actor-1" }),
+          ]);
+          expect(
+            (await ticketStore.listEvents(ticket.id)).filter(
+              ({ eventType }) => eventType === "assignee_added",
+            ),
+          ).toHaveLength(1);
+        }
+      }
+    } finally {
+      connection.close();
+    }
+  });
   it("registers every Discord ping surface from one action", async () => {
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),

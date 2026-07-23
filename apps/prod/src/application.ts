@@ -5,6 +5,7 @@ import { createSqliteModelConfigurationStore } from "@mia-cx/protocord-model-set
 import type { ProdConfig } from "./config.js";
 import { createProdActionRuntime } from "./actions/runtime.js";
 import {
+  createProdAuthorizationResourceValidator,
   createProdAuthorizationService,
   createProdPermissionRuleStore,
 } from "./authorization.js";
@@ -77,9 +78,10 @@ export const startProd = async (
       connection.database,
     );
     const executeGuildOperation = createGuildOperationExecutor();
+    const ticketStore = createSqliteTicketStore(connection.database);
     const ticketProvisioningService = createTicketProvisioningService(
       guildSettingsStore,
-      createSqliteTicketStore(connection.database),
+      ticketStore,
       createTicketProvisioningDiscord(),
       { executeGuildOperation },
     );
@@ -88,10 +90,7 @@ export const startProd = async (
     );
     const permissionAuthorization = createProdAuthorizationService({
       store: sqlitePermissionRules,
-      validateResource: ({ object }) =>
-        (object.objectType === "settings" ||
-          object.objectType === "permissions") &&
-        object.objectId === "*",
+      validateResource: createProdAuthorizationResourceValidator(ticketStore),
     });
     const permissionAdministration = createPermissionAdministrationService({
       rules: createProdPermissionRuleStore(sqlitePermissionRules),
@@ -119,6 +118,7 @@ export const startProd = async (
       executeGuildOperation,
       permissionAdministration,
       permissionAuthorization,
+      ticketStore,
     });
     gateway =
       dependencies.gateway ??

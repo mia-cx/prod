@@ -27,9 +27,12 @@ import type { LabelTaxonomyStore } from "../label-taxonomy.js";
 import type { PermissionAdministrationService } from "../permission-administration.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
+import { createTicketAssignmentService } from "../ticket-assignment.js";
+import type { TicketStore } from "../tickets.js";
 import { createTicketAction } from "./create-ticket.js";
 import { pingAction } from "./ping.js";
 import { createGuildSetupSettingsConsumer } from "./settings.js";
+import { createTicketAssignmentAction } from "./ticket-assignment.js";
 
 export type ProdActionContext = Readonly<{
   logger: Logger;
@@ -65,6 +68,7 @@ export type ProdActionRuntimeOptions = Readonly<{
   executeGuildOperation?: ExecuteGuildOperation;
   permissionAdministration?: PermissionAdministrationService;
   permissionAuthorization?: AuthorizationService;
+  ticketStore?: TicketStore;
 }>;
 
 export const createProdActionRuntime = (
@@ -128,6 +132,20 @@ export const createProdActionRuntime = (
     createTicketAction(options.ticketProvisioningService),
   );
   registry.registerAction(settings.action);
+  if (
+    options.ticketStore !== undefined &&
+    options.permissionAuthorization !== undefined
+  ) {
+    registry.registerAction(
+      createTicketAssignmentAction(
+        createTicketAssignmentService({
+          tickets: options.ticketStore,
+          authorization: options.permissionAuthorization,
+          createUserAuthorizationSubject,
+        }),
+      ),
+    );
+  }
 
   const handleMessage = textProvider.prefix
     ? async (message: Message): Promise<boolean> => {

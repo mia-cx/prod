@@ -15,6 +15,13 @@
       "when": 1784485229973,
       "tag": "0001_lowly_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784731909812,
+      "tag": "0002_shallow_the_order",
+      "breakpoints": true
     }
   ]
 }

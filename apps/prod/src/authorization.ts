@@ -13,6 +13,7 @@ import {
   type RuleObject,
   type UpsertPermissionRuleInput,
 } from "@protocord/permissions";
+import type { TicketStore } from "./tickets.js";
 
 export class UnsupportedProdAuthorizationContextError extends Error {
   override readonly name = "UnsupportedProdAuthorizationContextError";
@@ -37,6 +38,19 @@ export const createProdAuthorizationContext = (
   }
   return Object.freeze({ guildId });
 };
+
+export const createProdAuthorizationResourceValidator =
+  (tickets: Pick<TicketStore, "get">): AuthorizationResourceValidator =>
+  async ({ context, object }) => {
+    if (object.objectType === "ticket") {
+      return (await tickets.get(object.objectId))?.guildId === context.guildId;
+    }
+    return (
+      (object.objectType === "settings" ||
+        object.objectType === "permissions") &&
+      object.objectId === "*"
+    );
+  };
 
 export const createProdPermissionRuleStore = (
   store: PermissionRuleStore,
