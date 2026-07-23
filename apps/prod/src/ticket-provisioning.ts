@@ -81,6 +81,11 @@ export interface TicketProvisioningDiscord {
     guild: Guild,
     threadId: string,
     reporterUserId: string,
+  ): Promise<boolean>;
+  removeReporter(
+    guild: Guild,
+    threadId: string,
+    reporterUserId: string,
   ): Promise<void>;
   upsertOpeningInstructions(
     guild: Guild,
@@ -420,7 +425,22 @@ export const createTicketProvisioningDiscord =
       },
       addReporter: async (guild, threadId, reporterUserId) => {
         const thread = await requirePrivateThread(guild, threadId);
+        const wasMember = await thread.client.rest
+          .get(Routes.threadMembers(thread.id, reporterUserId))
+          .then(() => true)
+          .catch((error: unknown) => {
+            if (isDiscordErrorCode(error, RESTJSONErrorCodes.UnknownMember)) {
+              return false;
+            }
+            throw error;
+          });
+        if (wasMember) return false;
         await thread.members.add(reporterUserId);
+        return true;
+      },
+      removeReporter: async (guild, threadId, reporterUserId) => {
+        const thread = await requirePrivateThread(guild, threadId);
+        await thread.members.remove(reporterUserId);
       },
       upsertOpeningInstructions: async (guild, ticket) => {
         if (ticket.threadId === undefined)
@@ -848,7 +868,31 @@ export const createTicketProvisioningService = (
               threadError = error;
             });
           const cleanupErrors: unknown[] = [];
-          const hasOtherActiveTicket = await store.hasOtherActiveTicket(closed);
+          const persistedAfterThread = await store.get(ticketId);
+          if (persistedAfterThread?.status === "open") {
+            const reporter = await discord.validateReporter(
+              guild,
+              persistedAfterThread.reporterUserId,
+            );
+            await discord.grantReporterAccess(
+              guild,
+              persistedAfterThread.hubChannelId,
+              reporter,
+            );
+            await discord.reopenTicketThread(guild, persistedAfterThread);
+            if (persistedAfterThread.threadId === undefined) {
+              throw new Error("The ticket thread has not been persisted");
+            }
+            await discord.addReporter(
+              guild,
+              persistedAfterThread.threadId,
+              persistedAfterThread.reporterUserId,
+            );
+            return persistedAfterThread;
+          }
+          let hasOtherActiveTicket =
+            await store.hasOtherActiveTicket(closed);
+          let closeCompensated = false;
           if (
             threadError !== undefined &&
             closeTransitionApplied
@@ -859,13 +903,26 @@ export const createTicketProvisioningService = (
                 ...details,
                 compensatedCloseFailure: true,
               });
+              closeCompensated = true;
             } catch (error) {
               cleanupErrors.push(error);
               await discord
                 .closeTicketThread(guild, closed)
                 .catch((closeError: unknown) => cleanupErrors.push(closeError));
             }
-          } else if (!hasOtherActiveTicket) {
+          }
+          const persistedAfterCompensation = await store.get(ticketId);
+          if (
+            persistedAfterCompensation?.status === "open" &&
+            !closeCompensated
+          ) {
+            return persistedAfterCompensation;
+          }
+          hasOtherActiveTicket =
+            persistedAfterCompensation?.status === "open"
+              ? true
+              : await store.hasOtherActiveTicket(closed);
+          if (!hasOtherActiveTicket) {
             const snapshot = await store.getReporterAccess(closed);
             if (snapshot !== undefined) {
               await restoreReporterAccess(
@@ -929,9 +986,16 @@ export const createTicketProvisioningService = (
           );
           let ownershipStarted = false;
           let discordMutationStarted = false;
+          let reporterMembershipAdded = false;
           let ownedSnapshot = snapshot;
           try {
             await recheckAuthorization?.();
+            if (
+              !accessIsShared &&
+              (await store.getReporterAccess(fresh)) !== undefined
+            ) {
+              await store.finishReporterAccess(fresh);
+            }
             ownedSnapshot = await store.beginReporterAccess(fresh, snapshot);
             ownershipStarted = true;
             discordMutationStarted = true;
@@ -944,7 +1008,7 @@ export const createTicketProvisioningService = (
             if (fresh.threadId === undefined) {
               throw new Error("The ticket thread has not been persisted");
             }
-            await discord.addReporter(
+            reporterMembershipAdded = await discord.addReporter(
               guild,
               fresh.threadId,
               fresh.reporterUserId,
@@ -957,10 +1021,25 @@ export const createTicketProvisioningService = (
             ) {
               return (await store.get(ticketId))!;
             }
+            const persisted = await store.get(ticketId);
+            if (persisted?.status === "open") {
+              return persisted;
+            }
             const compensationErrors: unknown[] = [];
             if (discordMutationStarted) {
               await discord
                 .closeTicketThread(guild, fresh)
+                .catch((compensationError: unknown) =>
+                  compensationErrors.push(compensationError),
+                );
+            }
+            if (reporterMembershipAdded && fresh.threadId !== undefined) {
+              await discord
+                .removeReporter(
+                  guild,
+                  fresh.threadId,
+                  fresh.reporterUserId,
+                )
                 .catch((compensationError: unknown) =>
                   compensationErrors.push(compensationError),
                 );

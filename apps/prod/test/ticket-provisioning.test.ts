@@ -69,7 +69,8 @@ const discordFixture = (
     wasArchived: false,
     reporterWasMember: false,
   }),
-  addReporter: vi.fn().mockResolvedValue(undefined),
+  addReporter: vi.fn().mockResolvedValue(false),
+  removeReporter: vi.fn().mockResolvedValue(undefined),
   upsertOpeningInstructions: vi.fn().mockResolvedValue({
     messageId: "message-1",
     created: true,
@@ -234,6 +235,48 @@ describe("ticket provisioning", () => {
         expect.objectContaining({ id: ticket.id }),
       );
       expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("releases final access when close rollback settles closed", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const closeTicketThread = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("cannot archive"))
+      .mockResolvedValue(undefined);
+    const discord = discordFixture({
+      closeTicketThread,
+      reopenTicketThread: vi.fn().mockRejectedValue(new Error("thread gone")),
+    });
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-close-settled",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+
+      await expect(service.close(guild, ticket.id)).rejects.toThrow(
+        "Ticket close reconciliation failed",
+      );
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        status: "closed",
+        triageStatus: "paused",
+      });
+      expect(closeTicketThread).toHaveBeenCalledTimes(2);
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        ticket.hubChannelId,
+        ticket.reporterUserId,
+        emptyAccessSnapshot,
+      );
+      await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
     } finally {
       connection.close();
     }
@@ -435,6 +478,50 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("removes membership newly added by a failed reopen", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const realStore = createSqliteTicketStore(connection.database);
+    let failReopen = false;
+    const store = {
+      ...realStore,
+      reopen: async (...args: Parameters<typeof realStore.reopen>) => {
+        if (failReopen) throw new Error("database unavailable");
+        return realStore.reopen(...args);
+      },
+    };
+    const discord = discordFixture({
+      addReporter: vi.fn().mockResolvedValue(true),
+    });
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-membership-rollback",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.close(guild, ticket.id);
+      vi.mocked(discord.removeReporter).mockClear();
+      failReopen = true;
+
+      await expect(service.reopen(guild, ticket.id)).rejects.toThrow(
+        "database unavailable",
+      );
+      expect(discord.removeReporter).toHaveBeenCalledWith(
+        guild,
+        ticket.threadId,
+        ticket.reporterUserId,
+      );
+      await expect(realStore.get(ticket.id)).resolves.toMatchObject({
+        status: "closed",
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
   it("does not compensate Discord when the serialized reopen authorization fails", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -530,6 +617,116 @@ describe("ticket provisioning", () => {
       expect(discord.closeTicketThread).not.toHaveBeenCalled();
       expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
       await expect(realStore.get(ticket.id)).resolves.toMatchObject({
+        status: "open",
+        triageStatus: "paused",
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("preserves a reopen that wins while another service is closing", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    let closeStarted!: () => void;
+    const closeStartedGate = new Promise<void>((resolve) => {
+      closeStarted = resolve;
+    });
+    const closingDiscord = discordFixture({
+      closeTicketThread: vi.fn(async () => {
+        closeStarted();
+        await closeGate;
+      }),
+    });
+    const reopeningDiscord = discordFixture();
+    const closingService = createTicketProvisioningService(
+      settings,
+      store,
+      closingDiscord,
+      { createId: () => "ticket-close-reopen-race" },
+    );
+    const reopeningService = createTicketProvisioningService(
+      settings,
+      store,
+      reopeningDiscord,
+    );
+    try {
+      const ticket = await closingService.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      const closing = closingService.close(guild, ticket.id);
+      await closeStartedGate;
+      await reopeningService.reopen(guild, ticket.id);
+      releaseClose();
+
+      await expect(closing).resolves.toMatchObject({ status: "open" });
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        status: "open",
+        triageStatus: "paused",
+      });
+      expect(closingDiscord.restoreReporterAccess).not.toHaveBeenCalled();
+      expect(closingDiscord.reopenTicketThread).toHaveBeenCalled();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("does not let a failed reopen loser compensate a committed winner", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let releaseLoser!: () => void;
+    const loserGate = new Promise<void>((resolve) => {
+      releaseLoser = resolve;
+    });
+    let loserStarted!: () => void;
+    const loserStartedGate = new Promise<void>((resolve) => {
+      loserStarted = resolve;
+    });
+    const losingDiscord = discordFixture({
+      reopenTicketThread: vi.fn(async () => {
+        loserStarted();
+        await loserGate;
+        throw new Error("loser Discord failure");
+      }),
+    });
+    const winningDiscord = discordFixture();
+    const losingService = createTicketProvisioningService(
+      settings,
+      store,
+      losingDiscord,
+      { createId: () => "ticket-reopen-winner" },
+    );
+    const winningService = createTicketProvisioningService(
+      settings,
+      store,
+      winningDiscord,
+    );
+    try {
+      const ticket = await losingService.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await losingService.close(guild, ticket.id);
+      vi.mocked(losingDiscord.closeTicketThread).mockClear();
+      vi.mocked(losingDiscord.restoreReporterAccess).mockClear();
+      const losing = losingService.reopen(guild, ticket.id);
+      await loserStartedGate;
+      await winningService.reopen(guild, ticket.id);
+      releaseLoser();
+
+      await expect(losing).resolves.toMatchObject({ status: "open" });
+      expect(losingDiscord.closeTicketThread).not.toHaveBeenCalled();
+      expect(losingDiscord.restoreReporterAccess).not.toHaveBeenCalled();
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
         status: "open",
         triageStatus: "paused",
       });

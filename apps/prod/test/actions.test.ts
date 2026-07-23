@@ -583,6 +583,45 @@ describe("Prod action runtime", () => {
     },
   );
 
+  it("registers lifecycle ticket options for thread inference and explicit reopen", () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      {
+        ...runtimeOptions,
+        permissionAuthorization: {
+          check: vi.fn(),
+          require: vi.fn(),
+        } as AuthorizationService,
+        permissionAdministration: permissionAdministrationFixture,
+      },
+    );
+    const commands = new Map(
+      runtime.commands.map((command) => [command.name, command]),
+    );
+
+    expect(commands.get("close")).toMatchObject({
+      options: [
+        { name: "ticket", required: false },
+        { name: "reason", required: false },
+      ],
+    });
+    expect(commands.get("reopen")).toMatchObject({
+      options: [{ name: "ticket", required: true }],
+    });
+    expect(commands.get("triage")).toMatchObject({
+      options: [
+        {
+          name: "pause",
+          options: [{ name: "ticket", required: false }],
+        },
+        {
+          name: "resume",
+          options: [{ name: "ticket", required: false }],
+        },
+      ],
+    });
+  });
+
   it("infers an omitted close ticket from the current private thread", async () => {
     const authorization = {
       check: vi.fn(),
