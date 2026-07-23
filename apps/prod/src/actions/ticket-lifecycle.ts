@@ -26,7 +26,10 @@ const ticketOption = {
 const present = async (
   outcome: DispatchOutcome,
   interaction: {
-    editReply: (payload: { content: string }) => Promise<unknown>;
+    editReply: (payload: {
+      content: string;
+      allowedMentions: { parse: readonly [] };
+    }) => Promise<unknown>;
   },
 ): Promise<void> => {
   const content =
@@ -38,7 +41,7 @@ const present = async (
       : outcome.status === "failed" && outcome.error instanceof Error
         ? outcome.error.message
         : "Prod could not update that ticket.";
-  await interaction.editReply({ content });
+  await interaction.editReply({ content, allowedMentions: { parse: [] } });
 };
 
 const requireInvocation = (
@@ -160,17 +163,20 @@ export const createTicketLifecycleAction = (
     if (ticketId === undefined) {
       throw new Error("Specify a ticket ID when outside a ticket thread.");
     }
-    const member = await guild.members.fetch(userId);
     const authorizationContext = createProdAuthorizationContext(guild.id);
-    await authorization.require({
-      context: authorizationContext,
-      subject: context.createUserAuthorizationSubject(
-        member,
-        authorizationContext,
-      ),
-      object: { objectType: "ticket", objectId: ticketId },
-      verb: permissionVerb(invocation.input.operation),
-    });
+    const requireAuthorization = async (): Promise<void> => {
+      const member = await guild.members.fetch({ user: userId, force: true });
+      await authorization.require({
+        context: authorizationContext,
+        subject: context.createUserAuthorizationSubject(
+          member,
+          authorizationContext,
+        ),
+        object: { objectType: "ticket", objectId: ticketId },
+        verb: permissionVerb(invocation.input.operation),
+      });
+    };
+    await requireAuthorization();
     const details = {
       actorUserId: userId,
       ...(invocation.input.reason === undefined
@@ -185,7 +191,13 @@ export const createTicketLifecycleAction = (
           : invocation.input.operation === "close"
             ? tickets.close
             : tickets.reopen;
-    await method(guild, ticketId, details);
-    return { message: `Ticket ${ticketId} ${invocation.input.operation}d.` };
+    await method(guild, ticketId, details, requireAuthorization);
+    const pastTense = {
+      close: "closed",
+      reopen: "reopened",
+      pause: "paused",
+      resume: "resumed",
+    }[invocation.input.operation];
+    return { message: `Ticket ${ticketId} ${pastTense}.` };
   },
 });

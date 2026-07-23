@@ -533,6 +533,12 @@ describe("Prod action runtime", () => {
         require: requireAuthorization,
       } as AuthorizationService;
       vi.mocked(ticketProvisioningService[method]).mockClear();
+      vi.mocked(ticketProvisioningService[method]).mockImplementationOnce(
+        async (_guild, _ticketId, _details, recheckAuthorization) => {
+          await recheckAuthorization?.();
+          return undefined as never;
+        },
+      );
       const runtime = createProdActionRuntime(
         createLogger({ level: "fatal" }),
         {
@@ -556,9 +562,23 @@ describe("Prod action runtime", () => {
         interaction.guild,
         "ticket-1",
         expect.objectContaining({ actorUserId: "staff-1" }),
+        expect.any(Function),
       );
+      expect(requireAuthorization).toHaveBeenCalledTimes(2);
       expect(interaction.deferReply).toHaveBeenCalledWith({
         flags: MessageFlags.Ephemeral,
+      });
+      expect(interaction.editReply).toHaveBeenCalledWith({
+        content: `Ticket ticket-1 ${
+          command === "close"
+            ? "closed"
+            : command === "reopen"
+              ? "reopened"
+              : subcommand === "pause"
+                ? "paused"
+                : "resumed"
+        }.`,
+        allowedMentions: { parse: [] },
       });
     },
   );
@@ -588,6 +608,7 @@ describe("Prod action runtime", () => {
       interaction.guild,
       "ticket-in-thread",
       expect.objectContaining({ actorUserId: "staff-1" }),
+      expect.any(Function),
     );
   });
 

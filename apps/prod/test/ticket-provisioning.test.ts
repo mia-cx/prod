@@ -24,7 +24,10 @@ import {
   ticketOpeningInstructions,
   type TicketProvisioningDiscord,
 } from "../src/ticket-provisioning.js";
-import { createSqliteTicketStore } from "../src/tickets.js";
+import {
+  createSqliteTicketStore,
+  TicketStateTransitionError,
+} from "../src/tickets.js";
 import type { ReporterHubAccessSnapshot } from "../src/reporter-hub-access.js";
 
 const guild = { id: "guild-1" } as Guild;
@@ -189,6 +192,148 @@ describe("ticket provisioning", () => {
       await expect(store.getReporterAccess(ticket)).resolves.toEqual(
         emptyAccessSnapshot,
       );
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("still releases final reporter access when Discord thread closing fails", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture({
+      closeTicketThread: vi.fn().mockRejectedValue(new Error("thread missing")),
+    });
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-close-failure",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+
+      await expect(service.close(guild, ticket.id)).rejects.toThrow(
+        "thread missing",
+      );
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        status: "closed",
+        triageStatus: "paused",
+      });
+      await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        ticket.hubChannelId,
+        ticket.reporterUserId,
+        emptyAccessSnapshot,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("compensates reporter access and thread state when reopen fails", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-reopen-failure",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.close(guild, ticket.id);
+      vi.mocked(discord.restoreReporterAccess).mockClear();
+      vi.mocked(discord.closeTicketThread).mockClear();
+      vi.mocked(discord.reopenTicketThread).mockRejectedValueOnce(
+        new Error("cannot unlock"),
+      );
+
+      await expect(service.reopen(guild, ticket.id)).rejects.toThrow(
+        "cannot unlock",
+      );
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        status: "closed",
+        triageStatus: "paused",
+      });
+      await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
+      expect(discord.closeTicketThread).toHaveBeenCalledWith(
+        guild,
+        expect.objectContaining({ id: ticket.id }),
+      );
+      expect(discord.restoreReporterAccess).toHaveBeenCalledOnce();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("rejects reopening an already-open ticket before Discord side effects", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-invalid-reopen",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      vi.mocked(discord.grantReporterAccess).mockClear();
+      vi.mocked(discord.reopenTicketThread).mockClear();
+
+      await expect(service.reopen(guild, ticket.id)).rejects.toBeInstanceOf(
+        TicketStateTransitionError,
+      );
+      expect(discord.grantReporterAccess).not.toHaveBeenCalled();
+      expect(discord.reopenTicketThread).not.toHaveBeenCalled();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("rejects reopening a ticket after its configured support hub moved", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let hubChannelId = "hub-1";
+    const movingSettings = {
+      get: async (guildId: string) => ({
+        guildId,
+        initialized: true,
+        hubChannelId,
+        assistantIdentity: "Prod",
+        tone: "friendly",
+      }),
+    } as GuildSettingsStore;
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(
+      movingSettings,
+      store,
+      discord,
+      { createId: () => "ticket-former-hub-reopen" },
+    );
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.close(guild, ticket.id);
+      hubChannelId = "hub-2";
+      vi.mocked(discord.grantReporterAccess).mockClear();
+
+      await expect(service.reopen(guild, ticket.id)).rejects.toThrow(
+        "former support hub",
+      );
+      expect(discord.grantReporterAccess).not.toHaveBeenCalled();
     } finally {
       connection.close();
     }

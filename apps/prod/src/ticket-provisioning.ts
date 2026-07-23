@@ -107,21 +107,25 @@ export interface TicketProvisioningService {
     guild: Guild,
     ticketId: string,
     details?: Readonly<Record<string, unknown>>,
+    recheckAuthorization?: () => Promise<void>,
   ): Promise<Ticket>;
   reopen(
     guild: Guild,
     ticketId: string,
     details?: Readonly<Record<string, unknown>>,
+    recheckAuthorization?: () => Promise<void>,
   ): Promise<Ticket>;
   pauseTriage(
     guild: Guild,
     ticketId: string,
     details?: Readonly<Record<string, unknown>>,
+    recheckAuthorization?: () => Promise<void>,
   ): Promise<Ticket>;
   resumeTriage(
     guild: Guild,
     ticketId: string,
     details?: Readonly<Record<string, unknown>>,
+    recheckAuthorization?: () => Promise<void>,
   ): Promise<Ticket>;
   discoverRecoveryThreads(
     resolveGuild: (guildId: string) => Promise<Guild>,
@@ -809,12 +813,13 @@ export const createTicketProvisioningService = (
           return provision(input.guild, ticket, false);
         });
       }),
-    close: async (guild, ticketId, details = {}) => {
+    close: async (guild, ticketId, details = {}, recheckAuthorization) => {
       const initial = await store.get(ticketId);
       if (initial === undefined || initial.guildId !== guild.id)
         throw new Error(`Ticket ${ticketId} does not exist in this guild`);
       return executeGuildOperation(guild.id, () =>
         execute(`hub:${guild.id}:${initial.hubChannelId}`, async () => {
+          await recheckAuthorization?.();
           const fresh = await store.get(ticketId);
           if (fresh === undefined || fresh.guildId !== guild.id)
             throw new Error(`Ticket ${ticketId} does not exist in this guild`);
@@ -830,7 +835,13 @@ export const createTicketProvisioningService = (
             }
             closed = fresh;
           }
-          await discord.closeTicketThread(guild, closed);
+          let threadError: unknown;
+          await discord
+            .closeTicketThread(guild, closed)
+            .catch((error: unknown) => {
+              threadError = error;
+            });
+          const cleanupErrors: unknown[] = [];
           if (!(await store.hasOtherActiveTicket(closed))) {
             const snapshot = await store.getReporterAccess(closed);
             if (snapshot !== undefined) {
@@ -839,44 +850,66 @@ export const createTicketProvisioningService = (
                 closed.hubChannelId,
                 closed.reporterUserId,
                 snapshot,
-              );
-              await store.finishReporterAccess(closed);
+              )
+                .then(() => store.finishReporterAccess(closed))
+                .catch((error: unknown) => cleanupErrors.push(error));
             }
+          }
+          if (threadError !== undefined || cleanupErrors.length > 0) {
+            const errors = [
+              ...(threadError === undefined ? [] : [threadError]),
+              ...cleanupErrors,
+            ];
+            throw errors.length === 1
+              ? errors[0]
+              : new AggregateError(
+                  errors,
+                  "Ticket close reconciliation failed",
+                );
           }
           return closed;
         }),
       );
     },
-    reopen: async (guild, ticketId, details = {}) => {
+    reopen: async (guild, ticketId, details = {}, recheckAuthorization) => {
       const initial = await store.get(ticketId);
       if (initial === undefined || initial.guildId !== guild.id)
         throw new Error(`Ticket ${ticketId} does not exist in this guild`);
       return executeGuildOperation(guild.id, () =>
         execute(`hub:${guild.id}:${initial.hubChannelId}`, async () => {
+          await recheckAuthorization?.();
           const fresh = await store.get(ticketId);
           if (fresh === undefined || fresh.guildId !== guild.id)
             throw new Error(`Ticket ${ticketId} does not exist in this guild`);
-          if (fresh.status !== "closed" && fresh.status !== "open") {
+          if (fresh.status !== "closed") {
             return store.reopen(ticketId, details);
+          }
+          const guildSettings = await settings.get(guild.id);
+          if (guildSettings.hubChannelId !== fresh.hubChannelId) {
+            throw new Error(
+              "This ticket belongs to a former support hub and cannot be reopened.",
+            );
           }
           const reporter = await discord.validateReporter(
             guild,
             fresh.reporterUserId,
           );
+          const existingOwnership = await store.getReporterAccess(fresh);
           const snapshot = await discord.captureReporterAccess(
             guild,
             fresh.hubChannelId,
             fresh.reporterUserId,
           );
-          await store.beginReporterAccess(fresh, snapshot);
-          await discord.grantReporterAccess(
-            guild,
-            fresh.hubChannelId,
-            reporter,
-          );
-          await discord.reopenTicketThread(guild, fresh);
-          if (fresh.status === "open") return fresh;
+          let ownershipStarted = false;
           try {
+            await store.beginReporterAccess(fresh, snapshot);
+            ownershipStarted = true;
+            await discord.grantReporterAccess(
+              guild,
+              fresh.hubChannelId,
+              reporter,
+            );
+            await discord.reopenTicketThread(guild, fresh);
             return await store.reopen(ticketId, details);
           } catch (error) {
             if (
@@ -885,26 +918,60 @@ export const createTicketProvisioningService = (
             ) {
               return (await store.get(ticketId))!;
             }
-            throw error;
+            const compensationErrors: unknown[] = [];
+            await discord
+              .closeTicketThread(guild, fresh)
+              .catch((compensationError: unknown) =>
+                compensationErrors.push(compensationError),
+              );
+            if (ownershipStarted && existingOwnership === undefined) {
+              await restoreReporterAccess(
+                guild,
+                fresh.hubChannelId,
+                fresh.reporterUserId,
+                snapshot,
+              )
+                .then(() => store.finishReporterAccess(fresh))
+                .catch((compensationError: unknown) =>
+                  compensationErrors.push(compensationError),
+                );
+            }
+            if (compensationErrors.length === 0) throw error;
+            throw new AggregateError(
+              [error, ...compensationErrors],
+              "Ticket reopen and compensation failed",
+            );
           }
         }),
       );
     },
-    pauseTriage: async (guild, ticketId, details = {}) => {
+    pauseTriage: async (
+      guild,
+      ticketId,
+      details = {},
+      recheckAuthorization,
+    ) => {
       const ticket = await store.get(ticketId);
       if (ticket === undefined || ticket.guildId !== guild.id)
         throw new Error(`Ticket ${ticketId} does not exist in this guild`);
-      return executeGuildOperation(guild.id, () =>
-        store.pauseTriage(ticketId, details),
-      );
+      return executeGuildOperation(guild.id, async () => {
+        await recheckAuthorization?.();
+        return store.pauseTriage(ticketId, details);
+      });
     },
-    resumeTriage: async (guild, ticketId, details = {}) => {
+    resumeTriage: async (
+      guild,
+      ticketId,
+      details = {},
+      recheckAuthorization,
+    ) => {
       const ticket = await store.get(ticketId);
       if (ticket === undefined || ticket.guildId !== guild.id)
         throw new Error(`Ticket ${ticketId} does not exist in this guild`);
-      return executeGuildOperation(guild.id, () =>
-        store.resumeTriage(ticketId, details),
-      );
+      return executeGuildOperation(guild.id, async () => {
+        await recheckAuthorization?.();
+        return store.resumeTriage(ticketId, details);
+      });
     },
     discoverRecoveryThreads: async (resolveGuild) => {
       let discovered = 0;
