@@ -55,6 +55,7 @@ export type ProdActionRuntime = DiscordActionSurface &
 
 export type ProdActionRuntimeOptions = Readonly<{
   textCommandPrefix: string;
+  handleUnconsumedMessage?: DiscordActionSurface["handleUnconsumedMessage"];
   guildSettingsStore: GuildSettingsStore;
   labelTaxonomyStore: LabelTaxonomyStore;
   supportHubDiscord: SupportHubDiscord;
@@ -231,6 +232,9 @@ export const createProdActionRuntime = (
       logProdActionResult(logger, handled);
     },
     ...(handleMessage ? { handleMessage } : {}),
+    ...(options.handleUnconsumedMessage
+      ? { handleUnconsumedMessage: options.handleUnconsumedMessage }
+      : {}),
     handleError: (error: unknown) => {
       logger.error({ err: error }, "Discord action dispatch failed");
     },
