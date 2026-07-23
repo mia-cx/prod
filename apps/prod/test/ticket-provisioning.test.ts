@@ -233,6 +233,56 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("compensates a failed close back to open when shared access must remain", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let thread = 0;
+    const closeTicketThread = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("cannot lock"))
+      .mockResolvedValue(undefined);
+    const discord = discordFixture({
+      createTicketThread: vi.fn(async () => `thread-compensate-${++thread}`),
+      upsertOpeningInstructions: vi.fn(async (_guild, ticket) => ({
+        messageId: `message-${ticket.id}`,
+        created: true,
+      })),
+      closeTicketThread,
+    });
+    let id = 0;
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => `ticket-close-compensate-${++id}`,
+    });
+    try {
+      const first = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "report",
+      });
+
+      await expect(service.close(guild, first.id)).rejects.toThrow(
+        "cannot lock",
+      );
+      await expect(store.get(first.id)).resolves.toMatchObject({
+        status: "open",
+        triageStatus: "paused",
+      });
+      expect(discord.reopenTicketThread).toHaveBeenCalledWith(
+        guild,
+        expect.objectContaining({ id: first.id }),
+      );
+      expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("compensates reporter access and thread state when reopen fails", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -267,6 +317,57 @@ describe("ticket provisioning", () => {
         expect.objectContaining({ id: ticket.id }),
       );
       expect(discord.restoreReporterAccess).toHaveBeenCalledOnce();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("restores stale unshared ownership when a later reopen fails", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const realStore = createSqliteTicketStore(connection.database);
+    let failFinish = false;
+    const store = {
+      ...realStore,
+      finishReporterAccess: async (
+        ticket: Parameters<typeof realStore.finishReporterAccess>[0],
+      ) => {
+        if (failFinish) throw new Error("ownership cleanup failed");
+        return realStore.finishReporterAccess(ticket);
+      },
+    };
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-stale-ownership",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      failFinish = true;
+      await expect(service.close(guild, ticket.id)).rejects.toThrow(
+        "ownership cleanup failed",
+      );
+      failFinish = false;
+      vi.mocked(discord.restoreReporterAccess).mockClear();
+      vi.mocked(discord.reopenTicketThread).mockRejectedValueOnce(
+        new Error("cannot reopen thread"),
+      );
+
+      await expect(service.reopen(guild, ticket.id)).rejects.toThrow(
+        "cannot reopen thread",
+      );
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        ticket.hubChannelId,
+        ticket.reporterUserId,
+        emptyAccessSnapshot,
+      );
+      await expect(
+        realStore.getReporterAccess(ticket),
+      ).resolves.toBeUndefined();
     } finally {
       connection.close();
     }
