@@ -11,10 +11,13 @@ import {
 } from "discord.js";
 import type { Logger } from "pino";
 import type { ModelConfigurationStore } from "@mia-cx/protocord-model-settings";
-import type { AuthorizationService } from "@protocord/permissions";
 import type { DiscordInteractionHandleResult } from "protocord";
 import { encodeSettingsCustomId } from "@protocord/settings";
 import { describe, expect, it, vi } from "vitest";
+import type {
+  AuthorizationService,
+  DiscordMemberLike,
+} from "@protocord/permissions";
 
 import type { GuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
@@ -31,6 +34,9 @@ import {
   type TicketProvisioningService,
 } from "../src/ticket-provisioning.js";
 import { TicketAdmissionError } from "../src/tickets.js";
+import { openDatabase } from "../src/database.js";
+import { applyMigrations } from "../src/migrations.js";
+import { createSqliteTicketStore } from "../src/tickets.js";
 
 const noMentions = { parse: [], repliedUser: false };
 const permissionOwnership: HubPermissionOwnership = {
@@ -209,6 +215,165 @@ const pingInteraction = (
 };
 
 describe("Prod action runtime", () => {
+  it("registers and executes all four ticket assignment commands ephemerally", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const ticketStore = createSqliteTicketStore(connection.database);
+    const ticket = await ticketStore.create({
+      id: "ticket-assignment-runtime",
+      guildId: "guild-1",
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+    });
+    await ticketStore.recordProgress(
+      ticket.id,
+      "thread_created",
+      {},
+      { threadId: "thread-assignment" },
+    );
+    await ticketStore.recordProgress(
+      ticket.id,
+      "instructions_posted",
+      {},
+      { openingMessageId: "message-1" },
+    );
+    await ticketStore.markOpen(ticket.id);
+    const authorization: AuthorizationService = {
+      check: async () => ({
+        allowed: true,
+        reason: "matched_rule",
+        matchedRuleIds: ["rule-1"],
+      }),
+      require: async () => undefined,
+    };
+    const actor: DiscordMemberLike = {
+      id: "actor-1",
+      guild: { id: "guild-1", ownerId: "owner-1" },
+      roles: { cache: new Map() },
+      permissions: { has: () => false },
+    };
+    const target: DiscordMemberLike = { ...actor, id: "target-1" };
+    const fetch = vi.fn(async (id: string) =>
+      id === "actor-1" ? actor : target,
+    );
+    try {
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        {
+          ...runtimeOptions,
+          permissionAuthorization: authorization,
+          permissionAdministration: {
+            hasGuildRecords: async () => true,
+          } as never,
+          ticketStore,
+        },
+      );
+      expect(
+        runtime.commands.filter(({ name }) =>
+          ["claim", "unclaim", "assign", "unassign"].includes(name),
+        ),
+      ).toEqual([
+        expect.objectContaining({ name: "claim", options: [] }),
+        expect.objectContaining({ name: "unclaim", options: [] }),
+        expect.objectContaining({
+          name: "assign",
+          options: [
+            expect.objectContaining({
+              type: ApplicationCommandOptionType.User,
+              name: "member",
+              required: true,
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          name: "unassign",
+          options: [
+            expect.objectContaining({
+              type: ApplicationCommandOptionType.User,
+              name: "member",
+              required: true,
+            }),
+          ],
+        }),
+      ]);
+
+      for (const commandName of [
+        "claim",
+        "unclaim",
+        "assign",
+        "unassign",
+      ] as const) {
+        const interaction: Record<string, unknown> = {
+          commandName,
+          channelId: "thread-assignment",
+          guildId: "guild-1",
+          guild: { members: { fetch } },
+          user: { id: "actor-1", username: "actor" },
+          options: { getUser: () => ({ id: "target-1" }) },
+          deferred: false,
+          replied: false,
+          isAutocomplete: () => false,
+          isButton: () => false,
+          isStringSelectMenu: () => false,
+          isMentionableSelectMenu: () => false,
+          isChannelSelectMenu: () => false,
+          isModalSubmit: () => false,
+          isChatInputCommand: () => true,
+          isMessageContextMenuCommand: () => false,
+          isUserContextMenuCommand: () => false,
+          deferReply: vi.fn().mockResolvedValue(undefined),
+          editReply: vi.fn().mockResolvedValue(undefined),
+          followUp: vi.fn().mockResolvedValue(undefined),
+          deleteReply: vi.fn().mockResolvedValue(undefined),
+          reply: vi.fn().mockResolvedValue(undefined),
+        };
+        await runtime.handleInteraction(interaction as unknown as Interaction);
+        expect(interaction.deferReply).toHaveBeenCalledWith({
+          flags: MessageFlags.Ephemeral,
+        });
+        const expectedContent = {
+          claim: "You are now assigned to this ticket.",
+          unclaim: "You are no longer assigned to this ticket.",
+          assign: "That member is now assigned to this ticket.",
+          unassign: "That member is no longer assigned to this ticket.",
+        }[commandName];
+        expect(interaction.editReply).toHaveBeenCalledWith({
+          content: expectedContent,
+          allowedMentions: { parse: [] },
+        });
+        await expect(ticketStore.listAssignees(ticket.id)).resolves.toEqual(
+          commandName === "claim"
+            ? [expect.objectContaining({ assigneeUserId: "actor-1" })]
+            : commandName === "assign"
+              ? [expect.objectContaining({ assigneeUserId: "target-1" })]
+              : [],
+        );
+        if (commandName === "claim") {
+          const repeat = {
+            ...interaction,
+            deferReply: vi.fn().mockResolvedValue(undefined),
+            editReply: vi.fn().mockResolvedValue(undefined),
+          };
+          await runtime.handleInteraction(repeat as unknown as Interaction);
+          expect(repeat.editReply).toHaveBeenCalledWith({
+            content: "You are already assigned to this ticket.",
+            allowedMentions: { parse: [] },
+          });
+          await expect(ticketStore.listAssignees(ticket.id)).resolves.toEqual([
+            expect.objectContaining({ assigneeUserId: "actor-1" }),
+          ]);
+          expect(
+            (await ticketStore.listEvents(ticket.id)).filter(
+              ({ eventType }) => eventType === "assignee_added",
+            ),
+          ).toHaveLength(1);
+        }
+      }
+    } finally {
+      connection.close();
+    }
+  });
   it("registers every Discord ping surface from one action", async () => {
     const runtime = createProdActionRuntime(
       createLogger({ level: "fatal" }),
@@ -562,10 +727,22 @@ describe("Prod action runtime", () => {
       expect(ticketProvisioningService[method]).toHaveBeenCalledWith(
         interaction.guild,
         "ticket-1",
-        expect.objectContaining({ actorUserId: "staff-1" }),
+        expect.objectContaining({
+          actorUserId: "staff-1",
+          ...(command === "close" ? { reason: "Resolved" } : {}),
+        }),
         expect.any(Function),
       );
       expect(requireAuthorization).toHaveBeenCalledTimes(2);
+      expect(interaction.guild.members.fetch).toHaveBeenCalledTimes(2);
+      expect(interaction.guild.members.fetch).toHaveBeenNthCalledWith(1, {
+        user: "staff-1",
+        force: true,
+      });
+      expect(interaction.guild.members.fetch).toHaveBeenNthCalledWith(2, {
+        user: "staff-1",
+        force: true,
+      });
       expect(interaction.deferReply).toHaveBeenCalledWith({
         flags: MessageFlags.Ephemeral,
       });
@@ -643,7 +820,17 @@ describe("Prod action runtime", () => {
 
     await runtime.handleInteraction(interaction as unknown as Interaction);
 
-    expect(authorization.require).not.toHaveBeenCalled();
+    expect(authorization.require).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: { guildId: "guild-1" },
+        object: { objectType: "settings", objectId: "*" },
+        verb: "close",
+      }),
+    );
+    expect(interaction.guild.members.fetch).toHaveBeenCalledWith({
+      user: "staff-1",
+      force: true,
+    });
     expect(interaction.editReply).toHaveBeenCalledWith({
       content: "Authorization denied",
       allowedMentions: { parse: [] },
@@ -743,45 +930,49 @@ describe("Prod action runtime", () => {
     });
   });
 
-  it("returns a minimal text-command link and deletes it after 30 seconds", async () => {
-    vi.useFakeTimers();
-    vi.mocked(ticketProvisioningService.open).mockClear();
-    const runtime = createProdActionRuntime(
-      createLogger({ level: "fatal" }),
-      runtimeOptions,
-    );
-    const deleteReply = vi.fn().mockResolvedValue(undefined);
-    const reply = vi.fn().mockResolvedValue({ delete: deleteReply });
-    const message = {
-      content: "!issue Poke crashes",
-      author: {
-        id: "user-1",
-        username: "reporter",
-        globalName: "Reporter",
-        bot: false,
-      },
-      webhookId: null,
-      channelId: "channel-1",
-      guildId: "guild-1",
-      guild: { id: "guild-1" },
-      reply,
-    } as unknown as Message;
+  it.each(["issue", "report", "debugshare"] as const)(
+    "returns a minimal link for !%s, records its origin, and deletes the reply after 30 seconds",
+    async (alias) => {
+      vi.useFakeTimers();
+      vi.mocked(ticketProvisioningService.open).mockClear();
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        runtimeOptions,
+      );
+      const deleteReply = vi.fn().mockResolvedValue(undefined);
+      const reply = vi.fn().mockResolvedValue({ delete: deleteReply });
+      const message = {
+        content: `!${alias} Poke crashes`,
+        author: {
+          id: "user-1",
+          username: "reporter",
+          globalName: "Reporter",
+          bot: false,
+        },
+        webhookId: null,
+        channelId: "channel-1",
+        guildId: "guild-1",
+        guild: { id: "guild-1" },
+        reply,
+      } as unknown as Message;
 
-    await expect(runtime.handleMessage!(message)).resolves.toBe(true);
-    expect(ticketProvisioningService.open).toHaveBeenCalledWith({
-      guild: message.guild,
-      reporterUserId: "user-1",
-      originatingAlias: "issue",
-    });
-    expect(reply).toHaveBeenCalledWith({
-      content: "https://discord.com/channels/guild-1/thread-1",
-      allowedMentions: { parse: [], repliedUser: false },
-    });
-    expect(deleteReply).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(deleteReply).toHaveBeenCalledOnce();
-    vi.useRealTimers();
-  });
+      await expect(runtime.handleMessage!(message)).resolves.toBe(true);
+      expect(ticketProvisioningService.open).toHaveBeenCalledWith({
+        guild: message.guild,
+        reporterUserId: "user-1",
+        originatingAlias: alias,
+        summary: "Poke crashes",
+      });
+      expect(reply).toHaveBeenCalledWith({
+        content: "https://discord.com/channels/guild-1/thread-1",
+        allowedMentions: { parse: [], repliedUser: false },
+      });
+      expect(deleteReply).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(deleteReply).toHaveBeenCalledOnce();
+      vi.useRealTimers();
+    },
+  );
 
   it("removes the text capability when the configured prefix is empty", () => {
     const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
@@ -792,6 +983,27 @@ describe("Prod action runtime", () => {
     expect(runtime.handleMessage).toBeUndefined();
     expect(runtime.commands).toHaveLength(7);
   });
+
+  it.each([
+    ["enabled", "!", true],
+    ["disabled", " \t ", false],
+  ] as const)(
+    "keeps the downstream hook when text commands are %s",
+    (_state, textCommandPrefix, expectsTextHandler) => {
+      const handleUnconsumedMessage = vi.fn(async () => undefined);
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        {
+          ...runtimeOptions,
+          textCommandPrefix,
+          handleUnconsumedMessage,
+        },
+      );
+
+      expect(runtime.handleMessage === undefined).toBe(!expectsTextHandler);
+      expect(runtime.handleUnconsumedMessage).toBe(handleUnconsumedMessage);
+    },
+  );
 
   it("resolves guilds through the ready client during startup reconciliation", async () => {
     vi.mocked(ticketProvisioningService.discoverRecoveryThreads).mockClear();
@@ -946,7 +1158,10 @@ const ticketInteraction = (
     reply: vi.fn().mockResolvedValue(undefined),
   };
   return interaction as typeof interaction & {
-    guild: { id: string };
+    guild: {
+      id: string;
+      members: { fetch: ReturnType<typeof vi.fn> };
+    };
     deferReply: ReturnType<typeof vi.fn>;
     editReply: ReturnType<typeof vi.fn>;
   };
@@ -997,7 +1212,10 @@ const lifecycleInteraction = (
     reply: vi.fn().mockResolvedValue(undefined),
   };
   return interaction as typeof interaction & {
-    guild: { id: string };
+    guild: {
+      id: string;
+      members: { fetch: ReturnType<typeof vi.fn> };
+    };
     deferReply: ReturnType<typeof vi.fn>;
     editReply: ReturnType<typeof vi.fn>;
   };

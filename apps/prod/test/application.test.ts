@@ -1,10 +1,8 @@
 import { Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  createProdAuthorizationResourceValidator,
-  startProd,
-} from "../src/application.js";
+import { startProd } from "../src/application.js";
+import { createProdAuthorizationResourceValidator } from "../src/authorization.js";
 import type { ProdConfig } from "../src/config.js";
 import { openDatabase, type ProdDatabase } from "../src/database.js";
 import type { DiscordGateway } from "../src/discord.js";
@@ -105,7 +103,7 @@ describe("startProd", () => {
 
     expect(sequence).toEqual(["migrate", "connect"]);
     expect(output.join("")).toContain("Prod ready");
-    expect(output.join("")).toContain('"actionCount":4');
+    expect(output.join("")).toContain('"actionCount":5');
     expect(output.join("")).toContain('"applicationOperatorCount":1');
     expect(output.join("")).not.toContain(config.discordToken);
 

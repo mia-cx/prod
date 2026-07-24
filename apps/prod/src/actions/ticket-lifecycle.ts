@@ -1,5 +1,10 @@
-import { ApplicationCommandOptionType, type Guild } from "discord.js";
+import {
+  ApplicationCommandOptionType,
+  type Guild,
+  type GuildMember,
+} from "discord.js";
 import type {
+  AuthorizationObject,
   AuthorizationService,
   PermissionVerb,
 } from "@protocord/permissions";
@@ -157,28 +162,46 @@ export const createTicketLifecycleAction = (
   authorization: () => undefined,
   execute: async (invocation, context) => {
     const { guild, userId, channelId } = requireInvocation(invocation.rawEvent);
+    const authorizationContext = createProdAuthorizationContext(guild.id);
+    const initialMember = await guild.members.fetch({
+      user: userId,
+      force: true,
+    });
+    const authorize = (
+      member: GuildMember,
+      object: AuthorizationObject,
+    ): Promise<void> =>
+      Promise.resolve(
+        authorization.require({
+        context: authorizationContext,
+        subject: context.createUserAuthorizationSubject(
+          member,
+          authorizationContext,
+        ),
+        object,
+        verb: permissionVerb(invocation.input.operation),
+        }),
+      );
     const ticket =
       invocation.input.ticketId === undefined
         ? await tickets.findByThread(guild.id, channelId)
         : await tickets.findByReference(guild.id, invocation.input.ticketId);
     const ticketId = ticket?.id;
     if (ticketId === undefined) {
+      await authorize(initialMember, {
+        objectType: "settings",
+        objectId: "*",
+      }).catch(() => undefined);
       throw new Error("Authorization denied");
     }
-    const authorizationContext = createProdAuthorizationContext(guild.id);
     const requireAuthorization = async (): Promise<void> => {
       const member = await guild.members.fetch({ user: userId, force: true });
-      await authorization.require({
-        context: authorizationContext,
-        subject: context.createUserAuthorizationSubject(
-          member,
-          authorizationContext,
-        ),
-        object: { objectType: "ticket", objectId: ticketId },
-        verb: permissionVerb(invocation.input.operation),
-      });
+      await authorize(member, { objectType: "ticket", objectId: ticketId });
     };
-    await requireAuthorization();
+    await authorize(initialMember, {
+      objectType: "ticket",
+      objectId: ticketId,
+    });
     const details = {
       actorUserId: userId,
       ...(invocation.input.reason === undefined

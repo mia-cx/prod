@@ -27,10 +27,13 @@ import type { LabelTaxonomyStore } from "../label-taxonomy.js";
 import type { PermissionAdministrationService } from "../permission-administration.js";
 import type { SupportHubDiscord } from "../support-hub.js";
 import type { TicketProvisioningService } from "../ticket-provisioning.js";
+import { createTicketAssignmentService } from "../ticket-assignment.js";
+import type { TicketStore } from "../tickets.js";
 import { createTicketAction } from "./create-ticket.js";
 import { pingAction } from "./ping.js";
 import { createGuildSetupSettingsConsumer } from "./settings.js";
 import { createTicketLifecycleAction } from "./ticket-lifecycle.js";
+import { createTicketAssignmentAction } from "./ticket-assignment.js";
 
 export type ProdActionContext = Readonly<{
   logger: Logger;
@@ -56,6 +59,7 @@ export type ProdActionRuntime = DiscordActionSurface &
 
 export type ProdActionRuntimeOptions = Readonly<{
   textCommandPrefix: string;
+  handleUnconsumedMessage?: DiscordActionSurface["handleUnconsumedMessage"];
   guildSettingsStore: GuildSettingsStore;
   labelTaxonomyStore: LabelTaxonomyStore;
   supportHubDiscord: SupportHubDiscord;
@@ -65,6 +69,7 @@ export type ProdActionRuntimeOptions = Readonly<{
   executeGuildOperation?: ExecuteGuildOperation;
   permissionAdministration?: PermissionAdministrationService;
   permissionAuthorization?: AuthorizationService;
+  ticketStore?: TicketStore;
 }>;
 
 export const createProdActionRuntime = (
@@ -136,6 +141,20 @@ export const createProdActionRuntime = (
     );
   }
   registry.registerAction(settings.action);
+  if (
+    options.ticketStore !== undefined &&
+    options.permissionAuthorization !== undefined
+  ) {
+    registry.registerAction(
+      createTicketAssignmentAction(
+        createTicketAssignmentService({
+          tickets: options.ticketStore,
+          authorization: options.permissionAuthorization,
+          createUserAuthorizationSubject,
+        }),
+      ),
+    );
+  }
 
   const handleMessage = textProvider.prefix
     ? async (message: Message): Promise<boolean> => {
@@ -240,6 +259,9 @@ export const createProdActionRuntime = (
       logProdActionResult(logger, handled);
     },
     ...(handleMessage ? { handleMessage } : {}),
+    ...(options.handleUnconsumedMessage
+      ? { handleUnconsumedMessage: options.handleUnconsumedMessage }
+      : {}),
     handleError: (error: unknown) => {
       logger.error({ err: error }, "Discord action dispatch failed");
     },

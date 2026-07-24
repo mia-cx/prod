@@ -264,7 +264,12 @@ describe("createDiscordGateway", () => {
       expect(handleInteraction).toHaveBeenCalledWith(interaction),
     );
 
-    const message = { id: "message-1", content: "!ping" };
+    const message = {
+      id: "message-1",
+      content: "!ping",
+      author: { bot: false },
+      webhookId: null,
+    };
     discordMock.messageHandler?.(message);
     await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledWith(message));
 
@@ -285,6 +290,217 @@ describe("createDiscordGateway", () => {
 
     expect(discordMock.intents).toEqual([1]);
     expect(discordMock.messageHandler).toBeUndefined();
+  });
+
+  it("does not pass consumed messages to the downstream consumer", async () => {
+    const handleMessage = vi.fn(async () => true);
+    const handleUnconsumedMessage = vi.fn(async () => undefined);
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleMessage,
+        handleUnconsumedMessage,
+        handleError: vi.fn(),
+      },
+    });
+    const message = {
+      id: "message-consumed",
+      content: "!ping",
+      author: { bot: false },
+      webhookId: null,
+    };
+
+    discordMock.messageHandler?.(message);
+    await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledWith(message));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(handleUnconsumedMessage).not.toHaveBeenCalled();
+    await gateway.close();
+  });
+
+  it("passes unconsumed messages to the downstream consumer", async () => {
+    const handleMessage = vi.fn(async () => false);
+    const handleUnconsumedMessage = vi.fn(async () => undefined);
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleMessage,
+        handleUnconsumedMessage,
+        handleError: vi.fn(),
+      },
+    });
+    const message = {
+      id: "message-unconsumed",
+      content: "hello",
+      author: { bot: false },
+      webhookId: null,
+    };
+
+    discordMock.messageHandler?.(message);
+
+    await vi.waitFor(() =>
+      expect(handleUnconsumedMessage).toHaveBeenCalledWith(message),
+    );
+    await gateway.close();
+  });
+
+  it("handles unconsumed messages without a downstream consumer", async () => {
+    const handleMessage = vi.fn(async () => false);
+    const handleError = vi.fn();
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleMessage,
+        handleError,
+      },
+    });
+    const message = {
+      id: "message-unconsumed-text-only",
+      content: "hello",
+      author: { bot: false },
+      webhookId: null,
+    };
+
+    discordMock.messageHandler?.(message);
+
+    await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledWith(message));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handleError).not.toHaveBeenCalled();
+    await gateway.close();
+  });
+
+  it.each([
+    ["bot", { author: { bot: true }, webhookId: null }],
+    ["webhook", { author: { bot: false }, webhookId: "webhook-1" }],
+  ] as const)(
+    "does not dispatch %s messages to text or downstream handlers",
+    async (_source, message) => {
+      const handleMessage = vi.fn(async () => false);
+      const handleUnconsumedMessage = vi.fn(async () => undefined);
+      const gateway = createDiscordGateway({
+        actions: {
+          refreshCommands: vi.fn(async () => undefined),
+          handleInteraction: vi.fn(async () => undefined),
+          handleMessage,
+          handleUnconsumedMessage,
+          handleError: vi.fn(),
+        },
+      });
+
+      discordMock.messageHandler?.(message);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(handleMessage).not.toHaveBeenCalled();
+      expect(handleUnconsumedMessage).not.toHaveBeenCalled();
+      await gateway.close();
+    },
+  );
+
+  it.each([
+    ["bot", { author: { bot: true }, webhookId: null }],
+    ["webhook", { author: { bot: false }, webhookId: "webhook-1" }],
+  ] as const)(
+    "does not dispatch %s messages with only a downstream handler",
+    async (_source, message) => {
+      const handleUnconsumedMessage = vi.fn(async () => undefined);
+      const gateway = createDiscordGateway({
+        actions: {
+          refreshCommands: vi.fn(async () => undefined),
+          handleInteraction: vi.fn(async () => undefined),
+          handleUnconsumedMessage,
+          handleError: vi.fn(),
+        },
+      });
+
+      discordMock.messageHandler?.(message);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(handleUnconsumedMessage).not.toHaveBeenCalled();
+      await gateway.close();
+    },
+  );
+
+  it("treats message dispatch failures as terminal", async () => {
+    const error = new Error("text-command dispatch failed");
+    const handleMessage = vi.fn(async () => Promise.reject(error));
+    const handleUnconsumedMessage = vi.fn(async () => undefined);
+    const handleError = vi.fn();
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleMessage,
+        handleUnconsumedMessage,
+        handleError,
+      },
+    });
+    const message = {
+      id: "message-failed",
+      content: "!ping",
+      author: { bot: false },
+      webhookId: null,
+    };
+
+    discordMock.messageHandler?.(message);
+
+    await vi.waitFor(() => expect(handleError).toHaveBeenCalledWith(error));
+    expect(handleUnconsumedMessage).not.toHaveBeenCalled();
+    await gateway.close();
+  });
+
+  it("reports downstream message failures through the action error handler", async () => {
+    const error = new Error("downstream message dispatch failed");
+    const handleUnconsumedMessage = vi.fn(async () => Promise.reject(error));
+    const handleError = vi.fn();
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleUnconsumedMessage,
+        handleError,
+      },
+    });
+    const message = {
+      id: "message-downstream-failed",
+      content: "hello",
+      author: { bot: false },
+      webhookId: null,
+    };
+
+    discordMock.messageHandler?.(message);
+
+    await vi.waitFor(() => expect(handleError).toHaveBeenCalledWith(error));
+    expect(handleUnconsumedMessage).toHaveBeenCalledWith(message);
+    await gateway.close();
+  });
+
+  it("dispatches every message downstream and enables intents without a text handler", async () => {
+    const handleUnconsumedMessage = vi.fn(async () => undefined);
+    const gateway = createDiscordGateway({
+      actions: {
+        refreshCommands: vi.fn(async () => undefined),
+        handleInteraction: vi.fn(async () => undefined),
+        handleUnconsumedMessage,
+        handleError: vi.fn(),
+      },
+    });
+    const message = {
+      id: "message-downstream-only",
+      content: "hello",
+      author: { bot: false },
+      webhookId: null,
+    };
+
+    discordMock.messageHandler?.(message);
+
+    await vi.waitFor(() =>
+      expect(handleUnconsumedMessage).toHaveBeenCalledWith(message),
+    );
+    expect(discordMock.intents).toEqual([1, 2, 4]);
+    await gateway.close();
   });
 
   it("unions configured IDs with an individual application owner", async () => {

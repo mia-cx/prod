@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +7,12 @@ import { describe, expect, it } from "vitest";
 import { openDatabase, type ProdDatabase } from "../src/database.js";
 import { applyMigrations } from "../src/migrations.js";
 import type { ReporterHubAccessSnapshot } from "../src/reporter-hub-access.js";
-import { labels, ticketLabels, tickets } from "../src/schema.js";
+import {
+  labels,
+  ticketAssignees,
+  ticketLabels,
+  tickets,
+} from "../src/schema.js";
 import {
   createSqliteTicketStore,
   TicketStateTransitionError,
@@ -81,6 +86,35 @@ const createTicketInState = async (
   const ticket = await store.get(id);
   if (ticket === undefined) throw new Error("Expected lifecycle ticket");
   return ticket;
+};
+
+const createOpenTicket = async (
+  store: TicketStore,
+  id = "ticket-assignment",
+) => {
+  const ticket = await store.create({
+    id,
+    guildId: "guild-1",
+    hubChannelId: "hub-1",
+    reporterUserId: `reporter-${id}`,
+    originatingAlias: "issue",
+  });
+  await store.recordProgress(
+    ticket.id,
+    "thread_created",
+    {},
+    { threadId: `thread-${id}` },
+  );
+  await store.recordProgress(
+    ticket.id,
+    "instructions_posted",
+    {},
+    { openingMessageId: `message-${id}` },
+  );
+  await store.markOpen(ticket.id);
+  const opened = await store.get(ticket.id);
+  if (opened === undefined) throw new Error("Opened ticket was not persisted");
+  return opened;
 };
 
 describe("SQLite ticket store", () => {
@@ -437,6 +471,16 @@ describe("SQLite ticket store", () => {
           createdAt: timestamp,
         })
         .run();
+      connection.database
+        .insert(ticketAssignees)
+        .values({
+          ticketId: open.id,
+          assigneeUserId: "assignee-1",
+          assignedByUserId: "staff-1",
+          method: "delegated",
+          createdAt: timestamp,
+        })
+        .run();
       timestamp = "2026-07-22T11:00:00.000Z";
       const closed = await store.close(open.id);
       timestamp = "2026-07-22T12:00:00.000Z";
@@ -471,6 +515,14 @@ describe("SQLite ticket store", () => {
           ticketId: closed.id,
           labelId: "label-lifecycle",
           appliedById: "staff-1",
+        }),
+      ]);
+      expect(await store.listAssignees(closed.id)).toEqual([
+        expect.objectContaining({
+          ticketId: closed.id,
+          assigneeUserId: "assignee-1",
+          assignedByUserId: "staff-1",
+          method: "delegated",
         }),
       ]);
       expect(await store.listEvents(closed.id)).toContainEqual(
@@ -743,6 +795,382 @@ describe("SQLite ticket store", () => {
           ({ eventType }) => eventType === "closed",
         ),
       ).toHaveLength(1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("adds and lists assignees with provenance while only the first add pauses triage", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    let timestamp = Date.parse("2026-07-22T10:00:00.000Z");
+    const store = createSqliteTicketStore(connection.database, {
+      now: () => new Date(timestamp++).toISOString(),
+    });
+    try {
+      const ticket = await createOpenTicket(store);
+
+      await expect(
+        store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-z",
+          assignedByUserId: "user-z",
+          method: "self_claim",
+        }),
+      ).resolves.toEqual({
+        added: true,
+        assigneeCount: 1,
+        triagePaused: true,
+      });
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        triageStatus: "paused",
+      });
+
+      connection.database
+        .update(tickets)
+        .set({ triageStatus: "ready" })
+        .where(eq(tickets.id, ticket.id))
+        .run();
+      await expect(
+        store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-a",
+          assignedByUserId: "manager-1",
+          method: "delegated",
+        }),
+      ).resolves.toEqual({
+        added: true,
+        assigneeCount: 2,
+        triagePaused: false,
+      });
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        triageStatus: "ready",
+      });
+
+      expect(await store.listAssignees(ticket.id)).toEqual([
+        {
+          ticketId: ticket.id,
+          assigneeUserId: "user-z",
+          assignedByUserId: "user-z",
+          method: "self_claim",
+          createdAt: "2026-07-22T10:00:00.004Z",
+        },
+        {
+          ticketId: ticket.id,
+          assigneeUserId: "user-a",
+          assignedByUserId: "manager-1",
+          method: "delegated",
+          createdAt: "2026-07-22T10:00:00.005Z",
+        },
+      ]);
+      expect(
+        (await store.listEvents(ticket.id))
+          .filter(({ eventType }) => eventType === "assignee_added")
+          .map(({ details }) => details),
+      ).toEqual([
+        {
+          assigneeUserId: "user-z",
+          assignedByUserId: "user-z",
+          method: "self_claim",
+          triagePaused: true,
+        },
+        {
+          assigneeUserId: "user-a",
+          assignedByUserId: "manager-1",
+          method: "delegated",
+          triagePaused: false,
+        },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("treats a duplicate add as a no-op and preserves original provenance", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database, {
+      now: () => "2026-07-22T10:00:00.000Z",
+    });
+    try {
+      const ticket = await createOpenTicket(store);
+      await store.addAssignee({
+        ticketId: ticket.id,
+        assigneeUserId: "user-1",
+        assignedByUserId: "manager-original",
+        method: "delegated",
+      });
+
+      await expect(
+        store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-1",
+          assignedByUserId: "manager-later",
+          method: "self_claim",
+        }),
+      ).resolves.toEqual({
+        added: false,
+        assigneeCount: 1,
+        triagePaused: false,
+      });
+      expect(await store.listAssignees(ticket.id)).toEqual([
+        {
+          ticketId: ticket.id,
+          assigneeUserId: "user-1",
+          assignedByUserId: "manager-original",
+          method: "delegated",
+          createdAt: "2026-07-22T10:00:00.000Z",
+        },
+      ]);
+      expect(
+        (await store.listEvents(ticket.id)).filter(
+          ({ eventType }) => eventType === "assignee_added",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("does not report another triage pause when the first current assignee is added to paused triage", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(store);
+      await store.addAssignee({
+        ticketId: ticket.id,
+        assigneeUserId: "user-1",
+        assignedByUserId: "user-1",
+        method: "self_claim",
+      });
+      await store.removeAssignee({
+        ticketId: ticket.id,
+        assigneeUserId: "user-1",
+        removedByUserId: "user-1",
+      });
+
+      await expect(
+        store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-2",
+          assignedByUserId: "manager-1",
+          method: "delegated",
+        }),
+      ).resolves.toEqual({
+        added: true,
+        assigneeCount: 1,
+        triagePaused: false,
+      });
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        triageStatus: "paused",
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("removes only the targeted assignee and leaves paused triage after the final removal", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(store);
+      for (const assigneeUserId of ["user-1", "user-2"]) {
+        await store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId,
+          assignedByUserId: "manager-1",
+          method: "delegated",
+        });
+      }
+
+      await expect(
+        store.removeAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-1",
+          removedByUserId: "manager-2",
+        }),
+      ).resolves.toEqual({ removed: true, assigneeCount: 1 });
+      expect(await store.listAssignees(ticket.id)).toMatchObject([
+        { assigneeUserId: "user-2" },
+      ]);
+      await expect(
+        store.removeAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-2",
+          removedByUserId: "manager-2",
+        }),
+      ).resolves.toEqual({ removed: true, assigneeCount: 0 });
+      expect(await store.listAssignees(ticket.id)).toEqual([]);
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        triageStatus: "paused",
+      });
+      expect(
+        (await store.listEvents(ticket.id))
+          .filter(({ eventType }) => eventType === "assignee_removed")
+          .map(({ details }) => details),
+      ).toEqual([
+        { assigneeUserId: "user-1", removedByUserId: "manager-2" },
+        { assigneeUserId: "user-2", removedByUserId: "manager-2" },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("removes an assignee from only the selected ticket", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const first = await createOpenTicket(store, "ticket-first");
+      const second = await createOpenTicket(store, "ticket-second");
+      for (const ticket of [first, second]) {
+        await store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "shared-user",
+          assignedByUserId: "manager-1",
+          method: "delegated",
+        });
+      }
+
+      await expect(
+        store.removeAssignee({
+          ticketId: first.id,
+          assigneeUserId: "shared-user",
+          removedByUserId: "manager-1",
+        }),
+      ).resolves.toEqual({ removed: true, assigneeCount: 0 });
+      await expect(store.listAssignees(first.id)).resolves.toEqual([]);
+      await expect(store.listAssignees(second.id)).resolves.toMatchObject([
+        { ticketId: second.id, assigneeUserId: "shared-user" },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("rolls back assignment state when its audit event cannot be written", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(store);
+      connection.database.run(
+        sql.raw(`
+        CREATE TRIGGER reject_assignment_audit
+        BEFORE INSERT ON ticket_events
+        WHEN NEW.event_type = 'assignee_added'
+        BEGIN
+          SELECT RAISE(ABORT, 'audit rejected');
+        END
+      `),
+      );
+
+      await expect(
+        store.addAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-1",
+          assignedByUserId: "user-1",
+          method: "self_claim",
+        }),
+      ).rejects.toThrow("audit rejected");
+      await expect(store.listAssignees(ticket.id)).resolves.toEqual([]);
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        triageStatus: "collecting",
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("treats removal of a non-assignee as a no-op without an event", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(store);
+      await store.addAssignee({
+        ticketId: ticket.id,
+        assigneeUserId: "user-1",
+        assignedByUserId: "user-1",
+        method: "self_claim",
+      });
+
+      await expect(
+        store.removeAssignee({
+          ticketId: ticket.id,
+          assigneeUserId: "user-missing",
+          removedByUserId: "manager-1",
+        }),
+      ).resolves.toEqual({ removed: false, assigneeCount: 1 });
+      expect(
+        (await store.listEvents(ticket.id)).filter(
+          ({ eventType }) => eventType === "assignee_removed",
+        ),
+      ).toEqual([]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("requires an open ticket for assignment changes", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await store.create({
+        id: "ticket-provisioning",
+        guildId: "guild-1",
+        hubChannelId: "hub-1",
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      const add = (ticketId: string) =>
+        store.addAssignee({
+          ticketId,
+          assigneeUserId: "user-1",
+          assignedByUserId: "user-1",
+          method: "self_claim",
+        });
+      const remove = (ticketId: string) =>
+        store.removeAssignee({
+          ticketId,
+          assigneeUserId: "user-1",
+          removedByUserId: "user-1",
+        });
+
+      await expect(add(ticket.id)).rejects.toThrow(
+        "Ticket assignment needs an open ticket",
+      );
+      await expect(remove(ticket.id)).rejects.toThrow(
+        "Ticket assignment needs an open ticket",
+      );
+      await expect(add("ticket-missing")).rejects.toThrow(
+        "Ticket assignment needs an open ticket",
+      );
+      await expect(remove("ticket-missing")).rejects.toThrow(
+        "Ticket assignment needs an open ticket",
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("looks up tickets by their unique thread id", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createOpenTicket(store, "ticket-thread-lookup");
+
+      await expect(
+        store.getByThreadId("thread-ticket-thread-lookup"),
+      ).resolves.toEqual(ticket);
+      await expect(
+        store.getByThreadId("thread-missing"),
+      ).resolves.toBeUndefined();
     } finally {
       connection.close();
     }

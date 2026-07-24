@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createProdAuthorizationContext,
+  createProdAuthorizationResourceValidator,
   createProdAuthorizationService,
   createProdPermissionRuleStore,
   UnsupportedProdAuthorizationContextError,
@@ -13,7 +14,9 @@ import type {
   PermissionRuleStore,
 } from "@protocord/permissions";
 
-const rule = (context: PermissionRuleInput["context"]): PermissionRuleInput => ({
+const rule = (
+  context: PermissionRuleInput["context"],
+): PermissionRuleInput => ({
   id: "rule-1",
   context,
   subject: { subjectType: "role", subjectId: "role-1" },
@@ -42,6 +45,46 @@ const check = (context: AuthorizationCheck["context"]): AuthorizationCheck => ({
 });
 
 describe("Prod authorization policy boundary", () => {
+  it("accepts only ticket resources belonging to the authorization guild", async () => {
+    const validate = createProdAuthorizationResourceValidator({
+      get: async (ticketId) =>
+        ticketId === "ticket-1"
+          ? ({ id: ticketId, guildId: "guild-1" } as never)
+          : undefined,
+    });
+    await expect(
+      validate({
+        context: createProdAuthorizationContext("guild-1"),
+        object: { objectType: "ticket", objectId: "ticket-1" },
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      validate({
+        context: createProdAuthorizationContext("guild-2"),
+        object: { objectType: "ticket", objectId: "ticket-1" },
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      validate({
+        context: createProdAuthorizationContext("guild-1"),
+        object: { objectType: "ticket", objectId: "missing" },
+      }),
+    ).resolves.toBe(false);
+    for (const objectType of ["settings", "permissions"] as const) {
+      await expect(
+        validate({
+          context: createProdAuthorizationContext("guild-1"),
+          object: { objectType, objectId: "*" },
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        validate({
+          context: createProdAuthorizationContext("guild-1"),
+          object: { objectType, objectId: "specific" } as never,
+        }),
+      ).resolves.toBe(false);
+    }
+  });
   it("constructs only a guild-level context", () => {
     expect(createProdAuthorizationContext("guild-1")).toEqual({
       guildId: "guild-1",

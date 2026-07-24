@@ -1,13 +1,11 @@
 import type { Logger } from "pino";
-import {
-  createSqlitePermissionRuleStore,
-  type AuthorizationResourceValidator,
-} from "@protocord/permissions";
+import { createSqlitePermissionRuleStore } from "@protocord/permissions";
 import { createSqliteModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 
 import type { ProdConfig } from "./config.js";
 import { createProdActionRuntime } from "./actions/runtime.js";
 import {
+  createProdAuthorizationResourceValidator,
   createProdAuthorizationService,
   createProdPermissionRuleStore,
 } from "./authorization.js";
@@ -28,16 +26,7 @@ import {
   createTicketProvisioningDiscord,
   createTicketProvisioningService,
 } from "./ticket-provisioning.js";
-import { createSqliteTicketStore, type TicketStore } from "./tickets.js";
-
-export const createProdAuthorizationResourceValidator =
-  (tickets: TicketStore): AuthorizationResourceValidator =>
-  async ({ context, object }) =>
-    ((object.objectType === "settings" ||
-      object.objectType === "permissions") &&
-      object.objectId === "*") ||
-    (object.objectType === "ticket" &&
-      (await tickets.get(object.objectId))?.guildId === context.guildId);
+import { createSqliteTicketStore } from "./tickets.js";
 
 export type RunningProd = Readonly<{
   stop: (reason?: string) => Promise<void>;
@@ -129,6 +118,7 @@ export const startProd = async (
       executeGuildOperation,
       permissionAdministration,
       permissionAuthorization,
+      ticketStore,
     });
     gateway =
       dependencies.gateway ??
