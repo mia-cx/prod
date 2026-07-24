@@ -1194,7 +1194,10 @@ export const createTicketProvisioningService = (
               const current = await store.get(ticket.id);
               if (current?.status !== "closed") return;
               const guild = await resolveGuildOnce(current.guildId);
-              await discord.closeTicketThread(guild, current);
+              const reconciliationErrors: unknown[] = [];
+              await discord
+                .closeTicketThread(guild, current)
+                .catch((error: unknown) => reconciliationErrors.push(error));
               if (!(await store.hasOtherActiveTicket(current))) {
                 const snapshot = await store.getReporterAccess(current);
                 if (snapshot !== undefined) {
@@ -1203,9 +1206,20 @@ export const createTicketProvisioningService = (
                     current.hubChannelId,
                     current.reporterUserId,
                     snapshot,
-                  );
-                  await store.finishReporterAccess(current);
+                  )
+                    .then(() => store.finishReporterAccess(current))
+                    .catch((error: unknown) =>
+                      reconciliationErrors.push(error),
+                    );
                 }
+              }
+              if (reconciliationErrors.length > 0) {
+                throw reconciliationErrors.length === 1
+                  ? reconciliationErrors[0]
+                  : new AggregateError(
+                      reconciliationErrors,
+                      "Closed ticket recovery failed",
+                    );
               }
               recovered += 1;
             } catch {

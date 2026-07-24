@@ -650,6 +650,30 @@ describe("Prod action runtime", () => {
     });
   });
 
+  it("presents the same denial for an existing unauthorized ticket", async () => {
+    const authorization = {
+      check: vi.fn(),
+      require: vi.fn().mockRejectedValue(new Error("Authorization denied")),
+    } as AuthorizationService;
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      {
+        ...runtimeOptions,
+        permissionAuthorization: authorization,
+        permissionAdministration: permissionAdministrationFixture,
+      },
+    );
+    const interaction = lifecycleInteraction("close", undefined, "#1");
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(authorization.require).toHaveBeenCalledOnce();
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Authorization denied",
+      allowedMentions: { parse: [] },
+    });
+  });
+
   it("infers an omitted close ticket from the current private thread", async () => {
     const authorization = {
       check: vi.fn(),

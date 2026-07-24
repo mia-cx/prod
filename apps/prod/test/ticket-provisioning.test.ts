@@ -395,6 +395,122 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("still releases final access when closed-thread recovery fails", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-recovery-thread-missing",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await store.close(ticket.id);
+      vi.mocked(discord.closeTicketThread).mockRejectedValueOnce(
+        new Error("thread missing"),
+      );
+      vi.mocked(discord.restoreReporterAccess).mockClear();
+
+      await expect(service.recover(async () => guild)).resolves.toEqual({
+        recovered: 0,
+        failed: 1,
+      });
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        ticket.hubChannelId,
+        ticket.reporterUserId,
+        emptyAccessSnapshot,
+      );
+      await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("skips a closed recovery snapshot reopened before it acquires the guild lock", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let reopenStarted!: () => void;
+    const reopenStartedGate = new Promise<void>((resolve) => {
+      reopenStarted = resolve;
+    });
+    let releaseReopen!: () => void;
+    const reopenGate = new Promise<void>((resolve) => {
+      releaseReopen = resolve;
+    });
+    const discord = discordFixture({
+      reopenTicketThread: vi.fn(async () => {
+        reopenStarted();
+        await reopenGate;
+      }),
+    });
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-stale-recovery",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.close(guild, ticket.id);
+      vi.mocked(discord.closeTicketThread).mockClear();
+      const reopening = service.reopen(guild, ticket.id);
+      await reopenStartedGate;
+      const recovering = service.recover(async () => guild);
+      releaseReopen();
+
+      await expect(reopening).resolves.toMatchObject({ status: "open" });
+      await expect(recovering).resolves.toEqual({ recovered: 0, failed: 0 });
+      expect(discord.closeTicketThread).not.toHaveBeenCalled();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("does not mutate lifecycle state after serialized authorization is revoked", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-revoked-lifecycle",
+    });
+    const revoked = async (): Promise<void> => {
+      throw new Error("authorization revoked");
+    };
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      vi.mocked(discord.closeTicketThread).mockClear();
+
+      await expect(
+        service.close(guild, ticket.id, {}, revoked),
+      ).rejects.toThrow("authorization revoked");
+      await expect(
+        service.pauseTriage(guild, ticket.id, {}, revoked),
+      ).rejects.toThrow("authorization revoked");
+      await expect(store.get(ticket.id)).resolves.toMatchObject({
+        status: "open",
+        triageStatus: "collecting",
+      });
+      expect(discord.closeTicketThread).not.toHaveBeenCalled();
+      await expect(store.getReporterAccess(ticket)).resolves.toEqual(
+        emptyAccessSnapshot,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   it("compensates a failed final close back to open", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
