@@ -1,11 +1,26 @@
-import { describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 
-import { openDatabase } from "../src/database.js";
+import { openDatabase, type ProdDatabase } from "../src/database.js";
 import { applyMigrations } from "../src/migrations.js";
-import { tickets } from "../src/schema.js";
 import type { ReporterHubAccessSnapshot } from "../src/reporter-hub-access.js";
-import { createSqliteTicketStore, type TicketStore } from "../src/tickets.js";
+import {
+  labels,
+  ticketAssignees,
+  ticketLabels,
+  tickets,
+} from "../src/schema.js";
+import {
+  createSqliteTicketStore,
+  TicketStateTransitionError,
+  type Ticket,
+  type TicketStatus,
+  type TicketStore,
+  type TriageStatus,
+} from "../src/tickets.js";
 
 const emptySnapshot: ReporterHubAccessSnapshot = {
   version: 1,
@@ -20,6 +35,57 @@ const emptySnapshot: ReporterHubAccessSnapshot = {
     CreatePrivateThreads: "unset",
     ManageThreads: "unset",
   },
+};
+
+type TicketFixtureState = `${TicketStatus}/${TriageStatus}`;
+
+const createTicketInState = async (
+  store: TicketStore,
+  database: ProdDatabase,
+  state: TicketFixtureState,
+  id = "ticket-lifecycle",
+): Promise<Ticket> => {
+  const created = await store.create({
+    id,
+    guildId: "guild-lifecycle",
+    hubChannelId: "hub-lifecycle",
+    reporterUserId: `reporter-${id}`,
+    originatingAlias: "issue",
+    summary: "Preserve this summary",
+  });
+  if (state === "provisioning/collecting") return created;
+  if (state === "failed/collecting") {
+    await store.markFailed(id, "controlled failure");
+    const failed = await store.get(id);
+    if (failed === undefined) throw new Error("Expected failed ticket");
+    return failed;
+  }
+
+  await store.recordProgress(
+    id,
+    "thread_created",
+    {},
+    { threadId: `thread-${id}` },
+  );
+  await store.recordProgress(
+    id,
+    "instructions_posted",
+    {},
+    { openingMessageId: `message-${id}` },
+  );
+  await store.markOpen(id);
+  const [status, triageStatus] = state.split("/") as [
+    TicketStatus,
+    TriageStatus,
+  ];
+  database
+    .update(tickets)
+    .set({ status, triageStatus })
+    .where(eq(tickets.id, id))
+    .run();
+  const ticket = await store.get(id);
+  if (ticket === undefined) throw new Error("Expected lifecycle ticket");
+  return ticket;
 };
 
 const createOpenTicket = async (
@@ -295,6 +361,440 @@ describe("SQLite ticket store", () => {
           originatingAlias: "issue",
         }),
       ).rejects.toMatchObject({ code: "guild_busy" });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it.each(["collecting", "ready", "paused"] as const)(
+    "closes an open/%s ticket with details in its audit event",
+    async (triageStatus) => {
+      const connection = openDatabase(":memory:");
+      await applyMigrations(connection.database);
+      let timestamp = "2026-07-22T10:00:00.000Z";
+      const store = createSqliteTicketStore(connection.database, {
+        now: () => timestamp,
+      });
+      try {
+        const ticket = await createTicketInState(
+          store,
+          connection.database,
+          `open/${triageStatus}`,
+        );
+        const details = { actorUserId: "staff-1", reason: "Resolved" };
+        timestamp = "2026-07-22T11:00:00.000Z";
+
+        await expect(store.close(ticket.id, details)).resolves.toMatchObject({
+          id: ticket.id,
+          status: "closed",
+          triageStatus: "paused",
+          updatedAt: "2026-07-22T11:00:00.000Z",
+        });
+        await expect(store.get(ticket.id)).resolves.toMatchObject({
+          status: "closed",
+          triageStatus: "paused",
+        });
+        expect(
+          (await store.listEvents(ticket.id)).filter(
+            ({ eventType }) => eventType === "closed",
+          ),
+        ).toEqual([expect.objectContaining({ eventType: "closed", details })]);
+      } finally {
+        connection.close();
+      }
+    },
+  );
+
+  it.each([
+    ["closed/paused", "closed", "paused"],
+    ["provisioning/collecting", "provisioning", "collecting"],
+    ["failed/collecting", "failed", "collecting"],
+  ] as const)(
+    "rejects closing a %s ticket without changing its row or events",
+    async (state, status, triageStatus) => {
+      const connection = openDatabase(":memory:");
+      await applyMigrations(connection.database);
+      const store = createSqliteTicketStore(connection.database);
+      try {
+        const ticket = await createTicketInState(
+          store,
+          connection.database,
+          state,
+        );
+        const eventsBefore = await store.listEvents(ticket.id);
+
+        await expect(store.close(ticket.id)).rejects.toMatchObject({
+          name: "TicketStateTransitionError",
+          transition: "close",
+          status,
+          triageStatus,
+        });
+        expect(await store.get(ticket.id)).toEqual(ticket);
+        expect(await store.listEvents(ticket.id)).toEqual(eventsBefore);
+      } finally {
+        connection.close();
+      }
+    },
+  );
+
+  it("reopens a closed ticket paused without changing its related columns", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    let timestamp = "2026-07-22T10:00:00.000Z";
+    const store = createSqliteTicketStore(connection.database, {
+      now: () => timestamp,
+    });
+    try {
+      const open = await createTicketInState(
+        store,
+        connection.database,
+        "open/ready",
+      );
+      connection.database
+        .insert(labels)
+        .values({
+          id: "label-lifecycle",
+          guildId: open.guildId,
+          name: "Lifecycle",
+          normalizedName: "lifecycle",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .run();
+      connection.database
+        .insert(ticketLabels)
+        .values({
+          ticketId: open.id,
+          labelId: "label-lifecycle",
+          appliedByType: "user",
+          appliedById: "staff-1",
+          createdAt: timestamp,
+        })
+        .run();
+      connection.database
+        .insert(ticketAssignees)
+        .values({
+          ticketId: open.id,
+          assigneeUserId: "assignee-1",
+          assignedByUserId: "staff-1",
+          method: "delegated",
+          createdAt: timestamp,
+        })
+        .run();
+      timestamp = "2026-07-22T11:00:00.000Z";
+      const closed = await store.close(open.id);
+      timestamp = "2026-07-22T12:00:00.000Z";
+
+      const reopened = await store.reopen(closed.id, {
+        actorUserId: "staff-2",
+      });
+
+      expect(reopened).toMatchObject({
+        status: "open",
+        triageStatus: "paused",
+        summary: "Preserve this summary",
+        threadId: "thread-ticket-lifecycle",
+        openingMessageId: "message-ticket-lifecycle",
+        updatedAt: "2026-07-22T12:00:00.000Z",
+      });
+      expect(reopened).toEqual({
+        ...closed,
+        status: "open",
+        triageStatus: "paused",
+        updatedAt: "2026-07-22T12:00:00.000Z",
+      });
+      expect(await store.get(closed.id)).toEqual(reopened);
+      expect(
+        connection.database
+          .select()
+          .from(ticketLabels)
+          .where(eq(ticketLabels.ticketId, closed.id))
+          .all(),
+      ).toEqual([
+        expect.objectContaining({
+          ticketId: closed.id,
+          labelId: "label-lifecycle",
+          appliedById: "staff-1",
+        }),
+      ]);
+      expect(await store.listAssignees(closed.id)).toEqual([
+        expect.objectContaining({
+          ticketId: closed.id,
+          assigneeUserId: "assignee-1",
+          assignedByUserId: "staff-1",
+          method: "delegated",
+        }),
+      ]);
+      expect(await store.listEvents(closed.id)).toContainEqual(
+        expect.objectContaining({
+          eventType: "reopened",
+          details: { actorUserId: "staff-2" },
+        }),
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
+  it.each([
+    ["open/collecting", "open", "collecting"],
+    ["provisioning/collecting", "provisioning", "collecting"],
+    ["failed/collecting", "failed", "collecting"],
+  ] as const)(
+    "rejects reopening a %s ticket",
+    async (state, status, triageStatus) => {
+      const connection = openDatabase(":memory:");
+      await applyMigrations(connection.database);
+      const store = createSqliteTicketStore(connection.database);
+      try {
+        const ticket = await createTicketInState(
+          store,
+          connection.database,
+          state,
+        );
+        const eventsBefore = await store.listEvents(ticket.id);
+
+        await expect(store.reopen(ticket.id)).rejects.toMatchObject({
+          name: "TicketStateTransitionError",
+          transition: "reopen",
+          status,
+          triageStatus,
+        });
+        expect(await store.get(ticket.id)).toEqual(ticket);
+        expect(await store.listEvents(ticket.id)).toEqual(eventsBefore);
+      } finally {
+        connection.close();
+      }
+    },
+  );
+
+  it("rolls back the ticket update when its audit event cannot be inserted", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    let id = 0;
+    let collide = false;
+    const store = createSqliteTicketStore(connection.database, {
+      createId: () => (collide ? "event-1" : `event-${++id}`),
+    });
+    try {
+      const ticket = await createTicketInState(
+        store,
+        connection.database,
+        "open/collecting",
+      );
+      const eventsBefore = await store.listEvents(ticket.id);
+      collide = true;
+
+      await expect(store.close(ticket.id)).rejects.toMatchObject({
+        code: "SQLITE_CONSTRAINT_UNIQUE",
+      });
+      expect(await store.get(ticket.id)).toEqual(ticket);
+      expect(await store.listEvents(ticket.id)).toEqual(eventsBefore);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("re-reads state after a concurrent transition loses its SQLite snapshot", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "prod-ticket-race-"));
+    const databaseUrl = `file:${join(directory, "tickets.sqlite")}`;
+    const connection = openDatabase(databaseUrl);
+    await applyMigrations(connection.database);
+    const otherConnection = openDatabase(databaseUrl);
+    try {
+      let competingClose: Promise<Ticket> | undefined;
+      let race = false;
+      let competingEvent = 0;
+      const competingStore = createSqliteTicketStore(otherConnection.database, {
+        createId: () => `competing-event-${++competingEvent}`,
+      });
+      let event = 0;
+      const store = createSqliteTicketStore(connection.database, {
+        now: () => {
+          if (race && competingClose === undefined) {
+            competingClose = competingStore.close("ticket-lifecycle");
+          }
+          return "2026-07-22T10:00:00.000Z";
+        },
+        createId: () => `primary-event-${++event}`,
+      });
+      const ticket = await createTicketInState(
+        store,
+        connection.database,
+        "open/collecting",
+      );
+      race = true;
+
+      await expect(store.close(ticket.id)).rejects.toMatchObject({
+        name: "TicketStateTransitionError",
+        status: "closed",
+        triageStatus: "paused",
+      });
+      await expect(competingClose).resolves.toMatchObject({
+        status: "closed",
+        triageStatus: "paused",
+      });
+      expect(
+        (await store.listEvents(ticket.id)).filter(
+          ({ eventType }) => eventType === "closed",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      connection.close();
+      otherConnection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("pauses triage only from open/collecting and records details", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    let timestamp = "2026-07-22T10:00:00.000Z";
+    const store = createSqliteTicketStore(connection.database, {
+      now: () => timestamp,
+    });
+    try {
+      const ticket = await createTicketInState(
+        store,
+        connection.database,
+        "open/collecting",
+      );
+      timestamp = "2026-07-22T11:00:00.000Z";
+
+      await expect(
+        store.pauseTriage(ticket.id, { actorUserId: "staff-3" }),
+      ).resolves.toMatchObject({
+        status: "open",
+        triageStatus: "paused",
+        updatedAt: "2026-07-22T11:00:00.000Z",
+      });
+      expect(await store.listEvents(ticket.id)).toContainEqual(
+        expect.objectContaining({
+          eventType: "triage_paused",
+          details: { actorUserId: "staff-3" },
+        }),
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
+  it.each([
+    "open/ready",
+    "open/paused",
+    "closed/paused",
+    "provisioning/collecting",
+    "failed/collecting",
+  ] as const)("rejects pausing triage from %s", async (state) => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createTicketInState(
+        store,
+        connection.database,
+        state,
+      );
+      const eventsBefore = await store.listEvents(ticket.id);
+
+      await expect(store.pauseTriage(ticket.id)).rejects.toBeInstanceOf(
+        TicketStateTransitionError,
+      );
+      expect(await store.get(ticket.id)).toEqual(ticket);
+      expect(await store.listEvents(ticket.id)).toEqual(eventsBefore);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it.each(["ready", "paused"] as const)(
+    "resumes triage from open/%s and records details",
+    async (triageStatus) => {
+      const connection = openDatabase(":memory:");
+      await applyMigrations(connection.database);
+      let timestamp = "2026-07-22T10:00:00.000Z";
+      const store = createSqliteTicketStore(connection.database, {
+        now: () => timestamp,
+      });
+      try {
+        const ticket = await createTicketInState(
+          store,
+          connection.database,
+          `open/${triageStatus}`,
+        );
+        timestamp = "2026-07-22T11:00:00.000Z";
+
+        await expect(
+          store.resumeTriage(ticket.id, { actorUserId: "staff-4" }),
+        ).resolves.toMatchObject({
+          status: "open",
+          triageStatus: "collecting",
+          updatedAt: "2026-07-22T11:00:00.000Z",
+        });
+        expect(await store.listEvents(ticket.id)).toContainEqual(
+          expect.objectContaining({
+            eventType: "triage_resumed",
+            details: { actorUserId: "staff-4" },
+          }),
+        );
+      } finally {
+        connection.close();
+      }
+    },
+  );
+
+  it.each([
+    "open/collecting",
+    "closed/paused",
+    "provisioning/collecting",
+    "failed/collecting",
+  ] as const)("rejects resuming triage from %s", async (state) => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createTicketInState(
+        store,
+        connection.database,
+        state,
+      );
+      const eventsBefore = await store.listEvents(ticket.id);
+
+      await expect(store.resumeTriage(ticket.id)).rejects.toBeInstanceOf(
+        TicketStateTransitionError,
+      );
+      expect(await store.get(ticket.id)).toEqual(ticket);
+      expect(await store.listEvents(ticket.id)).toEqual(eventsBefore);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("exposes current state and records exactly one event on duplicate close", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      const ticket = await createTicketInState(
+        store,
+        connection.database,
+        "open/collecting",
+      );
+      const closed = await store.close(ticket.id);
+
+      await expect(store.close(ticket.id)).rejects.toMatchObject({
+        name: "TicketStateTransitionError",
+        ticketId: ticket.id,
+        transition: "close",
+        status: "closed",
+        triageStatus: "paused",
+      });
+      expect(await store.get(ticket.id)).toEqual(closed);
+      expect(
+        (await store.listEvents(ticket.id)).filter(
+          ({ eventType }) => eventType === "closed",
+        ),
+      ).toHaveLength(1);
     } finally {
       connection.close();
     }

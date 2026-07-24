@@ -2,10 +2,13 @@ import { Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
 import { startProd } from "../src/application.js";
+import { createProdAuthorizationResourceValidator } from "../src/authorization.js";
 import type { ProdConfig } from "../src/config.js";
 import { openDatabase, type ProdDatabase } from "../src/database.js";
 import type { DiscordGateway } from "../src/discord.js";
 import { createLogger } from "../src/logger.js";
+import { applyMigrations } from "../src/migrations.js";
+import { createSqliteTicketStore } from "../src/tickets.js";
 
 const config: ProdConfig = {
   discordToken: "development-secret-token",
@@ -36,6 +39,37 @@ const captureLogger = () => {
 };
 
 describe("startProd", () => {
+  it("validates exact ticket resources against their persisted guild", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    try {
+      await store.create({
+        id: "ticket-guild-1",
+        guildId: "guild-1",
+        hubChannelId: "hub-1",
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      const validate = createProdAuthorizationResourceValidator(store);
+
+      await expect(
+        validate({
+          context: { guildId: "guild-1" },
+          object: { objectType: "ticket", objectId: "ticket-guild-1" },
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        validate({
+          context: { guildId: "guild-2" },
+          object: { objectType: "ticket", objectId: "ticket-guild-1" },
+        }),
+      ).resolves.toBe(false);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("migrates before connecting, reports readiness, and stops idempotently", async () => {
     const sequence: string[] = [];
     const gateway: DiscordGateway = {
@@ -69,7 +103,7 @@ describe("startProd", () => {
 
     expect(sequence).toEqual(["migrate", "connect"]);
     expect(output.join("")).toContain("Prod ready");
-    expect(output.join("")).toContain('"actionCount":4');
+    expect(output.join("")).toContain('"actionCount":5');
     expect(output.join("")).toContain('"applicationOperatorCount":1');
     expect(output.join("")).not.toContain(config.discordToken);
 

@@ -32,6 +32,7 @@ import type { TicketStore } from "../tickets.js";
 import { createTicketAction } from "./create-ticket.js";
 import { pingAction } from "./ping.js";
 import { createGuildSetupSettingsConsumer } from "./settings.js";
+import { createTicketLifecycleAction } from "./ticket-lifecycle.js";
 import { createTicketAssignmentAction } from "./ticket-assignment.js";
 
 export type ProdActionContext = Readonly<{
@@ -131,6 +132,14 @@ export const createProdActionRuntime = (
   registry.registerAction(
     createTicketAction(options.ticketProvisioningService),
   );
+  if (options.permissionAuthorization !== undefined) {
+    registry.registerAction(
+      createTicketLifecycleAction(
+        options.ticketProvisioningService,
+        options.permissionAuthorization,
+      ),
+    );
+  }
   registry.registerAction(settings.action);
   if (
     options.ticketStore !== undefined &&
