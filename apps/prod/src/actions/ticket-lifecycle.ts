@@ -163,7 +163,7 @@ export const createTicketLifecycleAction = (
         : await tickets.findByReference(guild.id, invocation.input.ticketId);
     const ticketId = ticket?.id;
     if (ticketId === undefined) {
-      throw new Error("Specify a ticket ID when outside a ticket thread.");
+      throw new Error("Authorization denied");
     }
     const authorizationContext = createProdAuthorizationContext(guild.id);
     const requireAuthorization = async (): Promise<void> => {

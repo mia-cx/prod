@@ -307,6 +307,94 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("retains shared access while recovering one of multiple tickets", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let thread = 0;
+    const discord = discordFixture({
+      createTicketThread: vi.fn(async () => `thread-recovery-${++thread}`),
+      upsertOpeningInstructions: vi.fn(async (_guild, ticket) => ({
+        messageId: `message-${ticket.id}`,
+        created: true,
+      })),
+    });
+    let id = 0;
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => `ticket-recovery-${++id}`,
+    });
+    try {
+      const first = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "report",
+      });
+      await store.close(first.id);
+      vi.mocked(discord.restoreReporterAccess).mockClear();
+
+      await expect(service.recover(async () => guild)).resolves.toEqual({
+        recovered: 1,
+        failed: 0,
+      });
+      expect(discord.restoreReporterAccess).not.toHaveBeenCalled();
+      await expect(store.getReporterAccess(first)).resolves.toEqual(
+        emptyAccessSnapshot,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("caches failed guild resolution while recovering closed tickets", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    let thread = 0;
+    const service = createTicketProvisioningService(
+      settings,
+      store,
+      discordFixture({
+        createTicketThread: vi.fn(async () => `thread-cache-${++thread}`),
+      }),
+      {
+        createId: (() => {
+          let id = 0;
+          return () => `ticket-cache-${++id}`;
+        })(),
+      },
+    );
+    const resolveGuild = vi
+      .fn()
+      .mockRejectedValue(new Error("guild unavailable"));
+    try {
+      const first = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      const second = await service.open({
+        guild,
+        reporterUserId: "reporter-2",
+        originatingAlias: "report",
+      });
+      await store.close(first.id);
+      await store.close(second.id);
+
+      await expect(service.recover(resolveGuild)).resolves.toEqual({
+        recovered: 0,
+        failed: 2,
+      });
+      expect(resolveGuild).toHaveBeenCalledOnce();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("compensates a failed final close back to open", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);

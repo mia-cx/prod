@@ -1133,6 +1133,14 @@ export const createTicketProvisioningService = (
     recover: async (resolveGuild) => {
       let recovered = 0;
       let failed = 0;
+      const guilds = new Map<string, Promise<Guild>>();
+      const resolveGuildOnce = (guildId: string): Promise<Guild> => {
+        const cached = guilds.get(guildId);
+        if (cached !== undefined) return cached;
+        const pending = resolveGuild(guildId);
+        guilds.set(guildId, pending);
+        return pending;
+      };
       const provisioningTickets = await store.listProvisioning();
       const provisioningTicketIds = new Set(
         provisioningTickets.map(({ id }) => id),
@@ -1141,7 +1149,7 @@ export const createTicketProvisioningService = (
         await executeGuildOperation(ticket.guildId, () =>
           execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
             try {
-              const guild = await resolveGuild(ticket.guildId);
+              const guild = await resolveGuildOnce(ticket.guildId);
               const state = await settings.get(ticket.guildId);
               if (state.hubChannelId !== ticket.hubChannelId) {
                 await compensate(
@@ -1169,7 +1177,7 @@ export const createTicketProvisioningService = (
         await executeGuildOperation(ticket.guildId, () =>
           execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
             try {
-              const guild = await resolveGuild(ticket.guildId);
+              const guild = await resolveGuildOnce(ticket.guildId);
               const state = await settings.get(ticket.guildId);
               if (state.hubChannelId !== ticket.hubChannelId) return;
               await discord.reconcileTicketPresentation(guild, ticket);
@@ -1183,18 +1191,20 @@ export const createTicketProvisioningService = (
         await executeGuildOperation(ticket.guildId, () =>
           execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
             try {
-              const guild = await resolveGuild(ticket.guildId);
-              await discord.closeTicketThread(guild, ticket);
-              if (!(await store.hasOtherActiveTicket(ticket))) {
-                const snapshot = await store.getReporterAccess(ticket);
+              const current = await store.get(ticket.id);
+              if (current?.status !== "closed") return;
+              const guild = await resolveGuildOnce(current.guildId);
+              await discord.closeTicketThread(guild, current);
+              if (!(await store.hasOtherActiveTicket(current))) {
+                const snapshot = await store.getReporterAccess(current);
                 if (snapshot !== undefined) {
                   await restoreReporterAccess(
                     guild,
-                    ticket.hubChannelId,
-                    ticket.reporterUserId,
+                    current.hubChannelId,
+                    current.reporterUserId,
                     snapshot,
                   );
-                  await store.finishReporterAccess(ticket);
+                  await store.finishReporterAccess(current);
                 }
               }
               recovered += 1;

@@ -623,6 +623,33 @@ describe("Prod action runtime", () => {
     });
   });
 
+  it("does not reveal whether an unauthorized ticket reference exists", async () => {
+    vi.mocked(ticketProvisioningService.findByReference).mockResolvedValueOnce(
+      undefined,
+    );
+    const authorization = {
+      check: vi.fn(),
+      require: vi.fn(),
+    } as AuthorizationService;
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      {
+        ...runtimeOptions,
+        permissionAuthorization: authorization,
+        permissionAdministration: permissionAdministrationFixture,
+      },
+    );
+    const interaction = lifecycleInteraction("close", undefined, "#999");
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(authorization.require).not.toHaveBeenCalled();
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Authorization denied",
+      allowedMentions: { parse: [] },
+    });
+  });
+
   it("infers an omitted close ticket from the current private thread", async () => {
     const authorization = {
       check: vi.fn(),
