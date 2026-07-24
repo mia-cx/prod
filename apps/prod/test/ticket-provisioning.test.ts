@@ -203,6 +203,38 @@ describe("ticket provisioning", () => {
     }
   });
 
+  it("rechecks authorization and routes pause and resume through the service", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const service = createTicketProvisioningService(
+      settings,
+      store,
+      discordFixture(),
+      { createId: () => "ticket-triage-service" },
+    );
+    const pauseAuthorization = vi.fn().mockResolvedValue(undefined);
+    const resumeAuthorization = vi.fn().mockResolvedValue(undefined);
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+
+      await expect(
+        service.pauseTriage(guild, ticket.id, {}, pauseAuthorization),
+      ).resolves.toMatchObject({ triageStatus: "paused" });
+      await expect(
+        service.resumeTriage(guild, ticket.id, {}, resumeAuthorization),
+      ).resolves.toMatchObject({ triageStatus: "collecting" });
+      expect(pauseAuthorization).toHaveBeenCalledOnce();
+      expect(resumeAuthorization).toHaveBeenCalledOnce();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("compensates a failed final close back to open", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -764,6 +796,14 @@ describe("ticket provisioning", () => {
         "ownership cleanup failed",
       );
       failFinish = false;
+      vi.mocked(discord.captureReporterAccess).mockResolvedValueOnce({
+        ...emptyAccessSnapshot,
+        overwriteExisted: true,
+        permissions: {
+          ...emptyAccessSnapshot.permissions,
+          ViewChannel: "allow",
+        },
+      });
       vi.mocked(discord.restoreReporterAccess).mockClear();
       vi.mocked(discord.reopenTicketThread).mockRejectedValueOnce(
         new Error("cannot reopen thread"),
@@ -2369,6 +2409,35 @@ describe("Discord ticket privacy adapter", () => {
     expect(getThreadMember).toHaveBeenCalledWith(
       Routes.threadMembers("thread-match", "reporter-1"),
     );
+  });
+
+  it("reports whether private-thread membership was newly added", async () => {
+    const getThreadMember = vi
+      .fn()
+      .mockRejectedValueOnce({ code: RESTJSONErrorCodes.UnknownMember })
+      .mockResolvedValueOnce({});
+    const add = vi.fn().mockResolvedValue(undefined);
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const thread = {
+      id: "thread-membership",
+      type: ChannelType.PrivateThread,
+      client: { rest: { get: getThreadMember } },
+      members: { add, remove },
+    };
+    const mockGuild = {
+      channels: { fetch: vi.fn().mockResolvedValue(thread) },
+    } as unknown as Guild;
+    const adapter = createTicketProvisioningDiscord();
+
+    await expect(
+      adapter.addReporter(mockGuild, thread.id, "reporter-1"),
+    ).resolves.toBe(true);
+    await expect(
+      adapter.addReporter(mockGuild, thread.id, "reporter-1"),
+    ).resolves.toBe(false);
+    expect(add).toHaveBeenCalledOnce();
+    await adapter.removeReporter(mockGuild, thread.id, "reporter-1");
+    expect(remove).toHaveBeenCalledWith("reporter-1");
   });
 
   it("creates an invite-only private thread without a hub starter message", async () => {

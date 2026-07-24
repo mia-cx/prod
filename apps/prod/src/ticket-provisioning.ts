@@ -990,12 +990,6 @@ export const createTicketProvisioningService = (
           let ownedSnapshot = snapshot;
           try {
             await recheckAuthorization?.();
-            if (
-              !accessIsShared &&
-              (await store.getReporterAccess(fresh)) !== undefined
-            ) {
-              await store.finishReporterAccess(fresh);
-            }
             ownedSnapshot = await store.beginReporterAccess(fresh, snapshot);
             ownershipStarted = true;
             discordMutationStarted = true;
