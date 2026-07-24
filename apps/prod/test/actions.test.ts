@@ -734,6 +734,26 @@ describe("Prod action runtime", () => {
         expect.any(Function),
       );
       expect(requireAuthorization).toHaveBeenCalledTimes(2);
+      expect(requireAuthorization).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          subject: expect.objectContaining({
+            attributes: expect.objectContaining({
+              discordRoleIds: ["initial-role"],
+            }),
+          }),
+        }),
+      );
+      expect(requireAuthorization).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          subject: expect.objectContaining({
+            attributes: expect.objectContaining({
+              discordRoleIds: ["refreshed-role"],
+            }),
+          }),
+        }),
+      );
       expect(interaction.guild.members.fetch).toHaveBeenCalledTimes(2);
       expect(interaction.guild.members.fetch).toHaveBeenNthCalledWith(1, {
         user: "staff-1",
@@ -1175,9 +1195,25 @@ const lifecycleInteraction = (
   const member = {
     id: "staff-1",
     guild: { id: "guild-1", ownerId: "owner-1" },
-    roles: { cache: new Collection() },
+    roles: {
+      cache: new Collection([
+        ["initial-role", { id: "initial-role" }],
+      ]),
+    },
     permissions: { has: () => false },
   };
+  const refreshedMember = {
+    ...member,
+    roles: {
+      cache: new Collection([
+        ["refreshed-role", { id: "refreshed-role" }],
+      ]),
+    },
+  };
+  const fetchMember = vi
+    .fn()
+    .mockResolvedValueOnce(member)
+    .mockResolvedValue(refreshedMember);
   const interaction: Record<string, unknown> = {
     commandName,
     channelId: "thread-1",
@@ -1185,7 +1221,7 @@ const lifecycleInteraction = (
     guild: {
       id: "guild-1",
       ownerId: "owner-1",
-      members: { fetch: vi.fn().mockResolvedValue(member) },
+      members: { fetch: fetchMember },
     },
     user: { id: "staff-1", username: "staff", globalName: "Staff" },
     options: {

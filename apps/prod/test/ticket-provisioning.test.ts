@@ -135,7 +135,10 @@ describe("ticket provisioning", () => {
       });
 
       await expect(
-        service.close(guild, ticket.id, { actorUserId: "staff-1" }),
+        service.close(guild, ticket.id, {
+          actorUserId: "staff-1",
+          reason: "Resolved",
+        }),
       ).resolves.toMatchObject({ status: "closed", triageStatus: "paused" });
       expect(discord.closeTicketThread).toHaveBeenCalledWith(
         guild,
@@ -148,6 +151,12 @@ describe("ticket provisioning", () => {
         emptyAccessSnapshot,
       );
       await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
+      expect(await store.listEvents(ticket.id)).toContainEqual(
+        expect.objectContaining({
+          eventType: "closed",
+          details: { actorUserId: "staff-1", reason: "Resolved" },
+        }),
+      );
     } finally {
       connection.close();
     }
