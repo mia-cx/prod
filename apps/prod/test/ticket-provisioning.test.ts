@@ -812,6 +812,7 @@ describe("ticket provisioning", () => {
       });
       await service.close(guild, ticket.id);
       vi.mocked(discord.removeReporter).mockClear();
+      vi.mocked(discord.closeTicketThread).mockClear();
       failReopen = true;
 
       await expect(service.reopen(guild, ticket.id)).rejects.toThrow(
@@ -821,6 +822,11 @@ describe("ticket provisioning", () => {
         guild,
         ticket.threadId,
         ticket.reporterUserId,
+      );
+      expect(
+        vi.mocked(discord.removeReporter).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        vi.mocked(discord.closeTicketThread).mock.invocationCallOrder[0]!,
       );
       await expect(realStore.get(ticket.id)).resolves.toMatchObject({
         status: "closed",
@@ -2795,6 +2801,47 @@ describe("Discord ticket privacy adapter", () => {
       "archived:false",
       "locked:false",
     ]);
+  });
+
+  it("temporarily unarchives an idle thread before locking and rearchiving it", async () => {
+    const calls: string[] = [];
+    const thread = {
+      type: ChannelType.PrivateThread,
+      parentId: "hub-1",
+      locked: false,
+      archived: true,
+      setLocked: vi.fn(async (locked: boolean) => {
+        calls.push(`locked:${String(locked)}`);
+        thread.locked = locked;
+      }),
+      setArchived: vi.fn(async (archived: boolean) => {
+        calls.push(`archived:${String(archived)}`);
+        thread.archived = archived;
+      }),
+    };
+    const mockGuild = {
+      channels: { fetch: vi.fn().mockResolvedValue(thread) },
+    } as unknown as Guild;
+    const ticket = {
+      id: "ticket-idle",
+      number: 43,
+      guildId: "guild-1",
+      hubChannelId: "hub-1",
+      reporterUserId: "reporter-1",
+      originatingAlias: "issue",
+      status: "closed",
+      triageStatus: "paused",
+      threadId: "thread-idle",
+      createdAt: "2026-07-17T10:00:00.000Z",
+      updatedAt: "2026-07-17T10:00:00.000Z",
+    } as const;
+
+    await createTicketProvisioningDiscord().closeTicketThread(
+      mockGuild,
+      ticket,
+    );
+
+    expect(calls).toEqual(["archived:false", "locked:true", "archived:true"]);
   });
 
   it("edits deterministic instructions found by marker instead of duplicating them", async () => {

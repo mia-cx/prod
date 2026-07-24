@@ -555,10 +555,17 @@ export const createTicketProvisioningDiscord =
         const thread = await requirePrivateThread(guild, ticket.threadId);
         if (thread.parentId !== ticket.hubChannelId)
           throw new Error("Ticket thread does not belong to its stored hub");
+        const restoreArchived = thread.archived === true;
+        if (restoreArchived && thread.locked !== true) {
+          await thread.setArchived(
+            false,
+            `Prepare to close Prod ticket ${ticket.number}`,
+          );
+        }
         if (thread.locked !== true) {
           await thread.setLocked(true, `Close Prod ticket ${ticket.number}`);
         }
-        if (thread.archived !== true) {
+        if (restoreArchived || thread.archived !== true) {
           await thread.setArchived(true, `Close Prod ticket ${ticket.number}`);
         }
       },
@@ -1031,13 +1038,6 @@ export const createTicketProvisioningService = (
               return persisted;
             }
             const compensationErrors: unknown[] = [];
-            if (discordMutationStarted) {
-              await discord
-                .closeTicketThread(guild, fresh)
-                .catch((compensationError: unknown) =>
-                  compensationErrors.push(compensationError),
-                );
-            }
             if (reporterMembershipAdded && fresh.threadId !== undefined) {
               await discord
                 .removeReporter(
@@ -1045,6 +1045,13 @@ export const createTicketProvisioningService = (
                   fresh.threadId,
                   fresh.reporterUserId,
                 )
+                .catch((compensationError: unknown) =>
+                  compensationErrors.push(compensationError),
+                );
+            }
+            if (discordMutationStarted) {
+              await discord
+                .closeTicketThread(guild, fresh)
                 .catch((compensationError: unknown) =>
                   compensationErrors.push(compensationError),
                 );
