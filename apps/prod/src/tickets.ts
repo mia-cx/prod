@@ -55,8 +55,10 @@ export interface TicketStore {
   ): Promise<Ticket>;
   get(ticketId: string): Promise<Ticket | undefined>;
   findByThread(guildId: string, threadId: string): Promise<Ticket | undefined>;
+  findByNumber(guildId: string, number: number): Promise<Ticket | undefined>;
   listProvisioning(): Promise<readonly Ticket[]>;
   listOpen(): Promise<readonly Ticket[]>;
+  listClosed(): Promise<readonly Ticket[]>;
   hasActiveTickets(guildId: string, hubChannelId: string): Promise<boolean>;
   hasOtherActiveTicket(ticket: Ticket): Promise<boolean>;
   beginReporterAccess(
@@ -429,6 +431,16 @@ export const createSqliteTicketStore = (
         .get();
       return row === undefined ? undefined : ticketFromRow(row);
     },
+    findByNumber: async (guildId: string, number: number) => {
+      assertId("guild id", guildId);
+      if (!Number.isSafeInteger(number) || number <= 0) return undefined;
+      const row = database
+        .select()
+        .from(tickets)
+        .where(and(eq(tickets.guildId, guildId), eq(tickets.number, number)))
+        .get();
+      return row === undefined ? undefined : ticketFromRow(row);
+    },
     listProvisioning: async () =>
       database
         .select()
@@ -441,6 +453,13 @@ export const createSqliteTicketStore = (
         .select()
         .from(tickets)
         .where(eq(tickets.status, "open"))
+        .all()
+        .map(ticketFromRow),
+    listClosed: async () =>
+      database
+        .select()
+        .from(tickets)
+        .where(eq(tickets.status, "closed"))
         .all()
         .map(ticketFromRow),
     hasActiveTickets: async (guildId: string, hubChannelId: string) =>

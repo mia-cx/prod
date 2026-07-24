@@ -108,6 +108,10 @@ export interface TicketProvisioningDiscord {
 export interface TicketProvisioningService {
   open(input: OpenTicketInput): Promise<Ticket>;
   findByThread(guildId: string, threadId: string): Promise<Ticket | undefined>;
+  findByReference(
+    guildId: string,
+    reference: string,
+  ): Promise<Ticket | undefined>;
   close(
     guild: Guild,
     ticketId: string,
@@ -813,6 +817,13 @@ export const createTicketProvisioningService = (
 
   const service: TicketProvisioningService = {
     findByThread: (guildId, threadId) => store.findByThread(guildId, threadId),
+    findByReference: async (guildId, reference) => {
+      const byId = await store.get(reference);
+      if (byId?.guildId === guildId) return byId;
+      const normalized = reference.trim().replace(/^#/u, "");
+      if (!/^[1-9]\d*$/u.test(normalized)) return undefined;
+      return store.findByNumber(guildId, Number(normalized));
+    },
     open: async (input) =>
       executeGuildOperation(input.guild.id, async () => {
         const state = await settings.get(input.guild.id);
@@ -1162,6 +1173,31 @@ export const createTicketProvisioningService = (
               const state = await settings.get(ticket.guildId);
               if (state.hubChannelId !== ticket.hubChannelId) return;
               await discord.reconcileTicketPresentation(guild, ticket);
+            } catch {
+              failed += 1;
+            }
+          }),
+        );
+      }
+      for (const ticket of await store.listClosed()) {
+        await executeGuildOperation(ticket.guildId, () =>
+          execute(`hub:${ticket.guildId}:${ticket.hubChannelId}`, async () => {
+            try {
+              const guild = await resolveGuild(ticket.guildId);
+              await discord.closeTicketThread(guild, ticket);
+              if (!(await store.hasOtherActiveTicket(ticket))) {
+                const snapshot = await store.getReporterAccess(ticket);
+                if (snapshot !== undefined) {
+                  await restoreReporterAccess(
+                    guild,
+                    ticket.hubChannelId,
+                    ticket.reporterUserId,
+                    snapshot,
+                  );
+                  await store.finishReporterAccess(ticket);
+                }
+              }
+              recovered += 1;
             } catch {
               failed += 1;
             }

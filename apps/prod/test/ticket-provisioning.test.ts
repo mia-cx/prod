@@ -85,6 +85,40 @@ const discordFixture = (
 });
 
 describe("ticket provisioning", () => {
+  it("resolves visible ticket numbers and internal IDs within the guild", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const service = createTicketProvisioningService(
+      settings,
+      store,
+      discordFixture(),
+      { createId: () => "ticket-reference" },
+    );
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+
+      await expect(
+        service.findByReference(guild.id, String(ticket.number)),
+      ).resolves.toMatchObject({ id: ticket.id });
+      await expect(
+        service.findByReference(guild.id, `#${ticket.number}`),
+      ).resolves.toMatchObject({ id: ticket.id });
+      await expect(
+        service.findByReference(guild.id, ticket.id),
+      ).resolves.toMatchObject({ id: ticket.id });
+      await expect(
+        service.findByReference("guild-2", ticket.id),
+      ).resolves.toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("closes the final reporter ticket, archives its thread, and releases hub access", async () => {
     const connection = openDatabase(":memory:");
     await applyMigrations(connection.database);
@@ -230,6 +264,44 @@ describe("ticket provisioning", () => {
       ).resolves.toMatchObject({ triageStatus: "collecting" });
       expect(pauseAuthorization).toHaveBeenCalledOnce();
       expect(resumeAuthorization).toHaveBeenCalledOnce();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("reconciles an interrupted closed ticket during startup recovery", async () => {
+    const connection = openDatabase(":memory:");
+    await applyMigrations(connection.database);
+    const store = createSqliteTicketStore(connection.database);
+    const discord = discordFixture();
+    const service = createTicketProvisioningService(settings, store, discord, {
+      createId: () => "ticket-interrupted-close",
+    });
+    try {
+      const ticket = await service.open({
+        guild,
+        reporterUserId: "reporter-1",
+        originatingAlias: "issue",
+      });
+      await store.close(ticket.id);
+      vi.mocked(discord.closeTicketThread).mockClear();
+      vi.mocked(discord.restoreReporterAccess).mockClear();
+
+      await expect(service.recover(async () => guild)).resolves.toEqual({
+        recovered: 1,
+        failed: 0,
+      });
+      expect(discord.closeTicketThread).toHaveBeenCalledWith(
+        guild,
+        expect.objectContaining({ id: ticket.id, status: "closed" }),
+      );
+      expect(discord.restoreReporterAccess).toHaveBeenCalledWith(
+        guild,
+        ticket.hubChannelId,
+        ticket.reporterUserId,
+        emptyAccessSnapshot,
+      );
+      await expect(store.getReporterAccess(ticket)).resolves.toBeUndefined();
     } finally {
       connection.close();
     }

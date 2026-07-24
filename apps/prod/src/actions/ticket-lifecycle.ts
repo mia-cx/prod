@@ -19,7 +19,7 @@ type TicketLifecycleInput = Readonly<{
 const ticketOption = {
   type: ApplicationCommandOptionType.String,
   name: "ticket",
-  description: "Ticket ID; omit inside its private thread",
+  description: "Ticket number or ID; omit inside its private thread",
   required: false,
 } as const;
 
@@ -157,9 +157,11 @@ export const createTicketLifecycleAction = (
   authorization: () => undefined,
   execute: async (invocation, context) => {
     const { guild, userId, channelId } = requireInvocation(invocation.rawEvent);
-    const ticketId =
-      invocation.input.ticketId ??
-      (await tickets.findByThread(guild.id, channelId))?.id;
+    const ticket =
+      invocation.input.ticketId === undefined
+        ? await tickets.findByThread(guild.id, channelId)
+        : await tickets.findByReference(guild.id, invocation.input.ticketId);
+    const ticketId = ticket?.id;
     if (ticketId === undefined) {
       throw new Error("Specify a ticket ID when outside a ticket thread.");
     }

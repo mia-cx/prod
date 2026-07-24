@@ -90,6 +90,7 @@ const supportHubDiscord: SupportHubDiscord = {
 };
 const ticketProvisioningService: TicketProvisioningService = {
   findByThread: vi.fn(),
+  findByReference: vi.fn().mockResolvedValue({ id: "ticket-1" }),
   open: vi.fn().mockResolvedValue({
     id: "ticket-1",
     guildId: "guild-1",
