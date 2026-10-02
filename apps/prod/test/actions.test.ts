@@ -22,6 +22,7 @@ import type {
 import type { GuildSettingsStore } from "../src/guild-settings.js";
 import type { HubPermissionOwnership } from "../src/hub-permission-ownership.js";
 import type { LabelTaxonomyStore } from "../src/label-taxonomy.js";
+import type { PermissionAdministrationService } from "../src/permission-administration.js";
 import {
   createProdActionRuntime,
   logProdActionResult,
@@ -94,6 +95,8 @@ const supportHubDiscord: SupportHubDiscord = {
   deleteInformationMessage: async () => undefined,
 };
 const ticketProvisioningService: TicketProvisioningService = {
+  findByThread: vi.fn(),
+  findByReference: vi.fn().mockResolvedValue({ id: "ticket-1" }),
   open: vi.fn().mockResolvedValue({
     id: "ticket-1",
     guildId: "guild-1",
@@ -107,6 +110,10 @@ const ticketProvisioningService: TicketProvisioningService = {
     createdAt: "2026-07-17T10:00:00.000Z",
     updatedAt: "2026-07-17T10:00:00.000Z",
   }),
+  close: vi.fn(),
+  reopen: vi.fn(),
+  pauseTriage: vi.fn(),
+  resumeTriage: vi.fn(),
   discoverRecoveryThreads: vi.fn().mockResolvedValue({
     discovered: 0,
     failed: 0,
@@ -153,6 +160,9 @@ const runtimeOptions = {
   modelConfigurationStore,
   deploymentCredentialConfigured: false,
 };
+const permissionAdministrationFixture = {
+  hasGuildRecords: vi.fn().mockResolvedValue(true),
+} as unknown as PermissionAdministrationService;
 
 function componentWithCustomId(
   value: unknown,
@@ -675,6 +685,231 @@ describe("Prod action runtime", () => {
     },
   );
 
+  it.each([
+    ["close", undefined, "close", "close"],
+    ["reopen", undefined, "reopen", "reopen"],
+    ["triage", "pause", "pauseTriage", "pause_triage"],
+    ["triage", "resume", "resumeTriage", "resume_triage"],
+  ] as const)(
+    "authorizes and executes /%s %s against the exact ticket",
+    async (command, subcommand, method, verb) => {
+      const requireAuthorization = vi.fn().mockResolvedValue(undefined);
+      const authorization = {
+        check: vi.fn(),
+        require: requireAuthorization,
+      } as AuthorizationService;
+      vi.mocked(ticketProvisioningService[method]).mockClear();
+      vi.mocked(ticketProvisioningService[method]).mockImplementationOnce(
+        async (_guild, _ticketId, _details, recheckAuthorization) => {
+          await recheckAuthorization?.();
+          return undefined as never;
+        },
+      );
+      const runtime = createProdActionRuntime(
+        createLogger({ level: "fatal" }),
+        {
+          ...runtimeOptions,
+          permissionAuthorization: authorization,
+          permissionAdministration: permissionAdministrationFixture,
+        },
+      );
+      const interaction = lifecycleInteraction(command, subcommand);
+
+      await runtime.handleInteraction(interaction as unknown as Interaction);
+
+      expect(requireAuthorization).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: { guildId: "guild-1" },
+          object: { objectType: "ticket", objectId: "ticket-1" },
+          verb,
+        }),
+      );
+      expect(ticketProvisioningService[method]).toHaveBeenCalledWith(
+        interaction.guild,
+        "ticket-1",
+        expect.objectContaining({
+          actorUserId: "staff-1",
+          ...(command === "close" ? { reason: "Resolved" } : {}),
+        }),
+        expect.any(Function),
+      );
+      expect(requireAuthorization).toHaveBeenCalledTimes(2);
+      expect(requireAuthorization).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          subject: expect.objectContaining({
+            attributes: expect.objectContaining({
+              discordRoleIds: ["initial-role"],
+            }),
+          }),
+        }),
+      );
+      expect(requireAuthorization).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          subject: expect.objectContaining({
+            attributes: expect.objectContaining({
+              discordRoleIds: ["refreshed-role"],
+            }),
+          }),
+        }),
+      );
+      expect(interaction.guild.members.fetch).toHaveBeenCalledTimes(2);
+      expect(interaction.guild.members.fetch).toHaveBeenNthCalledWith(1, {
+        user: "staff-1",
+        force: true,
+      });
+      expect(interaction.guild.members.fetch).toHaveBeenNthCalledWith(2, {
+        user: "staff-1",
+        force: true,
+      });
+      expect(interaction.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
+      expect(interaction.editReply).toHaveBeenCalledWith({
+        content: `Ticket ticket-1 ${
+          command === "close"
+            ? "closed"
+            : command === "reopen"
+              ? "reopened"
+              : subcommand === "pause"
+                ? "paused"
+                : "resumed"
+        }.`,
+        allowedMentions: { parse: [] },
+      });
+    },
+  );
+
+  it("registers lifecycle ticket options for thread inference and explicit reopen", () => {
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      {
+        ...runtimeOptions,
+        permissionAuthorization: {
+          check: vi.fn(),
+          require: vi.fn(),
+        } as AuthorizationService,
+        permissionAdministration: permissionAdministrationFixture,
+      },
+    );
+    const commands = new Map(
+      runtime.commands.map((command) => [command.name, command]),
+    );
+
+    expect(commands.get("close")).toMatchObject({
+      options: [
+        { name: "ticket", required: false },
+        { name: "reason", required: false },
+      ],
+    });
+    expect(commands.get("reopen")).toMatchObject({
+      options: [{ name: "ticket", required: true }],
+    });
+    expect(commands.get("triage")).toMatchObject({
+      options: [
+        {
+          name: "pause",
+          options: [{ name: "ticket", required: false }],
+        },
+        {
+          name: "resume",
+          options: [{ name: "ticket", required: false }],
+        },
+      ],
+    });
+  });
+
+  it("does not reveal whether an unauthorized ticket reference exists", async () => {
+    vi.mocked(ticketProvisioningService.findByReference).mockResolvedValueOnce(
+      undefined,
+    );
+    const authorization = {
+      check: vi.fn(),
+      require: vi.fn(),
+    } as AuthorizationService;
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      {
+        ...runtimeOptions,
+        permissionAuthorization: authorization,
+        permissionAdministration: permissionAdministrationFixture,
+      },
+    );
+    const interaction = lifecycleInteraction("close", undefined, "#999");
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(authorization.require).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: { guildId: "guild-1" },
+        object: { objectType: "settings", objectId: "*" },
+        verb: "close",
+      }),
+    );
+    expect(interaction.guild.members.fetch).toHaveBeenCalledWith({
+      user: "staff-1",
+      force: true,
+    });
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Authorization denied",
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it("presents the same denial for an existing unauthorized ticket", async () => {
+    const authorization = {
+      check: vi.fn(),
+      require: vi.fn().mockRejectedValue(new Error("Authorization denied")),
+    } as AuthorizationService;
+    const runtime = createProdActionRuntime(
+      createLogger({ level: "fatal" }),
+      {
+        ...runtimeOptions,
+        permissionAuthorization: authorization,
+        permissionAdministration: permissionAdministrationFixture,
+      },
+    );
+    const interaction = lifecycleInteraction("close", undefined, "#1");
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(authorization.require).toHaveBeenCalledOnce();
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Authorization denied",
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it("infers an omitted close ticket from the current private thread", async () => {
+    const authorization = {
+      check: vi.fn(),
+      require: vi.fn().mockResolvedValue(undefined),
+    } as AuthorizationService;
+    vi.mocked(ticketProvisioningService.findByThread).mockResolvedValueOnce({
+      id: "ticket-in-thread",
+    } as never);
+    const runtime = createProdActionRuntime(createLogger({ level: "fatal" }), {
+      ...runtimeOptions,
+      permissionAuthorization: authorization,
+      permissionAdministration: permissionAdministrationFixture,
+    });
+    const interaction = lifecycleInteraction("close", undefined, null);
+
+    await runtime.handleInteraction(interaction as unknown as Interaction);
+
+    expect(ticketProvisioningService.findByThread).toHaveBeenCalledWith(
+      "guild-1",
+      "thread-1",
+    );
+    expect(ticketProvisioningService.close).toHaveBeenCalledWith(
+      interaction.guild,
+      "ticket-in-thread",
+      expect.objectContaining({ actorUserId: "staff-1" }),
+      expect.any(Function),
+    );
+  });
+
   it("presents persistent ticket admission rejection without provisioning", async () => {
     vi.mocked(ticketProvisioningService.open).mockRejectedValueOnce(
       new TicketAdmissionError(
@@ -943,7 +1178,80 @@ const ticketInteraction = (
     reply: vi.fn().mockResolvedValue(undefined),
   };
   return interaction as typeof interaction & {
-    guild: { id: string };
+    guild: {
+      id: string;
+      members: { fetch: ReturnType<typeof vi.fn> };
+    };
+    deferReply: ReturnType<typeof vi.fn>;
+    editReply: ReturnType<typeof vi.fn>;
+  };
+};
+
+const lifecycleInteraction = (
+  commandName: "close" | "reopen" | "triage",
+  subcommand?: "pause" | "resume",
+  ticketId: string | null = "ticket-1",
+) => {
+  const member = {
+    id: "staff-1",
+    guild: { id: "guild-1", ownerId: "owner-1" },
+    roles: {
+      cache: new Collection([
+        ["initial-role", { id: "initial-role" }],
+      ]),
+    },
+    permissions: { has: () => false },
+  };
+  const refreshedMember = {
+    ...member,
+    roles: {
+      cache: new Collection([
+        ["refreshed-role", { id: "refreshed-role" }],
+      ]),
+    },
+  };
+  const fetchMember = vi
+    .fn()
+    .mockResolvedValueOnce(member)
+    .mockResolvedValue(refreshedMember);
+  const interaction: Record<string, unknown> = {
+    commandName,
+    channelId: "thread-1",
+    guildId: "guild-1",
+    guild: {
+      id: "guild-1",
+      ownerId: "owner-1",
+      members: { fetch: fetchMember },
+    },
+    user: { id: "staff-1", username: "staff", globalName: "Staff" },
+    options: {
+      getString: (name: string) =>
+        name === "ticket" ? ticketId : name === "reason" ? "Resolved" : null,
+      getSubcommand: () => subcommand,
+    },
+    deferred: false,
+    replied: false,
+    isAutocomplete: () => false,
+    isChatInputCommand: () => true,
+    isMessageContextMenuCommand: () => false,
+    isUserContextMenuCommand: () => false,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isMentionableSelectMenu: () => false,
+    isChannelSelectMenu: () => false,
+    isModalSubmit: () => false,
+    deferReply: vi.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+    }),
+    editReply: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
+  };
+  return interaction as typeof interaction & {
+    guild: {
+      id: string;
+      members: { fetch: ReturnType<typeof vi.fn> };
+    };
     deferReply: ReturnType<typeof vi.fn>;
     editReply: ReturnType<typeof vi.fn>;
   };

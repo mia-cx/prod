@@ -18,6 +18,8 @@ export type TicketStatus = "provisioning" | "open" | "closed" | "failed";
 export type TriageStatus = "collecting" | "ready" | "paused";
 export type AssignmentMethod = "self_claim" | "delegated";
 export type TicketEventType = (typeof ticketEvents.$inferInsert)["eventType"];
+export type TicketStateTransition =
+  "close" | "reopen" | "pauseTriage" | "resumeTriage";
 
 export type Ticket = Readonly<{
   id: string;
@@ -66,6 +68,8 @@ export interface TicketStore {
     }>,
   ): Promise<Ticket>;
   get(ticketId: string): Promise<Ticket | undefined>;
+  findByThread(guildId: string, threadId: string): Promise<Ticket | undefined>;
+  findByNumber(guildId: string, number: number): Promise<Ticket | undefined>;
   getByThreadId(threadId: string): Promise<Ticket | undefined>;
   listAssignees(ticketId: string): Promise<readonly TicketAssignee[]>;
   addAssignee(
@@ -91,6 +95,7 @@ export interface TicketStore {
   ): Promise<Readonly<{ removed: boolean; assigneeCount: number }>>;
   listProvisioning(): Promise<readonly Ticket[]>;
   listOpen(): Promise<readonly Ticket[]>;
+  listClosed(): Promise<readonly Ticket[]>;
   hasActiveTickets(guildId: string, hubChannelId: string): Promise<boolean>;
   hasOtherActiveTicket(ticket: Ticket): Promise<boolean>;
   beginReporterAccess(
@@ -132,6 +137,22 @@ export interface TicketStore {
   ): Promise<void>;
   markOpen(ticketId: string): Promise<void>;
   markFailed(ticketId: string, failureReason: string): Promise<void>;
+  close(
+    ticketId: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket>;
+  reopen(
+    ticketId: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket>;
+  pauseTriage(
+    ticketId: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket>;
+  resumeTriage(
+    ticketId: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket>;
   recordEvent(
     ticketId: string,
     eventType: TicketEventType,
@@ -159,6 +180,21 @@ export class TicketAdmissionError extends Error {
   }
 }
 
+export class TicketStateTransitionError extends Error {
+  override readonly name = "TicketStateTransitionError";
+
+  constructor(
+    readonly ticketId: string,
+    readonly transition: TicketStateTransition,
+    readonly status: TicketStatus,
+    readonly triageStatus: TriageStatus,
+  ) {
+    super(
+      `Ticket ${ticketId} cannot ${transition} from ${status}/${triageStatus}`,
+    );
+  }
+}
+
 export class TicketAssignmentStateError extends Error {
   override readonly name = "TicketAssignmentStateError";
   readonly code = "not_open";
@@ -174,6 +210,16 @@ export const DEFAULT_TICKET_ADMISSION = Object.freeze({
   reporterWindowMs: 60_000,
   maxProvisioningTicketsPerGuild: 8,
 });
+
+const isSqliteBusyError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  typeof error.code === "string" &&
+  error.code.startsWith("SQLITE_BUSY");
+
+const yieldBeforeTransitionRetry = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve));
 
 const assertId = (label: string, value: string): void => {
   if (value.trim().length === 0)
@@ -269,6 +315,58 @@ export const createSqliteTicketStore = (
     }
     return row;
   };
+  const transitionTicket = async (
+    ticketId: string,
+    transition: TicketStateTransition,
+    isAllowed: (row: typeof tickets.$inferSelect) => boolean,
+    updates: Readonly<{
+      status?: TicketStatus;
+      triageStatus?: TriageStatus;
+    }>,
+    eventType: TicketEventType,
+    details: Readonly<Record<string, unknown>>,
+  ): Promise<Ticket> => {
+    assertId("ticket id", ticketId);
+    for (let attempt = 0; ; attempt += 1) {
+      let updatedRow: typeof tickets.$inferSelect | undefined;
+      try {
+        database.transaction((transaction) => {
+          const row = transaction
+            .select()
+            .from(tickets)
+            .where(eq(tickets.id, ticketId))
+            .get();
+          if (row === undefined)
+            throw new Error(`Ticket ${ticketId} does not exist`);
+          if (!isAllowed(row)) {
+            throw new TicketStateTransitionError(
+              ticketId,
+              transition,
+              row.status,
+              row.triageStatus,
+            );
+          }
+          const timestamp = now();
+          updatedRow = { ...row, ...updates, updatedAt: timestamp };
+          transaction
+            .update(tickets)
+            .set({ ...updates, updatedAt: timestamp })
+            .where(eq(tickets.id, ticketId))
+            .run();
+          insertEvent(transaction, row, eventType, details, timestamp);
+        });
+      } catch (error) {
+        if (!isSqliteBusyError(error) || attempt >= 2) throw error;
+        await yieldBeforeTransitionRetry();
+        continue;
+      }
+      if (updatedRow === undefined) {
+        throw new Error("Ticket transition transaction did not run");
+      }
+      return ticketFromRow(updatedRow);
+    }
+  };
+
   const requireOpenForAssignment = (
     writer: Pick<ProdDatabase, "select">,
     ticketId: string,
@@ -390,6 +488,28 @@ export const createSqliteTicketStore = (
         .select()
         .from(tickets)
         .where(eq(tickets.id, ticketId))
+        .get();
+      return row === undefined ? undefined : ticketFromRow(row);
+    },
+    findByThread: async (guildId: string, threadId: string) => {
+      assertId("guild id", guildId);
+      assertId("thread id", threadId);
+      const row = database
+        .select()
+        .from(tickets)
+        .where(
+          and(eq(tickets.guildId, guildId), eq(tickets.threadId, threadId)),
+        )
+        .get();
+      return row === undefined ? undefined : ticketFromRow(row);
+    },
+    findByNumber: async (guildId: string, number: number) => {
+      assertId("guild id", guildId);
+      if (!Number.isSafeInteger(number) || number <= 0) return undefined;
+      const row = database
+        .select()
+        .from(tickets)
+        .where(and(eq(tickets.guildId, guildId), eq(tickets.number, number)))
         .get();
       return row === undefined ? undefined : ticketFromRow(row);
     },
@@ -565,6 +685,13 @@ export const createSqliteTicketStore = (
         .select()
         .from(tickets)
         .where(eq(tickets.status, "open"))
+        .all()
+        .map(ticketFromRow),
+    listClosed: async () =>
+      database
+        .select()
+        .from(tickets)
+        .where(eq(tickets.status, "closed"))
         .all()
         .map(ticketFromRow),
     hasActiveTickets: async (guildId: string, hubChannelId: string) =>
@@ -777,6 +904,45 @@ export const createSqliteTicketStore = (
         );
       });
     },
+    close: async (ticketId: string, details = {}) =>
+      transitionTicket(
+        ticketId,
+        "close",
+        ({ status }) => status === "open",
+        { status: "closed", triageStatus: "paused" },
+        "closed",
+        details,
+      ),
+    reopen: async (ticketId: string, details = {}) =>
+      transitionTicket(
+        ticketId,
+        "reopen",
+        ({ status }) => status === "closed",
+        { status: "open", triageStatus: "paused" },
+        "reopened",
+        details,
+      ),
+    pauseTriage: async (ticketId: string, details = {}) =>
+      transitionTicket(
+        ticketId,
+        "pauseTriage",
+        ({ status, triageStatus }) =>
+          status === "open" && triageStatus === "collecting",
+        { triageStatus: "paused" },
+        "triage_paused",
+        details,
+      ),
+    resumeTriage: async (ticketId: string, details = {}) =>
+      transitionTicket(
+        ticketId,
+        "resumeTriage",
+        ({ status, triageStatus }) =>
+          status === "open" &&
+          (triageStatus === "ready" || triageStatus === "paused"),
+        { triageStatus: "collecting" },
+        "triage_resumed",
+        details,
+      ),
     recordEvent: async (
       ticketId: string,
       eventType: TicketEventType,

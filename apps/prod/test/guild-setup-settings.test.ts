@@ -48,7 +48,13 @@ const operatorId = "123456789012345676";
 
 const connections: DatabaseConnection[] = [];
 const ticketProvisioningService: TicketProvisioningService = {
+  findByThread: vi.fn(),
+  findByReference: vi.fn(),
   open: vi.fn(),
+  close: vi.fn(),
+  reopen: vi.fn(),
+  pauseTriage: vi.fn(),
+  resumeTriage: vi.fn(),
   discoverRecoveryThreads: vi.fn().mockResolvedValue({
     discovered: 0,
     failed: 0,
