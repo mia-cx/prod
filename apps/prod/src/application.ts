@@ -115,23 +115,6 @@ export const startProd = async (
     const labelTaxonomyStore = createSqliteLabelTaxonomyStore(
       connection.database,
     );
-    const triage = createTriageService({
-      tickets: ticketStore,
-      store: createSqliteTriageStore(connection.database),
-      settings: guildSettingsStore,
-      labels: labelTaxonomyStore,
-      models: modelConfigurationStore,
-      client: createOpenRouterClient(),
-      authorization: permissionAuthorization,
-      discord: createTriageDiscord(),
-      logger,
-      ...(config.openRouterApiKey === undefined
-        ? {}
-        : { deploymentKey: config.openRouterApiKey }),
-      ...(config.triageRateLimits === undefined
-        ? {}
-        : { rateLimits: config.triageRateLimits }),
-    });
     const actions = createProdActionRuntime(logger, {
       textCommandPrefix: config.textCommandPrefix,
       guildSettingsStore,
@@ -147,6 +130,25 @@ export const startProd = async (
       permissionAdministration,
       permissionAuthorization,
       ticketStore,
+    });
+    const triage = createTriageService({
+      tickets: ticketStore,
+      store: createSqliteTriageStore(connection.database),
+      settings: guildSettingsStore,
+      labels: labelTaxonomyStore,
+      models: modelConfigurationStore,
+      client: createOpenRouterClient(),
+      authorization: permissionAuthorization,
+      discord: createTriageDiscord({
+        isApplicationOperator: actions.isApplicationOperator,
+      }),
+      logger,
+      ...(config.openRouterApiKey === undefined
+        ? {}
+        : { deploymentKey: config.openRouterApiKey }),
+      ...(config.triageRateLimits === undefined
+        ? {}
+        : { rateLimits: config.triageRateLimits }),
     });
     gateway =
       dependencies.gateway ??

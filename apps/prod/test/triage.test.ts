@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import type { Message } from "discord.js";
+import { Collection, type Message } from "discord.js";
 import { createSqliteModelConfigurationStore } from "@mia-cx/protocord-model-settings";
 import {
   createSqlitePermissionRuleStore,
@@ -19,6 +19,7 @@ import {
 } from "../src/authorization.js";
 import { createOpenRouterClient } from "../src/openrouter.js";
 import { createTriageService, type TriageDiscordPort } from "../src/triage.js";
+import { createTriageDiscord } from "../src/triage-discord.js";
 import {
   ticketAssigneeSuggestions,
   ticketLabels,
@@ -231,6 +232,47 @@ const setup = async (
 };
 
 describe("AI reporter triage", () => {
+  it("includes an application-operator-only member as an eligible suggestion", async () => {
+    const { service, fetch, discord, db } = await setup({ defaultSetup: true });
+    const guild = { id: "guild-1", ownerId: "someone-else" };
+    const member = (id: string) => ({
+      id,
+      guild,
+      user: { bot: false },
+      roles: { cache: new Collection() },
+      permissions: { has: () => false },
+    });
+    const list = vi.fn().mockResolvedValue(
+      new Collection([
+        ["operator-1", member("operator-1")],
+        ["regular-member", member("regular-member")],
+      ]),
+    );
+    discord.candidates.mockImplementation(
+      createTriageDiscord({
+        isApplicationOperator: (id) => id === "operator-1",
+      }).candidates,
+    );
+    fetch.mockResolvedValueOnce(
+      tool("complete_triage", {
+        internal_summary: "private diagnostic context",
+        reporter_summary: "we have recorded the reported failure.",
+        labels: [],
+        suggested_assignee_ids: ["operator-1"],
+      }),
+    );
+    await service.handleReporterMessage({
+      ...message(),
+      guild: { ...guild, members: { list } },
+    } as unknown as Message);
+    const reference = JSON.parse(fetch.mock.calls[0]![1]!.body as string)
+      .messages[1].content as string;
+    expect(reference).toContain('"eligible_assignee_ids":["operator-1"]');
+    expect(db.select().from(ticketAssigneeSuggestions).all()).toEqual([
+      expect.objectContaining({ userId: "operator-1" }),
+    ]);
+    expect(discord.post).toHaveBeenCalledTimes(1);
+  });
   it("posts a follow-up for a new ticket in a default guild with no manual permission rules", async () => {
     const { service, fetch, discord, rules } = await setup({
       defaultSetup: true,

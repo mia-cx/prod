@@ -1,7 +1,11 @@
 import { createDiscordUserSubject } from "@protocord/permissions";
 import type { TriageDiscordPort } from "./triage.js";
 
-export const createTriageDiscord = (): TriageDiscordPort => ({
+export const createTriageDiscord = (
+  options: Readonly<{
+    isApplicationOperator: (userId: string) => boolean;
+  }>,
+): TriageDiscordPort => ({
   recentMessages: async (message) => {
     const recent = await message.channel.messages.fetch({
       limit: 50,
@@ -30,7 +34,7 @@ export const createTriageDiscord = (): TriageDiscordPort => ({
             createDiscordUserSubject(
               member,
               { guildId: message.guild.id },
-              { isApplicationOperator: () => false },
+              { isApplicationOperator: options.isApplicationOperator },
             ),
           );
       }

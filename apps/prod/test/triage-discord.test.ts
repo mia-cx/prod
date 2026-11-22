@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createTriageDiscord } from "../src/triage-discord.js";
 
+const discord = () =>
+  createTriageDiscord({ isApplicationOperator: () => false });
+
 describe("triage Discord port", () => {
   it("reads history before the triggering message and identifies only this bot as assistant", async () => {
     const entries = [
@@ -31,7 +34,7 @@ describe("triage Discord port", () => {
       channel: { messages: { fetch } },
       client: { user: { id: "prod" } },
     } as unknown as Message;
-    expect(await createTriageDiscord().recentMessages(input)).toEqual([
+    expect(await discord().recentMessages(input)).toEqual([
       { id: "1", authorId: "prod", content: "question", isAssistant: true },
       { id: "2", authorId: "other-bot", content: "other", isAssistant: false },
       { id: "3", authorId: "prod", content: "webhook", isAssistant: false },
@@ -44,13 +47,13 @@ describe("triage Discord port", () => {
     const input = {
       channel: { isThread: () => true, send },
     } as unknown as Message;
-    await createTriageDiscord().post(input, "question?");
+    await discord().post(input, "question?");
     expect(send).toHaveBeenCalledWith({
       content: "question?",
       allowedMentions: { parse: [] },
     });
     await expect(
-      createTriageDiscord().post(
+      discord().post(
         { channel: { isThread: () => false } } as unknown as Message,
         "question?",
       ),
@@ -58,12 +61,10 @@ describe("triage Discord port", () => {
   });
 
   it("returns no candidates outside guilds or for empty membership", async () => {
-    expect(
-      await createTriageDiscord().candidates({ guild: null } as Message),
-    ).toEqual([]);
+    expect(await discord().candidates({ guild: null } as Message)).toEqual([]);
     const list = vi.fn().mockResolvedValue(new Collection());
     expect(
-      await createTriageDiscord().candidates({
+      await discord().candidates({
         guild: { id: "guild-1", members: { list } },
       } as unknown as Message),
     ).toEqual([]);
@@ -89,7 +90,7 @@ describe("triage Discord port", () => {
       .fn()
       .mockResolvedValueOnce(first)
       .mockResolvedValueOnce(new Collection([["last", member("last", false)]]));
-    const subjects = await createTriageDiscord().candidates({
+    const subjects = await discord().candidates({
       guild: { ...guild, members: { list } },
     } as unknown as Message);
     expect(subjects.map((subject) => subject.subjectId)).toEqual(["0", "last"]);
