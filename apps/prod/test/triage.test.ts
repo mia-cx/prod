@@ -243,7 +243,16 @@ describe("AI reporter triage", () => {
   });
 
   it("lets an explicit guild deny override the default service grant", async () => {
-    const { service, rules, discord, fetch, dependencies } = await setup({
+    const {
+      service,
+      rules,
+      discord,
+      fetch,
+      dependencies,
+      complete,
+      db,
+      models,
+    } = await setup({
       defaultSetup: true,
     });
     await rules.upsert({
@@ -266,14 +275,22 @@ describe("AI reporter triage", () => {
         verb: "view_metadata",
       }),
     ).rejects.toThrow("Authorization denied");
-    await service.handleReporterMessage(message());
-    expect(fetch).toHaveBeenCalledTimes(3);
+    fetch.mockImplementation(async () => complete());
+    const resolve = vi.fn(models.resolve);
+    await createTriageService({
+      ...dependencies,
+      models: { resolve },
+    }).handleReporterMessage(message());
+    expect(fetch).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(db.select().from(ticketTriageResults).all()).toEqual([]);
     expect(discord.post).not.toHaveBeenCalled();
     await rules.remove({
       ruleId: "disable-ai",
       context: { guildId: "guild-1" },
       actor: { actorType: "user", actorId: "admin" },
     });
+    fetch.mockImplementation(async () => tool());
     await service.handleReporterMessage(message("message-2"));
     expect(discord.post).toHaveBeenCalledTimes(1);
   });
@@ -564,25 +581,24 @@ describe("AI reporter triage", () => {
 
   it("rechecks service authorization for every tool without bypassing explicit denial", async () => {
     const { service, fetch, rules, discord } = await setup();
-    await rules.upsert({
-      context: { guildId: "guild-1" },
-      actor: { actorType: "user", actorId: "admin" },
-      rule: {
-        id: "deny-view",
+    fetch.mockImplementation(async () => {
+      await rules.upsert({
         context: { guildId: "guild-1" },
-        subject: { subjectType: "service", subjectId: "prod-ai" },
-        object: { objectType: "ticket", objectId: "ticket-1" },
-        verb: "view_metadata",
-        permit: "deny",
-      },
+        actor: { actorType: "user", actorId: "admin" },
+        rule: {
+          id: "deny-view",
+          context: { guildId: "guild-1" },
+          subject: { subjectType: "service", subjectId: "prod-ai" },
+          object: { objectType: "ticket", objectId: "ticket-1" },
+          verb: "view_metadata",
+          permit: "deny",
+        },
+      });
+      return tool();
     });
     await service.handleReporterMessage(message());
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(discord.post).not.toHaveBeenCalled();
-    expect(
-      JSON.parse(fetch.mock.calls[1]![1]!.body as string).messages.at(-1)
-        .content,
-    ).toContain("authorization denied");
   });
 
   it("escapes injected delimiters and bounds transcript count and characters", async () => {

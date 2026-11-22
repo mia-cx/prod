@@ -147,6 +147,10 @@ export const createTriageService = (
     const ticket = await dependencies.tickets.get(ticketId);
     if (!ticket || !(await dependencies.store.isTriageEligible(ticketId)))
       return;
+    if (!(await allowed(ticket, "view_metadata"))) {
+      warn("authorization_denied");
+      return;
+    }
     const timestamp = now();
     requests = requests.filter(
       (entry) => entry.at > timestamp - limits.windowMs,
@@ -222,6 +226,10 @@ export const createTriageService = (
     ];
     for (let round = 0; round < 3; round++) {
       if (!(await dependencies.store.isTriageEligible(ticketId))) return;
+      if (!(await allowed(ticket, "view_metadata"))) {
+        warn("authorization_denied");
+        return;
+      }
       const at = now();
       requests = requests.filter((entry) => entry.at > at - limits.windowMs);
       if (
