@@ -1,5 +1,6 @@
 import {
   authorizationContextsEqual,
+  AuthorizationDeniedError,
   createAuthorizationService,
   InvalidAuthorizationInputError,
   validateAuthorizationContext,
@@ -9,6 +10,7 @@ import {
   type AuthorizationService,
   type PermissionRule,
   type PermissionRuleStore,
+  type PermissionVerb,
   type RemovePermissionRuleInput,
   type RuleObject,
   type UpsertPermissionRuleInput,
@@ -90,6 +92,13 @@ export type CreateProdAuthorizationServiceOptions = Readonly<{
   validateResource: AuthorizationResourceValidator;
 }>;
 
+export const PROD_AI_DEFAULT_VERBS: readonly PermissionVerb[] = Object.freeze([
+  "view_metadata",
+  "complete_triage",
+  "label",
+  "suggest_assignee",
+]);
+
 export const createProdAuthorizationService = (
   options: CreateProdAuthorizationServiceOptions,
 ): AuthorizationService => {
@@ -97,14 +106,29 @@ export const createProdAuthorizationService = (
     store: createProdPermissionRuleStore(options.store),
     validateResource: options.validateResource,
   });
+  const check = async (input: AuthorizationCheck) => {
+    assertProdAuthorizationContext(input.context);
+    const decision = await service.check(input);
+    if (
+      decision.reason === "default_deny" &&
+      input.subject.subjectType === "service" &&
+      input.subject.subjectId === "prod-ai" &&
+      input.object.objectType === "ticket" &&
+      PROD_AI_DEFAULT_VERBS.includes(input.verb)
+    ) {
+      return {
+        allowed: true,
+        reason: "matched_rule" as const,
+        matchedRuleIds: [`prod:default:prod-ai:${input.verb}`],
+      };
+    }
+    return decision;
+  };
   return Object.freeze({
-    check: async (input: AuthorizationCheck) => {
-      assertProdAuthorizationContext(input.context);
-      return await service.check(input);
-    },
+    check,
     require: async (input: AuthorizationCheck) => {
-      assertProdAuthorizationContext(input.context);
-      await service.require(input);
+      const decision = await check(input);
+      if (!decision.allowed) throw new AuthorizationDeniedError(decision);
     },
   });
 };

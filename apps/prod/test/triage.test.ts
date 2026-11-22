@@ -83,6 +83,7 @@ const staff: UserAuthorizationSubject = {
 const setup = async (
   options: {
     credential?: boolean;
+    defaultSetup?: boolean;
     timeoutMs?: number;
     rateLimits?: { global: number; guild: number; windowMs: number };
   } = {},
@@ -93,22 +94,26 @@ const setup = async (
   await applyMigrations(db);
   const ticketStore = createSqliteTicketStore(db);
   const triageStore = createSqliteTriageStore(db);
-  const timestamp = "2026-11-22T00:00:00.000Z";
-  db.insert(tickets)
-    .values({
-      id: "ticket-1",
-      number: 1,
-      guildId: "guild-1",
-      hubChannelId: "hub-1",
-      threadId: "thread-1",
-      reporterUserId: "reporter-1",
-      originatingAlias: "issue",
-      status: "open",
-      triageStatus: "collecting",
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    })
-    .run();
+  await ticketStore.create({
+    id: "ticket-1",
+    guildId: "guild-1",
+    hubChannelId: "hub-1",
+    reporterUserId: "reporter-1",
+    originatingAlias: "issue",
+  });
+  await ticketStore.recordProgress(
+    "ticket-1",
+    "thread_created",
+    {},
+    { threadId: "thread-1" },
+  );
+  await ticketStore.recordProgress(
+    "ticket-1",
+    "instructions_posted",
+    {},
+    { openingMessageId: "opening-1" },
+  );
+  await ticketStore.markOpen("ticket-1");
   const models = createSqliteModelConfigurationStore(db, {
     encryptionKey: Buffer.alloc(32, 7).toString("base64"),
     defaultModelId: "test/model",
@@ -120,12 +125,14 @@ const setup = async (
       apiKey: key,
     });
   const rules = createSqlitePermissionRuleStore(db);
-  for (const verb of [
-    "view_metadata",
-    "complete_triage",
-    "label",
-    "suggest_assignee",
-  ] as const) {
+  for (const verb of options.defaultSetup
+    ? []
+    : ([
+        "view_metadata",
+        "complete_triage",
+        "label",
+        "suggest_assignee",
+      ] as const)) {
     await rules.upsert({
       context: { guildId: "guild-1" },
       actor: { actorType: "user", actorId: "admin" },
@@ -139,18 +146,19 @@ const setup = async (
       },
     });
   }
-  await rules.upsert({
-    context: { guildId: "guild-1" },
-    actor: { actorType: "user", actorId: "admin" },
-    rule: {
-      id: "staff-claim",
+  if (!options.defaultSetup)
+    await rules.upsert({
       context: { guildId: "guild-1" },
-      subject: { subjectType: "role", subjectId: "support-role" },
-      object: { objectType: "ticket", objectId: "*" },
-      verb: "claim_self",
-      permit: "allow",
-    },
-  });
+      actor: { actorType: "user", actorId: "admin" },
+      rule: {
+        id: "staff-claim",
+        context: { guildId: "guild-1" },
+        subject: { subjectType: "role", subjectId: "support-role" },
+        object: { objectType: "ticket", objectId: "*" },
+        verb: "claim_self",
+        permit: "allow",
+      },
+    });
   const authorization = createProdAuthorizationService({
     store: rules,
     validateResource: createProdAuthorizationResourceValidator(ticketStore),
@@ -173,10 +181,12 @@ const setup = async (
   };
   const logger = { warn: vi.fn() };
   let clock = 100;
+  const settings = createSqliteGuildSettingsStore(db);
+  await settings.initialize("guild-1");
   const dependencies = {
     tickets: ticketStore,
     store: triageStore,
-    settings: createSqliteGuildSettingsStore(db),
+    settings,
     labels,
     models,
     client: createOpenRouterClient({
@@ -221,6 +231,53 @@ const setup = async (
 };
 
 describe("AI reporter triage", () => {
+  it("posts a follow-up for a new ticket in a default guild with no manual permission rules", async () => {
+    const { service, fetch, discord, rules } = await setup({
+      defaultSetup: true,
+    });
+    expect(await rules.listForContext({ guildId: "guild-1" })).toEqual([]);
+    const input = message();
+    await expect(service.handleReporterMessage(input)).resolves.toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(discord.post).toHaveBeenCalledWith(input, "what did you expect?");
+  });
+
+  it("lets an explicit guild deny override the default service grant", async () => {
+    const { service, rules, discord, fetch, dependencies } = await setup({
+      defaultSetup: true,
+    });
+    await rules.upsert({
+      context: { guildId: "guild-1" },
+      actor: { actorType: "user", actorId: "admin" },
+      rule: {
+        id: "disable-ai",
+        context: { guildId: "guild-1" },
+        subject: { subjectType: "service", subjectId: "prod-ai" },
+        object: { objectType: "ticket", objectId: "*" },
+        verb: "view_metadata",
+        permit: "deny",
+      },
+    });
+    await expect(
+      dependencies.authorization.require({
+        context: { guildId: "guild-1" },
+        subject: { subjectType: "service", subjectId: "prod-ai" },
+        object: { objectType: "ticket", objectId: "ticket-1" },
+        verb: "view_metadata",
+      }),
+    ).rejects.toThrow("Authorization denied");
+    await service.handleReporterMessage(message());
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(discord.post).not.toHaveBeenCalled();
+    await rules.remove({
+      ruleId: "disable-ai",
+      context: { guildId: "guild-1" },
+      actor: { actorType: "user", actorId: "admin" },
+    });
+    await service.handleReporterMessage(message("message-2"));
+    expect(discord.post).toHaveBeenCalledTimes(1);
+  });
+
   it("calls OpenRouter with configured model, tools and bounded untrusted context, then posts a question", async () => {
     const { service, fetch, discord } = await setup();
     discord.recentMessages.mockResolvedValue([

@@ -188,4 +188,67 @@ describe("Prod authorization policy boundary", () => {
       matchedRuleIds: [],
     });
   });
+
+  it("grants prod-ai exactly its four built-in ticket permissions", async () => {
+    const service = createProdAuthorizationService({
+      store: backingStore(),
+      validateResource: () => true,
+    });
+    for (const verb of [
+      "view_metadata",
+      "complete_triage",
+      "label",
+      "suggest_assignee",
+    ] as const) {
+      const input = { ...check({ guildId: "guild-1" }), verb };
+      await expect(service.check(input)).resolves.toMatchObject({
+        allowed: true,
+        matchedRuleIds: [`prod:default:prod-ai:${verb}`],
+      });
+      await expect(service.require(input)).resolves.toBeUndefined();
+    }
+    for (const verb of [
+      "claim_self",
+      "unclaim_self",
+      "assign_other",
+      "unassign_other",
+      "pause_triage",
+      "resume_triage",
+      "close",
+      "reopen",
+      "view",
+      "manage",
+    ] as const) {
+      await expect(
+        service.check({ ...check({ guildId: "guild-1" }), verb }),
+      ).resolves.toMatchObject({ allowed: false });
+    }
+    await expect(
+      service.check({
+        ...check({ guildId: "guild-1" }),
+        verb: "view_metadata",
+        subject: { subjectType: "service", subjectId: "other" },
+      }),
+    ).resolves.toMatchObject({ allowed: false });
+    await expect(
+      service.check({
+        ...check({ guildId: "guild-1" }),
+        verb: "view_metadata",
+        object: { objectType: "settings", objectId: "*" },
+      }),
+    ).resolves.toMatchObject({ allowed: false });
+  });
+
+  it("does not bypass resource validation for default service grants", async () => {
+    const service = createProdAuthorizationService({
+      store: backingStore(),
+      validateResource: () => false,
+    });
+    await expect(
+      service.check({
+        ...check({ guildId: "guild-1" }),
+        verb: "view_metadata",
+      }),
+    ).rejects.toThrow("Authorization object does not belong");
+  });
 });
