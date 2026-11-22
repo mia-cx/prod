@@ -27,6 +27,10 @@ import {
   createTicketProvisioningService,
 } from "./ticket-provisioning.js";
 import { createSqliteTicketStore } from "./tickets.js";
+import { createOpenRouterClient } from "./openrouter.js";
+import { createSqliteTriageStore } from "./triage-store.js";
+import { createTriageService } from "./triage.js";
+import { createTriageDiscord } from "./triage-discord.js";
 
 export type RunningProd = Readonly<{
   stop: (reason?: string) => Promise<void>;
@@ -101,24 +105,50 @@ export const startProd = async (
         );
       },
     });
+    const modelConfigurationStore = createSqliteModelConfigurationStore(
+      connection.database,
+      {
+        encryptionKey: config.apiKeyEncryptionKey,
+        defaultModelId: config.defaultTriageModel,
+      },
+    );
+    const labelTaxonomyStore = createSqliteLabelTaxonomyStore(
+      connection.database,
+    );
     const actions = createProdActionRuntime(logger, {
       textCommandPrefix: config.textCommandPrefix,
       guildSettingsStore,
-      labelTaxonomyStore: createSqliteLabelTaxonomyStore(connection.database),
+      labelTaxonomyStore,
       supportHubDiscord: createSupportHubDiscord(),
       ticketProvisioningService,
-      modelConfigurationStore: createSqliteModelConfigurationStore(
-        connection.database,
-        {
-          encryptionKey: config.apiKeyEncryptionKey,
-          defaultModelId: config.defaultTriageModel,
-        },
-      ),
+      modelConfigurationStore,
+      handleUnconsumedMessage: async (message) => {
+        await triage.handleReporterMessage(message);
+      },
       deploymentCredentialConfigured: config.openRouterApiKey !== undefined,
       executeGuildOperation,
       permissionAdministration,
       permissionAuthorization,
       ticketStore,
+    });
+    const triage = createTriageService({
+      tickets: ticketStore,
+      store: createSqliteTriageStore(connection.database),
+      settings: guildSettingsStore,
+      labels: labelTaxonomyStore,
+      models: modelConfigurationStore,
+      client: createOpenRouterClient(),
+      authorization: permissionAuthorization,
+      discord: createTriageDiscord({
+        isApplicationOperator: actions.isApplicationOperator,
+      }),
+      logger,
+      ...(config.openRouterApiKey === undefined
+        ? {}
+        : { deploymentKey: config.openRouterApiKey }),
+      ...(config.triageRateLimits === undefined
+        ? {}
+        : { rateLimits: config.triageRateLimits }),
     });
     gateway =
       dependencies.gateway ??

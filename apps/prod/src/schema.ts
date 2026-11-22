@@ -101,6 +101,7 @@ export const ticketEvents = sqliteTable(
         "recovery_started",
         "assignee_added",
         "assignee_removed",
+        "triage_completed",
       ],
     }).notNull(),
     detailsJson: text("details_json").notNull(),
@@ -281,6 +282,40 @@ export const ticketAssignees = sqliteTable(
     primaryKey({ columns: [table.ticketId, table.assigneeUserId] }),
     index("ticket_assignees_assignee").on(table.assigneeUserId),
   ],
+);
+
+export const processedReporterMessages = sqliteTable(
+  "processed_reporter_messages",
+  {
+    ticketId: text("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    messageId: text("message_id").notNull(),
+    claimedAt: text("claimed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ticketId, table.messageId] })],
+);
+
+export const ticketTriageResults = sqliteTable("ticket_triage_results", {
+  ticketId: text("ticket_id")
+    .primaryKey()
+    .references(() => tickets.id, { onDelete: "cascade" }),
+  internalSummary: text("internal_summary").notNull(),
+  reporterSummary: text("reporter_summary").notNull(),
+  completedAt: text("completed_at").notNull(),
+});
+
+export const ticketAssigneeSuggestions = sqliteTable(
+  "ticket_assignee_suggestions",
+  {
+    ticketId: text("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    suggestedBy: text("suggested_by").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ticketId, table.userId] })],
 );
 
 export const schemaContributors = Object.freeze([
