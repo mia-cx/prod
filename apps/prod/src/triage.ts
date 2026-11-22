@@ -96,19 +96,12 @@ const object = (value: unknown): value is Record<string, unknown> =>
 
 const exposesPrivateMetadata = (
   content: string,
-  labelNames: readonly string[],
   candidateIds: readonly string[],
   internalSummaries: readonly string[],
 ) =>
   /<@[^>]+>/u.test(content) ||
   candidateIds.some((id) => content.includes(id)) ||
-  internalSummaries.some((summary) => content.includes(summary)) ||
-  labelNames.some((name) =>
-    new RegExp(
-      `(^|[^\\p{L}\\p{N}_])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^\\p{L}\\p{N}_])`,
-      "iu",
-    ).test(content),
-  );
+  internalSummaries.some((summary) => content.includes(summary));
 
 export const createTriageService = (
   dependencies: Readonly<{
@@ -295,16 +288,10 @@ export const createTriageService = (
             Object.keys(args).length === 1 &&
             text(args.question, 1000)
           ) {
-            const currentLabels = await dependencies.labels.list(
-              ticket.guildId,
-            );
             const currentCandidates = await candidates(message, ticket);
             if (
               exposesPrivateMetadata(
                 args.question,
-                [...labelReference, ...currentLabels].map(
-                  (label) => label.name,
-                ),
                 [...candidateIds, ...currentCandidates],
                 internalSummaries,
               )
@@ -333,9 +320,6 @@ export const createTriageService = (
             if (
               exposesPrivateMetadata(
                 args.reporter_summary,
-                [...labelReference, ...currentLabels].map(
-                  (label) => label.name,
-                ),
                 [...candidateIds, ...currentCandidates],
                 internalSummaries,
               )

@@ -596,10 +596,8 @@ describe("AI reporter triage", () => {
   });
 
   it.each([
-    ["ask_follow_up", "uses PRIVATE-ROUTING-LABEL."],
     ["ask_follow_up", "contact staff-1"],
     ["ask_follow_up", "contact <@123456789012345678>"],
-    ["complete_triage", "uses PRIVATE-ROUTING-LABEL."],
     ["complete_triage", "contact staff-1"],
     ["complete_triage", "contact <@!123456789012345678>"],
     ["complete_triage", "private diagnostic context"],
@@ -628,12 +626,11 @@ describe("AI reporter triage", () => {
     ).toContain("Reporter text contains private metadata");
   });
 
-  it("allows a safe retry after rejecting a reporter leak and matches label names as whole words", async () => {
-    const { service, fetch, discord, dependencies } = await setup();
-    await dependencies.labels.create("guild-1", { name: "net" });
+  it("allows a safe retry after rejecting a reporter leak", async () => {
+    const { service, fetch, discord } = await setup();
     fetch
       .mockResolvedValueOnce(
-        tool("ask_follow_up", { question: "private-routing-label" }),
+        tool("ask_follow_up", { question: "contact staff-1" }),
       )
       .mockResolvedValueOnce(
         tool("ask_follow_up", { question: "does the internet work?" }),
@@ -644,6 +641,24 @@ describe("AI reporter triage", () => {
       "does the internet work?",
     );
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("posts an ordinary account question even when account is a configured label", async () => {
+    const { service, fetch, discord, dependencies } = await setup();
+    expect(
+      (await dependencies.labels.list("guild-1")).some(
+        (label) => label.name === "account",
+      ),
+    ).toBe(true);
+    fetch.mockImplementation(async () =>
+      tool("ask_follow_up", { question: "Can you sign in to your account?" }),
+    );
+    await service.handleReporterMessage(message());
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(discord.post).toHaveBeenCalledWith(
+      expect.anything(),
+      "Can you sign in to your account?",
+    );
   });
 
   it("does not reveal an earlier internal summary through a later follow-up", async () => {
