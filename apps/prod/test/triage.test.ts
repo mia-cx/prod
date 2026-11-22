@@ -553,6 +553,76 @@ describe("AI reporter triage", () => {
     );
   });
 
+  it.each([
+    ["ask_follow_up", "uses PRIVATE-ROUTING-LABEL."],
+    ["ask_follow_up", "contact staff-1"],
+    ["ask_follow_up", "contact <@123456789012345678>"],
+    ["complete_triage", "uses PRIVATE-ROUTING-LABEL."],
+    ["complete_triage", "contact staff-1"],
+    ["complete_triage", "contact <@!123456789012345678>"],
+    ["complete_triage", "private diagnostic context"],
+  ])("rejects reporter metadata from %s: %s", async (name, output) => {
+    const { service, fetch, discord, db } = await setup();
+    fetch.mockImplementation(async () =>
+      tool(
+        name,
+        name === "ask_follow_up"
+          ? { question: output }
+          : {
+              internal_summary: "private diagnostic context",
+              reporter_summary: output,
+              labels: [],
+              suggested_assignee_ids: [],
+            },
+      ),
+    );
+    await service.handleReporterMessage(message());
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(discord.post).not.toHaveBeenCalled();
+    expect(db.select().from(ticketTriageResults).all()).toEqual([]);
+    expect(
+      JSON.parse(fetch.mock.calls[1]![1]!.body as string).messages.at(-1)
+        .content,
+    ).toContain("Reporter text contains private metadata");
+  });
+
+  it("allows a safe retry after rejecting a reporter leak and matches label names as whole words", async () => {
+    const { service, fetch, discord, dependencies } = await setup();
+    await dependencies.labels.create("guild-1", { name: "net" });
+    fetch
+      .mockResolvedValueOnce(
+        tool("ask_follow_up", { question: "private-routing-label" }),
+      )
+      .mockResolvedValueOnce(
+        tool("ask_follow_up", { question: "does the internet work?" }),
+      );
+    await service.handleReporterMessage(message());
+    expect(discord.post).toHaveBeenCalledWith(
+      expect.anything(),
+      "does the internet work?",
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reveal an earlier internal summary through a later follow-up", async () => {
+    const { service, fetch, discord } = await setup();
+    fetch
+      .mockResolvedValueOnce(
+        tool("complete_triage", {
+          internal_summary: "private diagnostic context",
+          reporter_summary: "private diagnostic context",
+          labels: [],
+          suggested_assignee_ids: [],
+        }),
+      )
+      .mockImplementation(async () =>
+        tool("ask_follow_up", { question: "private diagnostic context?" }),
+      );
+    await service.handleReporterMessage(message());
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(discord.post).not.toHaveBeenCalled();
+  });
+
   it.each(["follow-up", "complete"])(
     "discards %s after assignment races inference",
     async (kind) => {

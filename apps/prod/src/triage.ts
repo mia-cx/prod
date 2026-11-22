@@ -94,6 +94,22 @@ const strings = (value: unknown, max: number): value is string[] =>
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const exposesPrivateMetadata = (
+  content: string,
+  labelNames: readonly string[],
+  candidateIds: readonly string[],
+  internalSummaries: readonly string[],
+) =>
+  /<@[^>]+>/u.test(content) ||
+  candidateIds.some((id) => content.includes(id)) ||
+  internalSummaries.some((summary) => content.includes(summary)) ||
+  labelNames.some((name) =>
+    new RegExp(
+      `(^|[^\\p{L}\\p{N}_])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^\\p{L}\\p{N}_])`,
+      "iu",
+    ).test(content),
+  );
+
 export const createTriageService = (
   dependencies: Readonly<{
     tickets: Pick<TicketStore, "getByThreadId" | "get">;
@@ -224,6 +240,7 @@ export const createTriageService = (
         content: untrusted("untrusted_ticket_transcript", transcript),
       },
     ];
+    const internalSummaries: string[] = [];
     for (let round = 0; round < 3; round++) {
       if (!(await dependencies.store.isTriageEligible(ticketId))) return;
       if (!(await allowed(ticket, "view_metadata"))) {
@@ -269,11 +286,32 @@ export const createTriageService = (
         if (!(await dependencies.store.isTriageEligible(ticketId))) return;
         if (calls.length === 1 && object(args)) {
           if (
+            call.function.name === "complete_triage" &&
+            text(args.internal_summary, 8000)
+          )
+            internalSummaries.push(args.internal_summary);
+          if (
             call.function.name === "ask_follow_up" &&
             Object.keys(args).length === 1 &&
             text(args.question, 1000)
           ) {
-            if (!(await allowed(ticket, "view_metadata")))
+            const currentLabels = await dependencies.labels.list(
+              ticket.guildId,
+            );
+            const currentCandidates = await candidates(message, ticket);
+            if (
+              exposesPrivateMetadata(
+                args.question,
+                [...labelReference, ...currentLabels].map(
+                  (label) => label.name,
+                ),
+                [...candidateIds, ...currentCandidates],
+                internalSummaries,
+              )
+            )
+              error =
+                "Reporter text contains private metadata. Rewrite without internal metadata.";
+            else if (!(await allowed(ticket, "view_metadata")))
               error = "Tool authorization denied.";
             else {
               if (await dependencies.store.isTriageEligible(ticketId))
@@ -293,6 +331,18 @@ export const createTriageService = (
             );
             const currentCandidates = await candidates(message, ticket);
             if (
+              exposesPrivateMetadata(
+                args.reporter_summary,
+                [...labelReference, ...currentLabels].map(
+                  (label) => label.name,
+                ),
+                [...candidateIds, ...currentCandidates],
+                internalSummaries,
+              )
+            )
+              error =
+                "Reporter text contains private metadata. Rewrite without internal metadata.";
+            else if (
               !args.labels.every((id) =>
                 currentLabels.some((label) => label.id === id),
               ) ||
