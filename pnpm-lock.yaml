@@ -30,8 +30,8 @@ importers:
         specifier: 10.7.0
         version: 10.7.0
       pnpm:
-        specifier: 11.13.0
-        version: 11.13.0
+        specifier: 11.13.1
+        version: 11.13.1
       prettier:
         specifier: 3.9.5
         version: 3.9.5
@@ -55,13 +55,13 @@ importers:
         version: link:../../packages/protocord-model-settings
       '@protocord/ai':
         specifier: workspace:*
-        version: link:../../packages/protocord-ai
+        version: link:../../vendor/protocord/packages/protocord-ai
       '@protocord/permissions':
         specifier: workspace:*
-        version: link:../../packages/protocord-permissions
+        version: link:../../vendor/protocord/packages/protocord-permissions
       '@protocord/settings':
         specifier: workspace:*
-        version: link:../../packages/protocord-settings
+        version: link:../../vendor/protocord/packages/protocord-settings
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1
@@ -79,7 +79,7 @@ importers:
         version: 10.3.1
       protocord:
         specifier: workspace:*
-        version: link:../../packages/protocord
+        version: link:../../vendor/protocord/packages/protocord
     devDependencies:
       '@types/better-sqlite3':
         specifier: 7.6.13
@@ -133,18 +133,27 @@ importers:
         specifier: 'catalog:'
         version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
 
-  packages/protocord:
+  packages/protocord-model-settings:
     dependencies:
-      discord.js:
-        specifier: 14.27.0
-        version: 14.27.0
+      '@protocord/settings':
+        specifier: workspace:*
+        version: link:../../vendor/protocord/packages/protocord-settings
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: 7.6.13
+        version: 7.6.13
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 4.1.10(vitest@4.1.10)
+      better-sqlite3:
+        specifier: 12.11.1
+        version: 12.11.1
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -152,54 +161,45 @@ importers:
         specifier: 'catalog:'
         version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
 
-  packages/protocord-ai:
+  vendor/protocord/packages/protocord:
+    dependencies:
+      discord.js:
+        specifier: 14.27.0
+        version: 14.27.0
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
+      '@vitest/coverage-v8':
+        specifier: 4.1.10
+        version: 4.1.10(vitest@4.1.10)
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
+
+  vendor/protocord/packages/protocord-ai:
     dependencies:
       protocord:
         specifier: workspace:*
         version: link:../protocord
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: 24.13.3
         version: 24.13.3
       '@vitest/coverage-v8':
-        specifier: 'catalog:'
+        specifier: 4.1.10
         version: 4.1.10(vitest@4.1.10)
       typescript:
-        specifier: 'catalog:'
+        specifier: 5.9.3
         version: 5.9.3
       vitest:
-        specifier: 'catalog:'
+        specifier: 4.1.10
         version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
 
-  packages/protocord-model-settings:
-    dependencies:
-      '@protocord/settings':
-        specifier: workspace:*
-        version: link:../protocord-settings
-      drizzle-orm:
-        specifier: 0.45.2
-        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)
-    devDependencies:
-      '@types/better-sqlite3':
-        specifier: 7.6.13
-        version: 7.6.13
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.13.3
-      '@vitest/coverage-v8':
-        specifier: 'catalog:'
-        version: 4.1.10(vitest@4.1.10)
-      better-sqlite3:
-        specifier: 12.11.1
-        version: 12.11.1
-      typescript:
-        specifier: 'catalog:'
-        version: 5.9.3
-      vitest:
-        specifier: 'catalog:'
-        version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
-
-  packages/protocord-permissions:
+  vendor/protocord/packages/protocord-permissions:
     dependencies:
       drizzle-orm:
         specifier: 0.45.2
@@ -209,38 +209,38 @@ importers:
         specifier: 7.6.13
         version: 7.6.13
       '@types/node':
-        specifier: 'catalog:'
+        specifier: 24.13.3
         version: 24.13.3
       '@vitest/coverage-v8':
-        specifier: 'catalog:'
+        specifier: 4.1.10
         version: 4.1.10(vitest@4.1.10)
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1
       typescript:
-        specifier: 'catalog:'
+        specifier: 5.9.3
         version: 5.9.3
       vitest:
-        specifier: 'catalog:'
+        specifier: 4.1.10
         version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
 
-  packages/protocord-settings:
+  vendor/protocord/packages/protocord-settings:
     dependencies:
       discord.js:
         specifier: 14.27.0
         version: 14.27.0
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: 24.13.3
         version: 24.13.3
       '@vitest/coverage-v8':
-        specifier: 'catalog:'
+        specifier: 4.1.10
         version: 4.1.10(vitest@4.1.10)
       typescript:
-        specifier: 'catalog:'
+        specifier: 5.9.3
         version: 5.9.3
       vitest:
-        specifier: 'catalog:'
+        specifier: 4.1.10
         version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
 
 packages:
@@ -935,6 +935,7 @@ packages:
   '@sapphire/shapeshift@4.0.0':
     resolution: {integrity: sha512-d9dUmWVA7MMiKobL3VpLF8P2aeanRTu6ypG2OIaEv/ZHH/SUQ2iHOVyi5wAPjQ+HmnMuL0whK9ez8I/raWbtIg==}
     engines: {node: '>=v16'}
+    deprecated: Shapeshift was created when other validation libraries had significant limitations in performance and error reporting. Those advantages have diminished as libraries such as Zod have become faster and improved their error messages, while also gaining broader environment support, a larger community, and custom error printers.
 
   '@sapphire/snowflake@3.5.5':
     resolution: {integrity: sha512-xzvBr1Q1c4lCe7i6sRnrofxeO1QTP/LKQ6A6qy0iB4x5yfiSfARMEQEghojzTNALDTcv8En04qYNIco9/K9eZQ==}
@@ -1682,10 +1683,9 @@ packages:
     resolution: {integrity: sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==}
     hasBin: true
 
-  pnpm@11.13.0:
-    resolution: {integrity: sha512-iNlHJNjy5sGGdEpVhMblnsrIaex7oV6ctM1ijo3HBmggskgdjuO1HqjaMjpzeAaKpYxVajcg0yt8IKBR0Ig2Og==}
+  pnpm@11.13.1:
+    resolution: {integrity: sha512-svx2g7imUlQU59E+G6KMqt3elr9m7FQL+ut+cCuB8+C+TR8pXt9/n+A5Z0Co3ORQnFgt33mJH0VD/qMtN2RfJQ==}
     engines: {node: '>=22.13'}
-    deprecated: This is a broken version. Please install pnpm v11.13.1 or newer
     hasBin: true
 
   postcss@8.5.19:
@@ -3177,7 +3177,7 @@ snapshots:
       sonic-boom: 4.2.1
       thread-stream: 4.2.0
 
-  pnpm@11.13.0: {}
+  pnpm@11.13.1: {}
 
   postcss@8.5.19:
     dependencies:

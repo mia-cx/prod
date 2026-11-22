@@ -1,0 +1,4 @@
+[submodule "vendor/protocord"]
+	path = vendor/protocord
+	url = https://github.com/mia-cx/protocord.git
+	ignore = untracked

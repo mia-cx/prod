@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packagesRoot = join(root, "packages");
+const packageRoots = [join(root, "packages"), join(root, "vendor/protocord/packages")];
 const errors = [];
 
 const expectedPackages = new Set([
@@ -53,10 +53,14 @@ const listFiles = async (directory) => {
 };
 
 const packageDirectories = (
-  await readdir(packagesRoot, { withFileTypes: true })
-)
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => join(packagesRoot, entry.name));
+  await Promise.all(
+    packageRoots.map(async (packageRoot) =>
+      (await readdir(packageRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(packageRoot, entry.name)),
+    ),
+  )
+).flat();
 
 const packageManifests = await Promise.all(
   packageDirectories.map(async (directory) => ({
