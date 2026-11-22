@@ -1,7 +1,5 @@
 ## Agent skills
 
-The README and CONTRIBUTING.md carry the 0rwx AI:W disclosure.
-
 ### Issue tracker
 
 Work is tracked in GitHub Issues for `mia-cx/prod`, using the organization's Issue Types. See `docs/agents/issue-tracker.md`.
