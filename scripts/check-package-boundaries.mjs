@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { glob, readFile, readdir } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,22 +52,16 @@ const listFiles = async (directory) => {
   return nested.flat();
 };
 
-const packageDirectories = (
-  await Promise.all(
-    packageRoots.map(async (packageRoot) =>
-      (await readdir(packageRoot, { withFileTypes: true }))
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => join(packageRoot, entry.name)),
-    ),
-  )
-).flat();
-
-const packageManifests = await Promise.all(
-  packageDirectories.map(async (directory) => ({
-    directory,
-    manifest: await readJson(join(directory, "package.json")),
-  })),
-);
+const packageManifests = [];
+for (const packageRoot of packageRoots) {
+  for await (const manifest of glob("*/package.json", { cwd: packageRoot })) {
+    const manifestPath = join(packageRoot, manifest);
+    packageManifests.push({
+      directory: dirname(manifestPath),
+      manifest: await readJson(manifestPath),
+    });
+  }
+}
 
 const actualPackages = new Set(packageManifests.map(({ manifest }) => manifest.name));
 for (const packageName of expectedPackages) {

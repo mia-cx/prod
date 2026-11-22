@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdirSync, watch } from "node:fs";
+import { globSync, watch } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,9 +25,9 @@ if (entry === undefined) {
       ? [resolve(root, "packages"), resolve(root, "vendor/protocord/packages")]
       : [resolve(packagesRootOverride)];
   const packageSourceDirectories = packageRoots.flatMap((packageDirectory) =>
-    readdirSync(packageDirectory, { withFileTypes: true })
-      .filter((item) => item.isDirectory())
-      .map((item) => resolve(packageDirectory, item.name, "src")),
+    globSync("*/package.json", { cwd: packageDirectory }).map((manifest) =>
+      resolve(packageDirectory, dirname(manifest), "src"),
+    ),
   );
   const watchDirectories = [
     sourceDirectory,
