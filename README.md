@@ -16,7 +16,7 @@ Server settings include model selection and encrypted API keys for AI triage. Da
 
 ## Setup
 
-Use Node.js 24 and pnpm 11.13.0.
+Use Node.js 24 and pnpm 11.13.1.
 
 ```sh
 git clone --recurse-submodules https://github.com/mia-cx/prod.git

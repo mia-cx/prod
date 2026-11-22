@@ -34,8 +34,8 @@ importers:
         specifier: 10.7.0
         version: 10.7.0
       pnpm:
-        specifier: 11.13.0
-        version: 11.13.0
+        specifier: 11.13.1
+        version: 11.13.1
       prettier:
         specifier: 3.9.5
         version: 3.9.5
@@ -1694,10 +1694,9 @@ packages:
     resolution: {integrity: sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==}
     hasBin: true
 
-  pnpm@11.13.0:
-    resolution: {integrity: sha512-iNlHJNjy5sGGdEpVhMblnsrIaex7oV6ctM1ijo3HBmggskgdjuO1HqjaMjpzeAaKpYxVajcg0yt8IKBR0Ig2Og==}
+  pnpm@11.13.1:
+    resolution: {integrity: sha512-svx2g7imUlQU59E+G6KMqt3elr9m7FQL+ut+cCuB8+C+TR8pXt9/n+A5Z0Co3ORQnFgt33mJH0VD/qMtN2RfJQ==}
     engines: {node: '>=22.13'}
-    deprecated: This is a broken version. Please install pnpm v11.13.1 or newer
     hasBin: true
 
   postcss@8.5.19:
@@ -3203,7 +3202,7 @@ snapshots:
       sonic-boom: 4.2.1
       thread-stream: 4.2.0
 
-  pnpm@11.13.0: {}
+  pnpm@11.13.1: {}
 
   postcss@8.5.19:
     dependencies:
