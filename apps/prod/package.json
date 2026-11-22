@@ -20,9 +20,9 @@
     "@protocord/permissions": "workspace:*",
     "@protocord/settings": "workspace:*",
     "better-sqlite3": "12.11.1",
-    "discord.js": "14.27.0",
+    "discord.js": "14.28.1",
     "drizzle-orm": "0.45.2",
-    "effect": "3.22.0",
+    "effect": "3.22.5",
     "pino": "10.3.1",
     "protocord": "workspace:*"
   },
