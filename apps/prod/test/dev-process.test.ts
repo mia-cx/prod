@@ -266,10 +266,14 @@ describe("the app dev process", () => {
     }
   }, 15_000);
 
-  it("restarts after an auto-discovered workspace package source changes", async () => {
+  it("watches workspace package sources despite leftover install directories", async () => {
     const packagesRoot = await mkdtemp(join(tmpdir(), "prod-dev-packages-"));
     const packageSourceDirectory = join(packagesRoot, "example", "src");
     await mkdir(packageSourceDirectory, { recursive: true });
+    await writeFile(join(packagesRoot, "example", "package.json"), "{}");
+    await mkdir(join(packagesRoot, "removed-package", "node_modules"), {
+      recursive: true,
+    });
     const fixture = startDevFixture(
       "test/fixtures/graceful-process.ts",
       [],

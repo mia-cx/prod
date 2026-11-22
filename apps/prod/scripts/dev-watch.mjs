@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdirSync, watch } from "node:fs";
+import { globSync, watch } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,15 +18,17 @@ if (entry === undefined) {
   const explicitWatchDirectories = process.argv.slice(3).map((directory) =>
     resolve(directory),
   );
-  const packageDirectory = resolve(
-    process.env.DEV_WATCH_PACKAGES_ROOT ??
-      resolve(dirname(fileURLToPath(import.meta.url)), "../../../packages"),
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const packagesRootOverride = process.env.DEV_WATCH_PACKAGES_ROOT;
+  const packageRoots =
+    packagesRootOverride === undefined
+      ? [resolve(root, "packages"), resolve(root, "vendor/protocord/packages")]
+      : [resolve(packagesRootOverride)];
+  const packageSourceDirectories = packageRoots.flatMap((packageDirectory) =>
+    globSync("*/package.json", { cwd: packageDirectory }).map((manifest) =>
+      resolve(packageDirectory, dirname(manifest), "src"),
+    ),
   );
-  const packageSourceDirectories = readdirSync(packageDirectory, {
-    withFileTypes: true,
-  })
-    .filter((item) => item.isDirectory())
-    .map((item) => resolve(packageDirectory, item.name, "src"));
   const watchDirectories = [
     sourceDirectory,
     ...(explicitWatchDirectories.length === 0
