@@ -30,6 +30,21 @@ const LogLevel = Schema.Literal(
 
 export type LogLevel = typeof LogLevel.Type;
 
+export type TriageRateLimits = Readonly<{
+  global: number;
+  guild: number;
+  windowMs: number;
+}>;
+export const DEFAULT_TRIAGE_RATE_LIMITS: TriageRateLimits = {
+  global: 60,
+  guild: 10,
+  windowMs: 60_000,
+};
+const PositiveInteger = Schema.NumberFromString.pipe(
+  Schema.int(),
+  Schema.positive(),
+);
+
 export type ProdConfig = Readonly<{
   discordToken: string;
   discordClientId: string;
@@ -40,6 +55,7 @@ export type ProdConfig = Readonly<{
   openRouterApiKey?: string;
   apiKeyEncryptionKey: string;
   defaultTriageModel: string;
+  triageRateLimits?: TriageRateLimits;
 }>;
 
 export class ConfigurationError extends Error {
@@ -155,6 +171,26 @@ export const loadConfig = (environment: Environment): ProdConfig =>
           ),
         }),
     apiKeyEncryptionKey: decodeEncryptionKeyConfig(environment),
+    triageRateLimits: {
+      global: decodeOptional(
+        environment,
+        "TRIAGE_GLOBAL_REQUESTS",
+        PositiveInteger,
+        DEFAULT_TRIAGE_RATE_LIMITS.global,
+      ),
+      guild: decodeOptional(
+        environment,
+        "TRIAGE_GUILD_REQUESTS",
+        PositiveInteger,
+        DEFAULT_TRIAGE_RATE_LIMITS.guild,
+      ),
+      windowMs: decodeOptional(
+        environment,
+        "TRIAGE_RATE_WINDOW_MS",
+        PositiveInteger,
+        DEFAULT_TRIAGE_RATE_LIMITS.windowMs,
+      ),
+    },
     defaultTriageModel: decodeOptional(
       environment,
       "DEFAULT_TRIAGE_MODEL",

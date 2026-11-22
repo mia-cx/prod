@@ -23,6 +23,7 @@ describe("loadConfig", () => {
       logLevel: "info",
       apiKeyEncryptionKey: requiredEnvironment.API_KEY_ENCRYPTION_KEY,
       defaultTriageModel: "google/gemma-4-31b-it",
+      triageRateLimits: { global: 60, guild: 10, windowMs: 60_000 },
     });
   });
 
@@ -37,6 +38,28 @@ describe("loadConfig", () => {
       openRouterApiKey: "deployment-key",
       defaultTriageModel: "openai/gpt-5-mini",
     });
+  });
+
+  it("configures positive triage rate limits", () => {
+    expect(
+      loadConfig({
+        ...requiredEnvironment,
+        TRIAGE_GLOBAL_REQUESTS: "100",
+        TRIAGE_GUILD_REQUESTS: "5",
+        TRIAGE_RATE_WINDOW_MS: "30000",
+      }).triageRateLimits,
+    ).toEqual({ global: 100, guild: 5, windowMs: 30000 });
+    for (const key of [
+      "TRIAGE_GLOBAL_REQUESTS",
+      "TRIAGE_GUILD_REQUESTS",
+      "TRIAGE_RATE_WINDOW_MS",
+    ]) {
+      for (const value of ["0", "-1", "1.5", "invalid"]) {
+        expect(() =>
+          loadConfig({ ...requiredEnvironment, [key]: value }),
+        ).toThrow(`${key} is invalid`);
+      }
+    }
   });
 
   it("treats an empty deployment API key as absent", () => {
